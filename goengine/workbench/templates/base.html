@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Thirdeye Workbench{% endblock %}</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --ink: #16191d; --muted: #666e7a;
+    --line: #dfe3e8; --accent: #1d4ed8; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--ink); }
+  header { background: #12161c; color: #fff; padding: 12px 20px; display: flex;
+           align-items: baseline; gap: 20px; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
+  header a { color: #b9c6dd; text-decoration: none; font-size: 13px; }
+  header a:hover { color: #fff; }
+  main { padding: 20px; max-width: 1500px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+           padding: 16px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase;
+              letter-spacing: .6px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+  .grid { display: grid; gap: 16px; }
+  .cols-4 { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+  .stat .n { font-size: 26px; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+          font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+  .pill.ok { background: #dcfce7; color: var(--ok); }
+  .pill.warn { background: #fef3c7; color: var(--warn); }
+  .pill.bad { background: #fee2e2; color: var(--bad); }
+  .pill.neutral { background: #e5e7eb; color: #374151; }
+  .conf { font-weight: 600; }
+  .conf.high { color: var(--ok); } .conf.mid { color: var(--warn); } .conf.low { color: var(--bad); }
+  .evidence { color: var(--muted); font-size: 12px; font-style: italic;
+              border-left: 3px solid var(--line); padding-left: 8px; margin-top: 4px; }
+  a { color: var(--accent); }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 4px;
+           padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  button.danger { background: var(--bad); }
+  input[type=text], input[type=number], textarea, select {
+    border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; font: inherit; width: 100%; }
+  form.inline { display: flex; gap: 6px; align-items: center; }
+  .muted { color: var(--muted); }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
+  iframe { width: 100%; height: 780px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  pre.pagetext { white-space: pre-wrap; word-wrap: break-word; background: #fbfbfc;
+                 border: 1px solid var(--line); border-radius: 4px; padding: 12px;
+                 max-height: 340px; overflow: auto; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>THIRDEYE &middot; GO Intelligence Engine</h1>
+  <a href="/">Workbench</a>
+  <a href="/audit">Audit trail</a>
+  <a href="/api/verified">Verified GO data (JSON)</a>
+  <span style="margin-left:auto; color:#7d8798; font-size:12px;">Phase 1 POC</span>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

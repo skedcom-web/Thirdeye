@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Record #{{ record.record_id }} &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap;">
+    <h2 style="margin:0;">Record #{{ record.record_id }}</h2>
+    <span class="pill {{ 'ok' if record.status == 'approved' else ('bad' if record.status == 'rejected' else 'warn') }}">{{ record.status }}</span>
+    <span class="mono">{{ record.file_name }}</span>
+    <span class="muted">{{ record.source_name }}</span>
+    {% if record.needs_ocr %}<span class="pill bad">text layer poor &mdash; needs OCR</span>{% endif %}
+  </div>
+  <table style="margin-top:12px;">
+    <tr><th style="width:150px;">Source URL</th>
+        <td class="mono"><a href="{{ record.source_url }}" rel="noreferrer noopener nofollow">{{ record.source_url }}</a></td></tr>
+    <tr><th>SHA256</th><td class="mono">{{ record.sha256 }}
+        <a href="/documents/{{ record.document_id }}/verify" style="margin-left:8px;">verify integrity</a></td></tr>
+    <tr><th>Text extraction</th>
+        <td>{{ record.page_count }} pages, confidence {{ record.extraction_confidence|pct }}</td></tr>
+  </table>
+  {% if record.missing_core_fields %}
+  <p style="margin:12px 0 0;"><span class="pill bad">missing core fields</span>
+     <span class="mono">{{ record.missing_core_fields|join(', ') }}</span>
+     <span class="muted">&mdash; correct these before approval.</span></p>
+  {% endif %}
+</div>
+
+<div class="split">
+  <!-- Original document -->
+  <div class="panel">
+    <h2>Original document</h2>
+    <iframe src="/documents/{{ record.document_id }}/pdf" title="Original PDF"></iframe>
+    <p class="muted" style="margin-bottom:0;">
+      Served byte-for-byte from the repository.
+      <a href="/documents/{{ record.document_id }}/pdf">Open in new tab</a>
+    </p>
+  </div>
+
+  <!-- Extracted fields -->
+  <div class="panel">
+    <h2>Extracted metadata</h2>
+    {% for group, names in [('Core fields', core_fields), ('Optional fields', optional_fields)] %}
+    <h3 style="font-size:13px; color:var(--muted); margin:14px 0 6px;">{{ group }}</h3>
+    <table>
+      {% for name in names %}
+      {% set f = record.fields.get(name) %}
+      <tr>
+        <th style="width:120px;">{{ name }}</th>
+        <td>
+          {% if f %}
+            <div><strong>{{ f.normalized_value }}</strong>
+              {% if f.origin == 'corrected' %}<span class="pill neutral">corrected by {{ f.created_by }}</span>{% endif %}
+            </div>
+            <div style="margin-top:3px;">
+              <span class="conf {{ 'high' if f.confidence >= 0.9 else ('mid' if f.confidence >= 0.7 else 'low') }}">{{ f.confidence|pct }}</span>
+              <span class="muted">&middot; page {{ f.source_page }} &middot; <span class="mono">{{ f.method }}</span></span>
+            </div>
+            <div class="evidence">&ldquo;{{ f.source_text }}&rdquo;</div>
+          {% else %}
+            <span class="pill {{ 'bad' if name in core_fields else 'neutral' }}">not found</span>
+            <div class="muted" style="font-size:12px;">No evidence in the document &mdash; nothing is assumed.</div>
+          {% endif %}
+
+          {% if candidates.get(name) %}
+          <details style="margin-top:6px;">
+            <summary class="muted" style="font-size:12px; cursor:pointer;">
+              {{ candidates[name]|length }} other candidate(s) considered</summary>
+            <table style="margin-top:4px;">
+              {% for c in candidates[name] %}
+              <tr><td class="mono">{{ c.value[:70] }}</td>
+                  <td class="muted">p{{ c.source_page }} &middot; {{ c.confidence|pct }} &middot; {{ c.method }}</td></tr>
+              {% endfor %}
+            </table>
+          </details>
+          {% endif %}
+
+          <form class="inline" method="post" action="/records/{{ record.record_id }}/correct" style="margin-top:6px;">
+            <input type="hidden" name="field_name" value="{{ name }}">
+            <input type="text" name="new_value" placeholder="Correct {{ name }}&hellip;" required>
+            <input type="number" name="source_page" min="1" max="{{ record.page_count }}"
+                   value="{{ f.source_page if f else 1 }}" style="width:70px;" title="Source page">
+            <input type="text" name="reviewer" placeholder="your name" required style="width:120px;">
+            <button class="ghost" type="submit">Correct</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Decision -->
+<div class="panel">
+  <h2>Decision</h2>
+  <div class="split">
+    <form method="post" action="/records/{{ record.record_id }}/approve">
+      <p class="muted">Approving moves this record into the Verified GO Database.</p>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="text" name="reviewer" placeholder="your name" required style="max-width:180px;">
+        <input type="text" name="note" placeholder="note (optional)">
+        <button type="submit">Approve</button>
+      </div>
+      {% if record.missing_core_fields %}
+      <label class="muted" style="display:block; margin-top:8px; font-size:12px;">
+        <input type="checkbox" name="override" value="1"> Approve despite missing core fields (recorded in the audit trail)
+      </label>
+      {% endif %}
+    </form>
+
+    <form method="post" action="/records/{{ record.record_id }}/reject">
+      <p class="muted">Rejecting keeps the document and the trail; it just never publishes.</p>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="text" name="reviewer" placeholder="your name" required style="max-width:180px;">
+        <input type="text" name="reason" placeholder="reason (required)" required>
+        <button class="danger" type="submit">Reject</button>
+      </div>
+    </form>
+  </div>
+  {% if record.reviewed_by %}
+  <p class="muted" style="margin-bottom:0;">
+    Last reviewed by <strong>{{ record.reviewed_by }}</strong> at {{ record.reviewed_at }}
+    {% if record.review_note %}&mdash; &ldquo;{{ record.review_note }}&rdquo;{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<!-- Extracted text -->
+<div class="panel">
+  <h2>Extracted text by page</h2>
+  {% for page in pages %}
+  <details {% if loop.first %}open{% endif %}>
+    <summary style="cursor:pointer; margin:6px 0;"><strong>Page {{ page.page_number }}</strong>
+      <span class="muted">&middot; {{ page.char_count }} characters</span></summary>
+    <pre class="pagetext">{{ page.text }}</pre>
+  </details>
+  {% endfor %}
+</div>
+
+<!-- Provenance -->
+<div class="panel">
+  <h2>Provenance &mdash; discovery to decision</h2>
+  <table>
+    <tr><th>When</th><th>Actor</th><th>Action</th><th>Field</th><th>Before</th><th>After</th></tr>
+    {% for e in provenance %}
+    <tr>
+      <td class="mono">{{ e.ts }}</td>
+      <td>{{ e.actor }}</td>
+      <td class="mono">{{ e.action }}</td>
+      <td class="mono">{{ e.field_name or '' }}</td>
+      <td class="mono">{{ (e.before_value or '')[:50] }}</td>
+      <td class="mono">{{ (e.after_value or '')[:50] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% endblock %}

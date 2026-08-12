@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Runtime data: the document repository and database are local state, never
+# committed. The repository is rebuildable from the source registry.
+data/
+!data/.gitkeep

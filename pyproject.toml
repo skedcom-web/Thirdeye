@@ -1,0 +1,31 @@
+[project]
+name = "thirdeye"
+version = "0.1.0"
+description = "Evidence-First Government Order Intelligence Engine (Phase 1 POC)"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28",
+    "beautifulsoup4>=4.13",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.20",
+    "pypdf>=5.1",
+]
+
+[project.optional-dependencies]
+pdf = ["pymupdf>=1.24", "pdfplumber>=0.11"]
+dev = ["pytest>=8.3"]
+
+[project.scripts]
+thirdeye = "goengine.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["goengine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

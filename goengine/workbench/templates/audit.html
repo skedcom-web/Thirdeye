@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Audit trail &middot; Thirdeye{% endblock %}
+{% block content %}
+<div class="panel">
+  <h2>Audit trail &mdash; newest first</h2>
+  <p class="muted">Append-only. Entries cannot be edited or deleted once written.</p>
+  <table>
+    <tr><th>#</th><th>When</th><th>Actor</th><th>Action</th><th>Entity</th>
+        <th>Field</th><th>Before</th><th>After</th><th>Detail</th></tr>
+    {% for e in entries %}
+    <tr>
+      <td class="mono">{{ e.id }}</td>
+      <td class="mono">{{ e.ts }}</td>
+      <td>{{ e.actor }}</td>
+      <td class="mono">{{ e.action }}</td>
+      <td class="mono">{{ e.entity_type }}#{{ e.entity_id }}</td>
+      <td class="mono">{{ e.field_name or '' }}</td>
+      <td class="mono">{{ (e.before_value or '')[:40] }}</td>
+      <td class="mono">{{ (e.after_value or '')[:40] }}</td>
+      <td class="mono muted" style="max-width:280px; overflow:hidden; text-overflow:ellipsis;">
+        {{ (e.detail | tojson)[:120] if e.detail else '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

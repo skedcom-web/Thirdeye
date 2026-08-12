@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Workbench &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="grid cols-4" style="margin-bottom:16px;">
+  <div class="stat"><div class="n">{{ discovery_counts.new }}</div><div class="l">Awaiting download</div></div>
+  <div class="stat"><div class="n">{{ repo_stats.documents }}</div><div class="l">Documents archived</div></div>
+  <div class="stat"><div class="n">{{ review_counts.pending }}</div><div class="l">Awaiting verification</div></div>
+  <div class="stat"><div class="n">{{ review_counts.approved }}</div><div class="l">Verified GOs</div></div>
+</div>
+
+<div class="panel">
+  <h2>Verification queue &mdash; lowest confidence first</h2>
+  {% if pending %}
+  <table>
+    <tr><th>Record</th><th>File</th><th>Source</th><th>Fields</th>
+        <th>Lowest field confidence</th><th>Text layer</th><th></th></tr>
+    {% for row in pending %}
+    <tr>
+      <td class="mono">#{{ row.id }}</td>
+      <td class="mono">{{ row.file_name }}</td>
+      <td>{{ row.source_name }}</td>
+      <td>{{ row.field_count }}</td>
+      <td>
+        {% set c = row.min_field_confidence or 0 %}
+        <span class="conf {{ 'high' if c >= 0.9 else ('mid' if c >= 0.7 else 'low') }}">{{ c|pct }}</span>
+      </td>
+      <td>
+        {% if row.needs_ocr %}<span class="pill bad">needs OCR</span>
+        {% else %}<span class="pill neutral">{{ row.extraction_confidence|pct }}</span>{% endif %}
+      </td>
+      <td><a href="/records/{{ row.id }}">Review &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Nothing awaiting verification. Run <code>thirdeye run</code> to ingest documents.</p>
+  {% endif %}
+</div>
+
+<div class="split">
+  <div class="panel">
+    <h2>Official source registry</h2>
+    <table>
+      <tr><th>Source</th><th>Department</th><th>Type</th><th>Last crawl</th><th>Status</th></tr>
+      {% for s in sources %}
+      <tr>
+        <td>{{ s.name }}<div class="mono muted">{{ s.url }}</div></td>
+        <td>{{ s.department }}</td>
+        <td>{{ s.source_type }}</td>
+        <td class="mono">{{ s.last_crawl_at or '—' }}</td>
+        <td>
+          {% if not s.active %}<span class="pill neutral">inactive</span>
+          {% elif s.last_crawl_status == 'ok' %}<span class="pill ok">ok</span>
+          {% elif s.last_crawl_status %}<span class="pill bad">{{ s.last_crawl_status }}</span>
+          {% else %}<span class="pill warn">never crawled</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Pipeline status</h2>
+    <table>
+      <tr><th>Stage</th><th>Count</th></tr>
+      <tr><td>Discovered, not yet downloaded</td><td>{{ discovery_counts.new }}</td></tr>
+      <tr><td>Downloaded, not yet parsed</td><td>{{ discovery_counts.downloaded }}</td></tr>
+      <tr><td>Parsed, awaiting verification</td><td>{{ discovery_counts.parsed }}</td></tr>
+      <tr><td>Verified</td><td>{{ discovery_counts.verified }}</td></tr>
+      <tr><td>Rejected</td><td>{{ discovery_counts.rejected }}</td></tr>
+    </table>
+    <p class="muted" style="margin-top:12px;">
+      Repository: {{ repo_stats.documents }} documents,
+      {{ repo_stats.unique_files }} unique files,
+      {{ '%.1f'|format(repo_stats.total_bytes / 1048576) }} MB.
+    </p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Recent audit activity</h2>
+  <table>
+    <tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th><th>Before</th><th>After</th></tr>
+    {% for e in recent_audit %}
+    <tr>
+      <td class="mono">{{ e.ts }}</td>
+      <td>{{ e.actor }}</td>
+      <td class="mono">{{ e.action }}</td>
+      <td class="mono">{{ e.entity_type }}#{{ e.entity_id }}</td>
+      <td class="mono">{{ (e.before_value or '')[:40] }}</td>
+      <td class="mono">{{ (e.after_value or '')[:40] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% endblock %}
