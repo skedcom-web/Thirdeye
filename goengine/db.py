@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -67,6 +68,74 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}")
 
 
+def _seed_tamil_nadu(conn: sqlite3.Connection) -> None:
+    now_ts = utcnow()
+    # Insert State
+    conn.execute(
+        "INSERT OR IGNORE INTO states (name, code, status, active, created_at) VALUES (?, ?, ?, ?, ?)",
+        ("Tamil Nadu", "TN", "ACTIVE", 1, now_ts)
+    )
+    state_row = conn.execute("SELECT id FROM states WHERE code = 'TN'").fetchone()
+    if not state_row:
+        return
+    state_id = state_row["id"]
+
+    # Insert 38 Districts of Tamil Nadu
+    districts = [
+        ("Ariyalur", "AR"), ("Chengalpattu", "CGL"), ("Chennai", "CHN"), ("Coimbatore", "CBE"),
+        ("Cuddalore", "CUD"), ("Dharmapuri", "DPI"), ("Dindigul", "DGL"), ("Erode", "ERD"),
+        ("Kallakurichi", "KKI"), ("Kanchipuram", "KPM"), ("Kanyakumari", "KK"), ("Karur", "KRR"),
+        ("Krishnagiri", "KGI"), ("Madurai", "MDU"), ("Mayiladuthurai", "MYD"), ("Nagapattinam", "NGP"),
+        ("Namakkal", "NKL"), ("Nilgiris", "NIL"), ("Perambalur", "PBL"), ("Pudukkottai", "PDK"),
+        ("Ramanathapuram", "RMD"), ("Ranipet", "RPT"), ("Salem", "SLM"), ("Sivaganga", "SVG"),
+        ("Tenkasi", "TKS"), ("Thanjavur", "TJV"), ("Theni", "TNI"), ("Thoothukudi", "TUT"),
+        ("Tiruchirappalli", "TRY"), ("Tirunelveli", "TNV"), ("Tirupathur", "TPT"), ("Tiruppur", "TPU"),
+        ("Tiruvallur", "TLR"), ("Tiruvannamalai", "TVM"), ("Tiruvarur", "TVR"), ("Vellore", "VEL"),
+        ("Viluppuram", "VPM"), ("Virudhunagar", "VDG")
+    ]
+    for name, code in districts:
+        conn.execute(
+            "INSERT OR IGNORE INTO districts (state_id, name, code, status, certification_status, publication_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (state_id, name, code, "CONFIGURED", "PENDING", "NOT_PUBLISHED", now_ts)
+        )
+
+    # Insert 9 Official Sources
+    sources = [
+        ("Tamil Nadu Government Portal", "All Departments", "https://www.tn.gov.in", "go_portal", "generic_links"),
+        ("Tamil Nadu GO Portal", "General Administration", "https://cms.tn.gov.in/go-search", "go_portal", "tn_go_portal"),
+        ("Health and Family Welfare Department", "Health and Family Welfare", "https://cms.tn.gov.in/hfw", "department_site", "generic_links"),
+        ("School Education Department", "School Education", "https://cms.tn.gov.in/school-education", "department_site", "generic_links"),
+        ("Rural Development Department", "Rural Development and Panchayat Raj", "https://cms.tn.gov.in/rd-pr", "department_site", "generic_links"),
+        ("Public Works Department", "Public Works", "https://cms.tn.gov.in/pwd", "department_site", "generic_links"),
+        ("Agriculture and Farmers Welfare", "Agriculture", "https://www.tnagrisnet.tn.gov.in", "department_site", "generic_links"),
+        ("Highways Department", "Highways", "https://www.tnhighways.gov.in", "department_site", "generic_links"),
+        ("Municipal Administration and Water Supply", "Municipal Administration", "https://www.tn.gov.in/maws", "department_site", "generic_links")
+    ]
+    for name, department, url, src_type, adapter in sources:
+        existing = conn.execute("SELECT id FROM sources WHERE name = ?", (name,)).fetchone()
+        if existing is None:
+            host = url.split("//")[-1].split("/")[0]
+            cur = conn.execute(
+                """
+                INSERT INTO sources
+                    (name, department, url, host, source_type, adapter, active,
+                     crawl_frequency, state_id, discovery_method, lifecycle_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 'daily', ?, 'listing_page', 'ACTIVE', ?)
+                """,
+                (name, department, url, host, src_type, adapter, state_id, now_ts)
+            )
+            source_id = cur.lastrowid
+            conn.execute(
+                """
+                INSERT INTO source_versions
+                    (source_id, version, name, department, url, discovery_method, active,
+                     crawl_frequency, changed_by, changed_at, change_reason)
+                VALUES (?, 1, ?, ?, ?, 'listing_page', 1, 'daily', 'system', ?, 'initial seed')
+                """,
+                (source_id, name, department, url, now_ts)
+            )
+
+
 def init_db(settings: Settings) -> sqlite3.Connection:
     settings.ensure_dirs()
     conn = connect(settings.db_path)
@@ -77,6 +146,13 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     _ensure_columns(conn, "extraction_pages", EXTRACTION_PAGES_PHASE2_COLUMNS)
     conn.executescript(SCHEMA_PHASE3_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "sources", SOURCES_PHASE3_COLUMNS)
+
+    # Automatically seed Tamil Nadu if table is empty and we are not in test mode
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        states_count = conn.execute("SELECT COUNT(*) AS n FROM states").fetchone()["n"]
+        if states_count == 0:
+            _seed_tamil_nadu(conn)
+
     return conn
 
 
