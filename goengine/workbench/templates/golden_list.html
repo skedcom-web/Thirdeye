@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Golden Dataset &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Real GO Acquisition Program &mdash; progress toward 200</h2>
+  <p class="muted">Counts every archived document from the real pipeline (Modules 2&ndash;4), not just golden-annotated ones.</p>
+  <table>
+    <tr><th>Department</th><th>Collected</th><th>Target</th><th style="width:220px;">Progress</th><th></th></tr>
+    {% for bucket, info in progress.departments.items() %}
+    <tr>
+      <td>{{ bucket.replace('_',' ')|title }}</td>
+      <td>{{ info.count }}</td>
+      <td>{{ info.target }}</td>
+      <td>
+        <div style="background:var(--line); border-radius:4px; height:10px; overflow:hidden;">
+          <div style="background:{{ 'var(--ok)' if info.met else 'var(--accent)' }}; height:100%;
+                      width:{{ [100, (info.count / info.target * 100)|round(0,'floor')]|min }}%;"></div>
+        </div>
+      </td>
+      <td>{% if info.met %}<span class="pill ok">target met</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted" style="margin:10px 0 0;">
+    {{ progress.total_in_target_departments }} / {{ progress.total_target }} across the 4 target departments
+    &middot; {{ progress.other_department_documents }} in other departments
+    &middot; {{ progress.by_text_type.scanned or 0 }} scanned, {{ progress.by_text_type.digital or 0 }} digital
+    &middot; language mix: {% for lang, n in progress.by_language.items() %}{{ lang }} {{ n }}{{ ", " if not loop.last }}{% endfor %}
+  </p>
+</div>
+
+<div class="grid cols-4" style="margin-bottom:16px;">
+  <div class="stat"><div class="n">{{ summary.total }}</div><div class="l">In golden set</div></div>
+  <div class="stat"><div class="n">{{ summary.fully_annotated }}</div><div class="l">Fully annotated</div></div>
+  <div class="stat"><div class="n">{{ progress.annexure_heavy_count }}</div><div class="l">Annexure-heavy</div></div>
+  <div class="stat"><div class="n">{{ progress.table_heavy_count }}</div><div class="l">Table-heavy</div></div>
+</div>
+
+<div class="panel">
+  <h2>Golden documents</h2>
+  {% if documents %}
+  <table>
+    <tr><th>ID</th><th>File</th><th>Source</th><th>Department</th><th>Language</th><th>Text</th><th>Annotated</th><th></th></tr>
+    {% for d in documents %}
+    <tr>
+      <td class="mono">#{{ d.id }}</td>
+      <td class="mono">{{ d.file_name }}</td>
+      <td>{{ d.source_name }}</td>
+      <td>{{ (d.department_bucket or '?').replace('_',' ') }}</td>
+      <td>{{ d.language or '?' }}</td>
+      <td>{{ d.text_type or '?' }}</td>
+      <td>
+        {% set complete = d.annotated_fields >= scored_fields|length %}
+        <span class="pill {{ 'ok' if complete else 'warn' }}">{{ d.annotated_fields }}/{{ scored_fields|length }}</span>
+      </td>
+      <td><a href="/golden/{{ d.id }}">Annotate &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No documents in the golden set yet &mdash; add one below.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Candidates &mdash; archived documents not yet in the golden set</h2>
+  <p class="muted">Ordered to fill the weakest department bucket first.</p>
+  {% if candidates %}
+  <table>
+    <tr><th>Document</th><th>File</th><th>Source</th><th>Department</th><th>Language</th><th></th></tr>
+    {% for c in candidates %}
+    <tr>
+      <td class="mono">#{{ c.document_id }}</td>
+      <td class="mono">{{ c.file_name }}</td>
+      <td>{{ c.source_name }}</td>
+      <td>{{ (c.department_bucket or '?').replace('_',' ') }}</td>
+      <td>{{ c.language or '?' }}</td>
+      <td>
+        <form class="inline" method="post" action="/golden/add">
+          <input type="hidden" name="document_id" value="{{ c.document_id }}">
+          <input type="text" name="added_by" placeholder="your name" required style="width:120px;">
+          <button class="ghost" type="submit">Add to golden set</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Nothing eligible &mdash; every archived document is already in the golden set.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

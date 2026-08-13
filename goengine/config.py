@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,6 +39,34 @@ USER_AGENT = (
 CRAWL_DELAY_SECONDS = 1.5
 REQUEST_TIMEOUT_SECONDS = 60.0
 MAX_DOCUMENT_BYTES = 100 * 1024 * 1024  # 100 MB guard against runaway downloads
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 -- OCR (Module 4)
+# ---------------------------------------------------------------------------
+def _default_tesseract_cmd() -> str | None:
+    env = os.environ.get("THIRDEYE_TESSERACT_CMD")
+    if env:
+        return env
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    windows_default = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+    if windows_default.exists():
+        return str(windows_default)
+    return None
+
+
+TESSERACT_CMD = _default_tesseract_cmd()
+# Project-local by default: a self-contained tessdata dir (eng + tam) travels
+# with the repo instead of depending on wherever Tesseract itself was
+# installed, so a fresh checkout only needs the binary, not language-pack setup.
+TESSDATA_DIR = Path(os.environ.get("THIRDEYE_TESSDATA_DIR") or PROJECT_ROOT / "vendor" / "tessdata")
+OCR_LANGUAGES = "eng+tam"
+OCR_DPI = 300
+# Below this mean word confidence (0..1), an OCR page is judged unusable and
+# the sparse digital text is kept rather than replaced with likely garbage.
+OCR_MIN_CONFIDENCE = 0.35
 
 
 @dataclass(frozen=True)

@@ -1,12 +1,21 @@
-# Thirdeye — GO Intelligence Engine (Phase 1)
+# Thirdeye — GO Intelligence Engine (Phase 1 + Phase 2)
 
 An evidence-first acquisition pipeline for Tamil Nadu Government Orders.
 
 > Nothing enters the platform unless it can be traced back to an official
 > government source and an original document.
 
-Phase 1 is measured on source authenticity, document completeness,
-traceability and extraction accuracy — not on UI or citizen features.
+Phase 1 built the acquisition pipeline: registry, crawler, write-once
+repository, extraction, workbench, audit trail. Phase 2 builds the
+*certification* layer on top of it — the engineering needed to prove the
+pipeline works against real sources and real documents, with OCR, Tamil
+language support, and precision/recall/F1 measured against human-verified
+ground truth, not synthetic fixtures. See
+[Status against the exit criteria](#status-against-the-exit-criteria) for what
+Phase 2 could and could not close from code alone — the certification
+*engine* is complete and tested; the actual certification of 10 sources and
+200 real orders is a data-collection exercise that has to happen next,
+by a human running this tool against the live internet.
 
 ---
 
@@ -25,6 +34,16 @@ The zero-hallucination principle is enforced *structurally*, not by convention:
 
 If the extractor finds no evidence for a field, the field is simply absent.
 There is no code path that emits a value without a page and a source span.
+
+Phase 2 adds its own governance layer on top, enforced the same way:
+
+| Rule | Enforcement |
+|---|---|
+| No benchmarking against synthetic data | `golden_documents.document_id` is a foreign key into the real `documents` table — a document that never went through real acquisition cannot be added |
+| Human annotations are the ground truth | `golden_annotations` is written only by `certification/golden.py`, never auto-filled from the extractor's own output |
+| Corrections never destroy history | Same supersede pattern as `go_fields`: a re-annotation writes a new row and marks the old one `superseded_by` |
+| Every failure is recorded | Every mismatch a certification run finds becomes a permanent `extraction_failures` row, classified by root cause |
+| Confidence is checked against reality | Every certification run buckets predictions by stated confidence and compares to actual accuracy (`calibration_snapshots`) |
 
 ---
 
@@ -56,15 +75,39 @@ Against real sources:
 .venv/Scripts/python.exe -m goengine.cli run --force
 ```
 
+### OCR setup (Module 4, optional)
+
+Scanned Government Orders need Tesseract. Everything degrades gracefully
+without it — documents just stay flagged `needs_ocr` for later reprocessing.
+
+1. Install the Tesseract binary (e.g. `winget install UB-Mannheim.TesseractOCR`
+   on Windows, `apt install tesseract-ocr` on Linux, `brew install tesseract`
+   on macOS).
+2. Put `eng.traineddata` and `tam.traineddata` in `vendor/tessdata/` (from
+   [tesseract-ocr/tessdata](https://github.com/tesseract-ocr/tessdata)), or
+   point `THIRDEYE_TESSDATA_DIR` at wherever your Tesseract install already
+   keeps its language files.
+3. `pip install pytesseract pillow` (or `pip install -e .[ocr]`).
+
+Check it worked: `python -c "from goengine.extraction.ocr import is_available; print(is_available())"`
+
 ---
 
 ## Architecture
 
 ```
-Official Source  →  Crawler  →  Downloader  →  Repository
+Official Source → Crawler → Downloader → Repository → Text Extraction → OCR
+                                                                          ↓
+                                          Metadata Extraction ← Language/Category ID
                                                    ↓
-Verified GO DB  ←  Workbench  ←  Metadata Eng.  ←  Text Extraction
+                    Golden Dataset ←  Validation Workbench  →  Verified GO DB
+                          ↓
+        Benchmark (P/R/F1) → Failure Intelligence + Confidence Calibration
+                          ↓
+                  Certification Dashboard
 ```
+
+### Phase 1 — acquisition pipeline
 
 | Module | Code | Notes |
 |---|---|---|
@@ -76,6 +119,20 @@ Verified GO DB  ←  Workbench  ←  Metadata Eng.  ←  Text Extraction
 | 6 Metadata Extraction | `extraction/metadata.py` | Evidence-bound fields + confidence |
 | 7 Validation Workbench | `workbench/` | FastAPI review UI |
 | 8 Audit & Traceability | `audit.py` | Append-only trail, provenance chains |
+
+### Phase 2 — certification layer (`certification/`)
+
+| Module | Code | Notes |
+|---|---|---|
+| 1 Source Certification | `certification/sources.py` | 5 live checks: connectivity, discovery, download, stability, authenticity |
+| 2 Acquisition Program | `certification/categorize.py` | Department/language/scan-type tagging, progress vs. the 200-GO target |
+| 3 Golden Dataset Workbench | `certification/golden.py`, `workbench/templates/golden_*.html` | Human annotation on *real* documents only |
+| 4 OCR Intelligence | `extraction/ocr.py` | Tesseract (eng+tam), merges only pages the digital layer left weak |
+| 5 Tamil Language Processing | `certification/language.py` | Unicode-script classification: English / Tamil / Mixed |
+| 6 Benchmark & Accuracy | `certification/benchmark.py` | Precision/recall/F1 per field, by department, by language |
+| 7 Failure Intelligence | `certification/failures.py` | Every mismatch classified by root cause, permanently recorded |
+| 8 Confidence Calibration | `certification/calibration.py` | Stated confidence vs. actual accuracy, bucketed by decile |
+| 9 Certification Dashboard | `workbench/templates/certification.html` | All of the above, one page: `/certification` |
 
 Documents are stored at `data/documents/<sha[0:2]>/<sha[2:4]>/<sha>.pdf`.
 Content addressing means identical bytes are stored once, the path *is* the
@@ -98,15 +155,37 @@ classified `@header`, `@references` or `@body`, and a reference-block match is
 weighted down to ~0.22 of a header match. This is the single biggest source of
 false positives on real GOs.
 
+### OCR merge (Module 4)
+
+OCR runs per *page*, not per document — a digital cover page next to a
+scanned annexure is common in real GOs, and re-OCRing pages that already
+extracted cleanly would only add noise. A weak page's digital text is
+replaced only when the OCR result is both longer and above a confidence
+floor (0.35); otherwise the sparse original is kept rather than risk seeding
+metadata extraction with confident-sounding OCR garbage. `extractions.confidence`
+is recomputed after a merge — it is never left showing the pre-OCR score for
+a document OCR just fixed.
+
+### Failure classification priority (Module 7)
+
+A mismatch is classified by the *most likely root cause*, checked in order:
+hallucination (any field) → OCR (document was scanned) → Tamil parsing
+(document is Tamil-dominant, and the patterns are English-oriented) →
+reference misclassification (picked a cited order's number/date over the
+order's own) → table extraction (table-heavy document, budget/district
+field) → the field-specific bucket as a fallback.
+
 ---
 
 ## Command reference
+
+### Phase 1
 
 | Command | Purpose |
 |---|---|
 | `init` | Create the DB and seed official sources |
 | `sources list \| add \| disable` | Manage the registry |
-| `crawl` / `download` / `parse` | Run one stage |
+| `crawl` / `download` / `parse` | Run one stage (parse now includes OCR + categorization) |
 | `run` | All three in one pass |
 | `ingest <pdf> --source-id N --source-url U` | Archive a PDF obtained out of band |
 | `status` / `queue` / `show <id>` | Inspect the pipeline |
@@ -114,42 +193,67 @@ false positives on real GOs.
 | `verified` | Dump the Verified GO Database as JSON |
 | `audit --document-id N` | Full provenance for one document |
 | `verify-repo` | Re-hash every archived file |
-| `golden init \| score` | Accuracy measurement |
-| `serve` | Validation Workbench |
+| `golden init \| score` | CSV-based accuracy harness (see note below) |
+| `serve` | Validation Workbench + Certification Dashboard |
 | `demo` | Offline end-to-end run |
+
+### Phase 2 — `thirdeye certify ...`
+
+| Command | Purpose |
+|---|---|
+| `sources [--source-id N]` | Run the 5 certification checks against live sources |
+| `status` | Certification summary + per-source detail |
+| `progress` | Real GO Acquisition Program progress (200-GO target) |
+| `golden add <document_id> --added-by X` | Add a real archived document to the golden set |
+| `golden annotate <golden_id> <field> <value> --annotator X [--absent]` | Record ground truth |
+| `golden list` / `golden candidates` | Golden set / documents not yet in it |
+| `benchmark` | Score the golden set: P/R/F1 + failures + calibration in one pass |
+| `benchmark-show [--run-id N]` | Print a past run's full JSON summary |
+| `failures [--type/--field/--department/--language]` | Query recorded failures |
+| `calibration` | Stated confidence vs. actual accuracy, by bucket |
 
 ---
 
-## Golden dataset
+## Golden datasets — two, on purpose
+
+**`thirdeye golden ...`** (Phase 1) is a CSV-driven harness against
+*synthetic* fixtures (`sampledata.py`) — a developer regression tool for the
+extraction patterns themselves, never used for certification numbers.
 
 ```bash
 .venv/Scripts/python.exe -m goengine.cli golden init --dataset golden
 ```
 
-Drop the PDFs into `golden/`, re-run `golden init` to refresh the template,
-fill in the ground truth in `golden/annotations.csv`, then:
+**`thirdeye certify golden ...`** (Phase 2) is the real one: annotations live
+in the database (`golden_annotations`), attached only to documents that came
+through actual discovery + acquisition (`golden_documents.document_id` is a
+foreign key into `documents` — a synthetic fixture cannot enter this set
+short of deliberately running it through `ingest`, at which point it has a
+real, verifiable source URL and SHA256 and is no longer synthetic in any way
+that matters).
 
 ```bash
-.venv/Scripts/python.exe -m goengine.cli golden score --dataset golden --json report.json
+.venv/Scripts/python.exe -m goengine.cli certify golden candidates
+.venv/Scripts/python.exe -m goengine.cli certify golden add 3 --added-by alex
+.venv/Scripts/python.exe -m goengine.cli certify golden annotate 1 go_number "G.O.(Ms) No.123" --annotator alex
+.venv/Scripts/python.exe -m goengine.cli certify benchmark
 ```
 
-A **blank cell means "this field does not appear in this order"**, and the
-extractor is scored correct only if it also reports nothing. That is what makes
-the metric measure hallucination rather than just recall — `hallucinated` is
-counted and reported as its own column.
-
-Comparison is field-appropriate, not string equality: GO numbers match on
-digits + series, dates on parsed value, budgets on rupee amount, subjects on
-containment or ≥90% token overlap.
+Both harnesses share the same field-appropriate comparison: GO numbers match
+on digits + series, dates on parsed value, budgets on rupee amount, subjects
+on containment or ≥90% token overlap. A blank/absent annotation is scored
+correct only if the extractor also reports nothing — measuring hallucination,
+not just recall.
 
 | Field | Phase 1 target | Field | Phase 2 target |
 |---|---|---|---|
 | GO Number | 99% | Budget | 95% |
 | GO Date | 99% | District | 95% |
-| Department | 99% | Scheme Name | 90% |
+| Department | 99% (98% Phase 2) | Scheme Name | 90% |
 | Subject | 95% | | |
 
-`golden score` exits non-zero when Phase 1 targets are not met, so it can gate CI.
+`golden score` / `certify benchmark` both exit non-zero when targets are not
+met, so either can gate CI.
 
 ---
 
@@ -159,50 +263,83 @@ containment or ≥90% token overlap.
 .venv/Scripts/python.exe -m pytest
 ```
 
-83 tests, fully offline — `OfflineFetcher` serves canned responses and
+143 tests, fully offline — `OfflineFetcher` serves canned responses and
 `sampledata.py` renders realistic two-page GO PDFs, so the whole pipeline is
-exercised without touching a government server. The suite covers the
-governance rules directly: unofficial sources rejected, documents
-un-overwritable, audit log un-editable, corrections non-destructive, and
-nothing invented from an empty document.
+exercised without touching a government server. The one exception, by
+necessity, is Module 4: one test makes a real call into the locally
+installed Tesseract binary (skipped automatically if it isn't present) to
+prove OCR genuinely recovers text from an image-only PDF — everything
+downstream of that (the merge into `extraction_pages`, categorization,
+benchmarking) is still exercised offline. The HTTP-triggered "run live
+certification" button is tested the same way: the route's fetcher is a
+FastAPI dependency, overridden with the offline fixture in tests so the
+suite never reaches the real internet, while still proving the actual route
+logic (not a mock of it).
+
+The suite covers the governance rules directly: unofficial sources rejected,
+documents un-overwritable, audit log un-editable, corrections
+non-destructive, nothing invented from an empty document, a golden document
+must reference a real archived document, and a wrong/hallucinated/missed
+prediction is scored and classified correctly.
 
 ---
 
-## Status against the Phase 1 exit criteria
+## Status against the exit criteria
+
+### Phase 1
 
 | Criterion | Status |
 |---|---|
 | Official source registry operational | ✅ |
 | Documents automatically discovered | ✅ engine complete; **live portal selectors need confirmation** |
 | PDFs downloaded and archived | ✅ |
-| Metadata extraction works reliably | ✅ on synthetic fixtures; **needs the real golden dataset** |
+| Metadata extraction works reliably | ✅ on synthetic fixtures; **needed the real golden dataset — see Phase 2** |
 | Validation workbench functional | ✅ |
 | Audit trail available | ✅ |
-| Accuracy targets achieved | ⚠️ **not yet demonstrated — requires 150 annotated real GOs** |
+| Accuracy targets achieved | ⚠️ **only against synthetic fixtures — see Phase 2** |
 
-### What is not done, and why
+### Phase 2
 
-Two exit criteria cannot be closed from code alone:
+| Criterion | Status |
+|---|---|
+| 10+ sources certified | ❌ **engine complete and tested; zero real certifications run** |
+| 200+ real Government Orders | ❌ **acquisition tooling complete; zero real documents acquired** |
+| OCR implemented and validated | ✅ implemented, proven against a real scanned PDF; ⚠️ not validated against real scanned GOs |
+| Tamil support validated | ✅ classification implemented and tested; ⚠️ not validated against real Tamil GOs |
+| Accuracy meets all target thresholds | ❌ **cannot be claimed — no real golden documents exist yet** |
+| 100% provenance coverage | ✅ every Phase 2 table extends the same audit trail as Phase 1 |
+| Benchmarking uses real documents only | ✅ structurally enforced (FK into `documents`), not just a process rule |
 
-1. **The seeded source URLs are unverified.** Department paths on
-   `cms.tn.gov.in` change between site revisions. The crawler is
-   adapter-based so adapting is a one-file change, but someone has to run
-   `thirdeye crawl --force --source-id N` against the live portal and confirm
-   the listing selectors. Until then treat the seed list as a starting point,
-   not as validated configuration.
+**Phase 2 is a certification *engine*, not a certification.** Every module
+the blueprint asked for is built, wired together, and covered by tests that
+exercise real logic (including a real Tesseract OCR call) — but "10 sources
+certified" and "200 real GOs" are claims about the *world*, not the code, and
+nothing in this repository can manufacture that evidence. That has to happen
+next, as an actual operational exercise:
 
-2. **The golden dataset contains no real GOs.** The harness, scoring and
-   targets are built and tested, but the blueprint's 150 manually annotated
-   orders (50 Health / 50 Education / 50 Public Works) is human work. The
-   100% scores in `thirdeye golden init --with-samples` are a smoke test of
-   the *harness* against synthetic fixtures whose layout the patterns were
-   written for — they are **not** evidence of real-world accuracy. Expect the
-   first real run to score lower, especially on scanned orders and Tamil-language
-   text, and to need OCR (no OCR backend is wired up yet).
+1. **Run `thirdeye certify sources` against the seeded URLs** (and fix the
+   ones that fail — Phase 1's README already flagged these as unverified) to
+   accumulate the 10 certified sources.
+2. **Run `thirdeye run` for real** across those certified sources, then
+   `thirdeye certify golden add` + `certify golden annotate` by hand against
+   real archived orders — 50 each in Health, Education, Public Works, Rural
+   Development — to build the 200-document acquisition target and its
+   golden subset.
+3. **Run `thirdeye certify benchmark`** against that real golden set and see
+   where the *actual* numbers land. Expect them to be lower than the
+   synthetic-fixture numbers, especially for scanned and Tamil-language
+   orders — that gap is exactly what Module 7 (Failure Intelligence) and
+   Module 8 (Confidence Calibration) exist to surface and quantify.
+
+Only after that real measurement meets the blueprint's thresholds should
+Phase 3 (Geography Intelligence) begin, per the blueprint's own governance
+rule: "No citizen-facing feature may be developed until extraction accuracy
+is validated against real government documents."
 
 ### Before this is exposed beyond localhost
 
-The workbench has **no authentication** — the reviewer name is a free-text form
-field, which is fine for a single-operator POC and not fine for anything else.
-Reviewer identity is what the audit trail attributes approvals to, so real
-deployment needs real auth first.
+The workbench has **no authentication** — the reviewer/annotator name is a
+free-text form field, which is fine for a single-operator POC and not fine
+for anything else. That identity is what the audit trail attributes
+approvals and ground-truth annotations to, so real deployment needs real
+auth first.

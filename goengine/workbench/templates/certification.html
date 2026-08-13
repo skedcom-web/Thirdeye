@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Certification &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="grid cols-4" style="margin-bottom:16px;">
+  <div class="stat"><div class="n">{{ source_certification_summary.CERTIFIED }}</div><div class="l">Sources certified</div></div>
+  <div class="stat"><div class="n">{{ source_certification_summary.PARTIALLY_CERTIFIED }}</div><div class="l">Partially certified</div></div>
+  <div class="stat"><div class="n">{{ source_certification_summary.FAILED }}</div><div class="l">Sources failed</div></div>
+  <div class="stat"><div class="n">{{ source_certification_summary.PENDING }}</div><div class="l">Pending certification</div></div>
+</div>
+
+<div class="panel">
+  <h2>Source Certification &mdash; Module 1</h2>
+  <p class="muted">Target: 10+ certified sources before citizen launch.</p>
+  <table>
+    <tr><th>Source</th><th>Department</th><th>Status</th><th>Certified</th><th>Last success</th><th>Last failure</th><th></th></tr>
+    {% for s in sources %}
+    <tr>
+      <td>{{ s.name }}<div class="mono muted" style="font-size:11px;">{{ s.url }}</div></td>
+      <td>{{ s.department }}</td>
+      <td>
+        {% if s.certification_status == 'CERTIFIED' %}<span class="pill ok">CERTIFIED</span>
+        {% elif s.certification_status == 'PARTIALLY_CERTIFIED' %}<span class="pill warn">PARTIAL</span>
+        {% elif s.certification_status == 'FAILED' %}<span class="pill bad">FAILED</span>
+        {% else %}<span class="pill neutral">PENDING</span>{% endif %}
+      </td>
+      <td class="mono">{{ s.certification_date or '—' }}</td>
+      <td class="mono">{{ s.last_crawl_success_at or '—' }}</td>
+      <td class="mono">{{ s.last_crawl_failure_at or '—' }}</td>
+      <td>
+        <form method="post" action="/certification/sources/{{ s.id }}/certify">
+          <button class="ghost" type="submit">Run certification</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Document Statistics</h2>
+  <div class="grid cols-4">
+    <div class="stat"><div class="n">{{ repo_stats.documents }}</div><div class="l">Collected</div></div>
+    <div class="stat"><div class="n">{{ discovery_counts.parsed + discovery_counts.verified }}</div><div class="l">Parsed</div></div>
+    <div class="stat"><div class="n">{{ ocr_count }}</div><div class="l">OCR'd</div></div>
+    <div class="stat"><div class="n">{{ discovery_counts.rejected }}</div><div class="l">Rejected</div></div>
+  </div>
+  <p class="muted" style="margin-top:10px;">
+    Golden set: {{ golden_summary.total }} documents, {{ golden_summary.fully_annotated }} fully annotated
+    &middot; Acquisition program: {{ acquisition_progress.total_in_target_departments }}/{{ acquisition_progress.total_target }}
+    <a href="/golden">view acquisition detail &rarr;</a>
+  </p>
+</div>
+
+<div class="panel">
+  <h2>Accuracy Metrics &mdash; Module 6</h2>
+  {% if latest_summary %}
+  <p class="muted">
+    Run #{{ latest_run.id }} at {{ latest_run.run_at }} &middot; {{ latest_run.documents_scored }} document(s) scored
+    &middot; Phase 2 targets:
+    <span class="pill {{ 'ok' if latest_summary.phase2_targets_met else 'bad' }}">
+      {{ 'MET' if latest_summary.phase2_targets_met else 'NOT MET' }}</span>
+  </p>
+  <table>
+    <tr><th>Field</th><th>Precision</th><th>Recall</th><th>F1</th><th>Accuracy</th><th>Target</th><th>Support</th><th></th></tr>
+    {% for name, stats in latest_summary.overall.items() %}
+    <tr>
+      <td class="mono">{{ name }}</td>
+      <td>{{ '%.1f%%'|format(stats.precision * 100) if stats.precision is not none else '—' }}</td>
+      <td>{{ '%.1f%%'|format(stats.recall * 100) if stats.recall is not none else '—' }}</td>
+      <td>{{ '%.1f%%'|format(stats.f1 * 100) if stats.f1 is not none else '—' }}</td>
+      <td>{{ '%.1f%%'|format(stats.accuracy * 100) if stats.accuracy is not none else '—' }}</td>
+      <td>{{ '%.0f%%'|format(stats.target * 100) if stats.target else '—' }}</td>
+      <td>{{ stats.support }}</td>
+      <td>
+        {% if stats.meets_target is not none %}
+        <span class="pill {{ 'ok' if stats.meets_target else 'bad' }}">{{ 'PASS' if stats.meets_target else 'FAIL' }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <div class="split" style="margin-top:14px;">
+    <div>
+      <h3 style="font-size:13px; color:var(--muted);">By department</h3>
+      <table>
+        <tr><th>Department</th><th>Field</th><th>Accuracy</th></tr>
+        {% for bucket, fields in latest_summary.by_department.items() %}
+          {% for name, stats in fields.items() %}
+          {% if stats.support %}
+          <tr><td>{{ bucket }}</td><td class="mono">{{ name }}</td>
+              <td>{{ '%.1f%%'|format(stats.accuracy * 100) if stats.accuracy is not none else '—' }}</td></tr>
+          {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </table>
+    </div>
+    <div>
+      <h3 style="font-size:13px; color:var(--muted);">By language</h3>
+      <table>
+        <tr><th>Language</th><th>Field</th><th>Accuracy</th></tr>
+        {% for lang, fields in latest_summary.by_language.items() %}
+          {% for name, stats in fields.items() %}
+          {% if stats.support %}
+          <tr><td>{{ lang }}</td><td class="mono">{{ name }}</td>
+              <td>{{ '%.1f%%'|format(stats.accuracy * 100) if stats.accuracy is not none else '—' }}</td></tr>
+          {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <p class="muted">No certification benchmark has run yet.</p>
+  {% endif %}
+
+  <form method="post" action="/certification/benchmark/run" style="margin-top:12px;">
+    <button type="submit">Run certification benchmark now</button>
+  </form>
+  {% if latest_summary and latest_summary.skipped_incomplete %}
+  <p class="muted" style="margin-top:8px;">{{ latest_summary.skipped_incomplete }} golden document(s) skipped: not yet fully annotated.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Confidence Calibration &mdash; Module 8</h2>
+  <p class="muted">
+    A field the extractor calls "92% confident" should be right about 92% of the time.
+    {% if calibration_error is not none %}
+    Weighted mean calibration error: <strong>{{ '%.1f%%'|format(calibration_error * 100) }}</strong>
+    {% endif %}
+  </p>
+  {% if calibration_buckets %}
+  <table>
+    <tr><th>Field</th><th>Confidence bucket</th><th>N</th><th>Stated</th><th>Actual</th><th>Gap</th></tr>
+    {% for b in calibration_buckets %}
+    <tr>
+      <td class="mono">{{ b.field_name }}</td>
+      <td>{{ '%.1f'|format(b.bucket_low) }}&ndash;{{ '%.1f'|format(b.bucket_high) }}</td>
+      <td>{{ b.predictions_count }}</td>
+      <td>{{ '%.1f%%'|format(b.mean_stated_confidence * 100) }}</td>
+      <td>{{ '%.1f%%'|format(b.actual_accuracy * 100) }}</td>
+      <td>
+        {% set gap = b.calibration_gap %}
+        <span class="{{ 'conf high' if gap >= -0.05 and gap <= 0.05 else 'conf low' }}">
+          {{ '%+.1f%%'|format(gap * 100) }}
+        </span>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No calibration data yet &mdash; run the certification benchmark.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Failure Analytics &mdash; Module 7</h2>
+  <div class="split">
+    <div>
+      <h3 style="font-size:13px; color:var(--muted);">Top failure types</h3>
+      <table>
+        <tr><th>Type</th><th>Count</th></tr>
+        {% for f in top_failure_types %}
+        <tr><td class="mono">{{ f.failure_type }}</td><td>{{ f.n }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div>
+      <h3 style="font-size:13px; color:var(--muted);">Failure trend across runs</h3>
+      <table>
+        <tr><th>Run</th><th>Scored</th><th>Failures</th></tr>
+        {% for t in failure_trend %}
+        <tr><td class="mono">#{{ t.run_id }}</td><td>{{ t.documents_scored }}</td><td>{{ t.failure_count }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+  <div class="split" style="margin-top:12px;">
+    <div>
+      <h3 style="font-size:13px; color:var(--muted);">By department</h3>
+      <table>
+        <tr><th>Department</th><th>Count</th></tr>
+        {% for d in department_failures %}
+        <tr><td>{{ d.department_bucket }}</td><td>{{ d.n }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div>
+      <h3 style="font-size:13px; color:var(--muted);">By language</h3>
+      <table>
+        <tr><th>Language</th><th>Count</th></tr>
+        {% for l in language_failures %}
+        <tr><td>{{ l.language }}</td><td>{{ l.n }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+
+  <h3 style="font-size:13px; color:var(--muted); margin-top:14px;">Open issues (most recent)</h3>
+  {% if open_issues %}
+  <table>
+    <tr><th>Document</th><th>Field</th><th>Type</th><th>Expected</th><th>Actual</th><th>When</th></tr>
+    {% for i in open_issues %}
+    <tr>
+      <td class="mono"><a href="/documents/{{ i.document_id }}/pdf">doc #{{ i.document_id }}</a></td>
+      <td class="mono">{{ i.field_name }}</td>
+      <td class="mono">{{ i.failure_type }}</td>
+      <td class="mono">{{ (i.expected_value or '(absent)')[:40] }}</td>
+      <td class="mono">{{ (i.actual_value or '(absent)')[:40] }}</td>
+      <td class="mono">{{ i.created_at }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No failures recorded yet.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

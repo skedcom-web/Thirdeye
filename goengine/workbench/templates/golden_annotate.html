@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Annotate #{{ doc.id }} &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap;">
+    <h2 style="margin:0;">Golden document #{{ doc.id }}</h2>
+    <span class="pill {{ 'ok' if doc.is_complete else 'warn' }}">
+      {{ doc.annotated_fields|length }}/{{ scored_fields|length }} annotated
+    </span>
+    <span class="mono">{{ doc.file_name }}</span>
+    <span class="muted">{{ doc.source_name }}</span>
+  </div>
+  <table style="margin-top:12px;">
+    <tr><th style="width:150px;">Department bucket</th><td>{{ doc.department_bucket or 'unknown' }}</td></tr>
+    <tr><th>Language</th><td>{{ doc.language or 'unknown' }}</td></tr>
+    <tr><th>Text type</th><td>{{ doc.text_type or 'unknown' }}</td></tr>
+    <tr><th>Added by</th><td>{{ doc.added_by }} at {{ doc.added_at }}</td></tr>
+  </table>
+</div>
+
+<div class="split">
+  <div class="panel">
+    <h2>Original document</h2>
+    <iframe src="/documents/{{ doc.document_id }}/pdf" title="Original PDF"></iframe>
+  </div>
+
+  <div class="panel">
+    <h2>Ground truth annotation</h2>
+    <p class="muted">
+      The machine's own extracted value is shown as a reference only &mdash;
+      annotation is stored independently and becomes the official benchmark
+      ground truth for this document, per governance rule 4.
+    </p>
+    <table>
+      {% for name in all_fields %}
+      {% set current = doc.annotations.get(name) %}
+      {% set machine = machine_fields.get(name) %}
+      <tr>
+        <th style="width:110px;">{{ name }}{% if name not in scored_fields %}<div class="muted" style="font-weight:400; font-size:11px;">not scored</div>{% endif %}</th>
+        <td>
+          {% if machine %}
+          <div class="muted" style="font-size:12px;">
+            machine: <span class="mono">{{ machine.normalized_value }}</span>
+            ({{ (machine.confidence * 100)|round(1) }}%, page {{ machine.source_page }})
+          </div>
+          {% else %}
+          <div class="muted" style="font-size:12px;">machine: not found</div>
+          {% endif %}
+
+          {% if current %}
+          <div style="margin:4px 0;">
+            ground truth: <strong>{{ current.value if current.value is not none else '(absent)' }}</strong>
+            <span class="muted" style="font-size:12px;">by {{ current.annotator }} at {{ current.annotated_at }}</span>
+          </div>
+          {% endif %}
+
+          <form class="inline" method="post" action="/golden/{{ doc.id }}/annotate" style="margin-top:4px;">
+            <input type="hidden" name="field_name" value="{{ name }}">
+            <input type="text" name="value" placeholder="ground truth value&hellip;"
+                   value="{{ machine.normalized_value if machine and not current else '' }}" style="flex:1;">
+            <label class="muted" style="font-size:12px; white-space:nowrap;">
+              <input type="checkbox" name="absent" value="1"> absent
+            </label>
+            <input type="text" name="annotator" placeholder="your name" required style="width:110px;">
+            <button class="ghost" type="submit">Save</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Extracted text by page</h2>
+  {% for page in pages %}
+  <details {% if loop.first %}open{% endif %}>
+    <summary style="cursor:pointer; margin:6px 0;"><strong>Page {{ page.page_number }}</strong>
+      <span class="muted">&middot; {{ page.char_count }} characters</span></summary>
+    <pre class="pagetext">{{ page.text }}</pre>
+  </details>
+  {% endfor %}
+</div>
+
+{% endblock %}

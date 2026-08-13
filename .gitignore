@@ -8,3 +8,7 @@ __pycache__/
 # committed. The repository is rebuildable from the source registry.
 data/
 !data/.gitkeep
+
+# OCR language data (Module 4): binary trained-data files, not source. Fetch
+# them per the README rather than committing ~7MB of binary blobs to git.
+vendor/tessdata/

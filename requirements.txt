@@ -11,4 +11,9 @@ pypdf>=5.1
 pymupdf>=1.24
 pdfplumber>=0.11
 
+# Module 4 (OCR). Also requires the Tesseract binary itself, plus
+# eng/tam.traineddata in vendor/tessdata -- see README.
+pytesseract>=0.3.10
+pillow>=10.0
+
 pytest>=8.3

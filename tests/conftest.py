@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from goengine import registry
+from goengine import pipeline, registry
 from goengine.config import Settings
 from goengine.db import init_db
 from goengine.fetching import OfflineFetcher
@@ -74,3 +74,13 @@ def fetcher(sample_pdfs) -> OfflineFetcher:
 @pytest.fixture
 def samples():
     return SAMPLES
+
+
+@pytest.fixture
+def parsed_documents(conn: sqlite3.Connection, settings: Settings, fetcher: OfflineFetcher, source_id: int) -> list[int]:
+    """Run the full Phase 1 pipeline end to end. Returns document ids in the
+    same order as `samples`/`sample_pdfs`, ready for Phase 2 certification
+    fixtures to build golden documents and categories on top of."""
+    pipeline.run_all(conn, settings, fetcher, only_due=False)
+    rows = conn.execute("SELECT id FROM documents ORDER BY id").fetchall()
+    return [int(r["id"]) for r in rows]

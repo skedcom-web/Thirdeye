@@ -1,7 +1,7 @@
 [project]
 name = "thirdeye"
-version = "0.1.0"
-description = "Evidence-First Government Order Intelligence Engine (Phase 1 POC)"
+version = "0.2.0"
+description = "Evidence-First Government Order Intelligence Engine (Phase 1 + 2)"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28",
@@ -15,6 +15,8 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["pymupdf>=1.24", "pdfplumber>=0.11"]
+# Module 4 (OCR). Also requires the Tesseract binary itself -- see README.
+ocr = ["pytesseract>=0.3.10", "pillow>=10.0"]
 dev = ["pytest>=8.3"]
 
 [project.scripts]

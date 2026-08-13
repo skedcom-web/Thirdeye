@@ -15,9 +15,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import acquisition, audit, registry, repository
+from .certification import categorize
 from .config import Settings
 from .discovery import crawler
 from .extraction import metadata as meta
+from .extraction import ocr as ocrengine
 from .extraction import text as textengine
 from .fetching import Fetcher
 
@@ -77,11 +79,46 @@ def parse_document(
     document_id: int,
     *,
     preferred_backend: str | None = None,
+    enable_ocr: bool = True,
 ) -> int:
-    """Text + metadata extraction for one archived document. Returns record id."""
+    """Text + OCR + metadata extraction for one archived document.
+
+    OCR (Module 4) runs between text extraction and metadata extraction,
+    exactly the blueprint's PDF -> Text Detection -> OCR Required? -> OCR
+    Engine -> Text Output pipeline: it only touches pages the digital text
+    layer left sparse, and never runs at all if Tesseract isn't installed
+    (a document just stays flagged `needs_ocr` for later reprocessing).
+    Returns the GO record id.
+    """
     extraction_id = textengine.extract_document(
         conn, settings, document_id, preferred_backend=preferred_backend
     )
+
+    if enable_ocr:
+        row = conn.execute(
+            "SELECT stored_path FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+        if row is not None:
+            document_path = repository.absolute_path(settings, row["stored_path"])
+            try:
+                ocrengine.apply_to_extraction(conn, extraction_id, document_path)
+            except ocrengine.OcrError as exc:
+                audit.record(
+                    conn,
+                    action="extraction.ocr_failed",
+                    entity_type="extraction",
+                    entity_id=extraction_id,
+                    detail={"error": str(exc)},
+                )
+
+    # Language/category identification (Module 2 + 5) runs on the final
+    # merged text -- digital or OCR'd, whichever applies per page -- and
+    # completes before metadata extraction, per the governance rule that
+    # language must be identified before extraction begins.
+    categorize.categorize_document(
+        conn, document_id, extraction_id, textengine.load_pages(conn, extraction_id)
+    )
+
     record_id = meta.extract_and_store(conn, extraction_id)
 
     row = conn.execute(

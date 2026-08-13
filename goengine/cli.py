@@ -8,6 +8,17 @@ import sys
 from pathlib import Path
 
 from . import audit, benchmark, pipeline, registry, repository, review
+from .certification import calibration as calib
+from .certification import categorize
+from .certification import failures as failure_intel
+from .certification import golden as golden_real
+from .certification import run_full_certification
+from .certification.benchmark import TARGETS as CERT_TARGETS
+from .certification.sources import (
+    certification_summary,
+    certify_all,
+    certify_source,
+)
 from .config import Settings
 from .db import init_db, session
 from .discovery import crawler
@@ -450,6 +461,254 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 -- Module 1: Source Certification
+# ---------------------------------------------------------------------------
+def cmd_certify_sources(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    fetcher = HttpFetcher()
+    try:
+        with session(settings) as conn:
+            if args.source_id is not None:
+                results = [
+                    certify_source(
+                        conn, settings, fetcher, args.source_id, max_pages=args.max_pages,
+                        download_sample=args.download_sample,
+                    )
+                ]
+            else:
+                results = certify_all(
+                    conn, settings, fetcher, max_pages=args.max_pages,
+                    download_sample=args.download_sample,
+                )
+    except LookupError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    finally:
+        fetcher.close()
+
+    _print_table(
+        ["SOURCE", "RESULT", "CONNECT", "DISCOVER", "DOWNLOAD", "STABLE", "AUTHENTIC", "DOCS"],
+        [
+            [
+                r.source_id, r.result,
+                "ok" if r.connectivity_ok else "fail", "ok" if r.discovery_ok else "fail",
+                "ok" if r.download_ok else "fail", "ok" if r.stability_ok else "fail",
+                "ok" if r.authenticity_ok else "fail", r.documents_discovered,
+            ]
+            for r in results
+        ],
+    )
+    return 0 if all(r.result == "CERTIFIED" for r in results) else 1
+
+
+def cmd_certify_status(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        summary = certification_summary(conn)
+        print(f"Certified: {summary['CERTIFIED']}  Partial: {summary['PARTIALLY_CERTIFIED']}  "
+              f"Failed: {summary['FAILED']}  Pending: {summary['PENDING']}")
+        print(f"Target: 10+ certified sources ({'MET' if summary['CERTIFIED'] >= 10 else 'not yet met'})\n")
+
+        rows = conn.execute(
+            "SELECT id, name, certification_status, certification_date, "
+            "last_crawl_success_at, last_crawl_failure_at FROM sources ORDER BY id"
+        ).fetchall()
+        _print_table(
+            ["ID", "NAME", "STATUS", "CERTIFIED AT", "LAST SUCCESS", "LAST FAILURE"],
+            [
+                [r["id"], r["name"], r["certification_status"], r["certification_date"] or "-",
+                 r["last_crawl_success_at"] or "-", r["last_crawl_failure_at"] or "-"]
+                for r in rows
+            ],
+        )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 -- Module 2: Acquisition progress
+# ---------------------------------------------------------------------------
+def cmd_certify_progress(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        progress = categorize.acquisition_progress(conn)
+    _print_table(
+        ["DEPARTMENT", "COLLECTED", "TARGET", "MET"],
+        [
+            [bucket, info["count"], info["target"], "yes" if info["met"] else "no"]
+            for bucket, info in progress["departments"].items()
+        ],
+    )
+    print(f"\nTotal: {progress['total_in_target_departments']}/{progress['total_target']} "
+          f"({'MET' if progress['target_met'] else 'not yet met'})")
+    print(f"Other departments: {progress['other_department_documents']}")
+    print(f"By text type: {progress['by_text_type']}")
+    print(f"By language: {progress['by_language']}")
+    print(f"Annexure-heavy: {progress['annexure_heavy_count']}  Table-heavy: {progress['table_heavy_count']}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 -- Module 3: Golden Dataset (real documents)
+# ---------------------------------------------------------------------------
+def cmd_golden2_add(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        try:
+            golden_id = golden_real.add_to_golden_set(
+                conn, args.document_id, added_by=args.added_by, notes=args.notes
+            )
+        except (golden_real.GoldenSetError, LookupError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    print(f"Document #{args.document_id} added to golden set as #{golden_id}")
+    return 0
+
+
+def cmd_golden2_annotate(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        try:
+            golden_real.annotate_field(
+                conn, args.golden_document_id, args.field,
+                None if args.absent else args.value,
+                annotator=args.annotator, note=args.note,
+            )
+        except (golden_real.GoldenSetError, LookupError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    print(f"Golden document #{args.golden_document_id}: {args.field} annotated by {args.annotator}")
+    return 0
+
+
+def cmd_golden2_list(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        rows = golden_real.list_golden_documents(conn)
+        _print_table(
+            ["ID", "DOCUMENT", "FILE", "DEPARTMENT", "LANGUAGE", "ANNOTATED"],
+            [
+                [r["id"], r["document_id"], r["file_name"], r["department_bucket"] or "?",
+                 r["language"] or "?", f"{r['annotated_fields']}/{len(golden_real.SCORED_FIELDS)}"]
+                for r in rows
+            ],
+        )
+    return 0
+
+
+def cmd_golden2_candidates(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        rows = golden_real.candidates_for_golden_set(conn, limit=args.limit)
+        _print_table(
+            ["DOCUMENT", "FILE", "SOURCE", "DEPARTMENT", "LANGUAGE"],
+            [
+                [r["document_id"], r["file_name"], r["source_name"],
+                 r["department_bucket"] or "?", r["language"] or "?"]
+                for r in rows
+            ],
+        )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 -- Modules 6, 7, 8: Benchmark, Failures, Calibration
+# ---------------------------------------------------------------------------
+def cmd_certify_benchmark(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        result = run_full_certification(conn)
+
+    print(f"Run #{result.run_id}: {result.documents_scored} document(s) scored "
+          f"({result.skipped_incomplete} skipped, not fully annotated)")
+    print(f"Extractor version: {result.extractor_version}\n")
+
+    _print_table(
+        ["FIELD", "PRECISION", "RECALL", "F1", "ACCURACY", "TARGET", "SUPPORT", ""],
+        [
+            [
+                name,
+                f"{s.precision:.1%}" if s.precision is not None else "-",
+                f"{s.recall:.1%}" if s.recall is not None else "-",
+                f"{s.f1:.1%}" if s.f1 is not None else "-",
+                f"{s.accuracy:.1%}" if s.accuracy is not None else "-",
+                f"{CERT_TARGETS.get(name, 0):.0%}",
+                s.support,
+                "PASS" if (s.accuracy or 0) >= CERT_TARGETS.get(name, 1) and s.support else
+                ("FAIL" if s.support else ""),
+            ]
+            for name, s in result.overall.items()
+        ],
+    )
+    print(f"\nPhase 2 accuracy targets: {'MET' if result.phase2_targets_met else 'NOT MET'}")
+    if result.mismatches:
+        print(f"{len(result.mismatches)} mismatch(es) recorded as failures "
+              "(see: thirdeye certify failures)")
+    return 0 if result.phase2_targets_met else 1
+
+
+def cmd_certify_benchmark_show(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        if args.run_id:
+            row = conn.execute(
+                "SELECT * FROM certification_benchmark_runs WHERE id = ?", (args.run_id,)
+            ).fetchone()
+            if row is None:
+                print(f"No benchmark run with id {args.run_id}", file=sys.stderr)
+                return 2
+        else:
+            row = conn.execute(
+                "SELECT * FROM certification_benchmark_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if row is None:
+                print("No certification benchmark has run yet. Run: thirdeye certify benchmark", file=sys.stderr)
+                return 1
+        print(json.dumps(json.loads(row["summary"]), indent=2))
+    return 0
+
+
+def cmd_certify_failures(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        rows = failure_intel.list_failures(
+            conn, failure_type=args.type, field_name=args.field,
+            department_bucket=args.department, language=args.language, limit=args.limit,
+        )
+        _print_table(
+            ["ID", "DOCUMENT", "FIELD", "TYPE", "EXPECTED", "ACTUAL", "WHEN"],
+            [
+                [r["id"], r["document_id"], r["field_name"], r["failure_type"],
+                 (r["expected_value"] or "(absent)")[:30], (r["actual_value"] or "(absent)")[:30],
+                 r["created_at"]]
+                for r in rows
+            ],
+        )
+    return 0
+
+
+def cmd_certify_calibration(args: argparse.Namespace) -> int:
+    with session(_settings(args)) as conn:
+        buckets = calib.latest_calibration(conn)
+        if not buckets:
+            print("No calibration data yet. Run: thirdeye certify benchmark", file=sys.stderr)
+            return 1
+        error = calib.overall_calibration_error(
+            [
+                calib.CalibrationBucket(
+                    field_name=r["field_name"], bucket_low=r["bucket_low"], bucket_high=r["bucket_high"],
+                    predictions_count=r["predictions_count"], correct_count=r["correct_count"],
+                    mean_stated_confidence=r["mean_stated_confidence"], actual_accuracy=r["actual_accuracy"],
+                )
+                for r in buckets
+            ]
+        )
+        _print_table(
+            ["FIELD", "BUCKET", "N", "STATED", "ACTUAL", "GAP"],
+            [
+                [
+                    r["field_name"], f"{r['bucket_low']:.1f}-{r['bucket_high']:.1f}",
+                    r["predictions_count"], f"{r['mean_stated_confidence']:.1%}",
+                    f"{r['actual_accuracy']:.1%}", f"{r['calibration_gap']:+.1%}",
+                ]
+                for r in buckets
+            ],
+        )
+        print(f"\nWeighted mean calibration error: {error:.1%}" if error is not None else "")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
@@ -594,6 +853,67 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("demo", help="run the full pipeline offline on synthetic GOs")
     p.set_defaults(func=cmd_demo)
+
+    # -------------------------------------------------------------------
+    # Phase 2 -- certification
+    # -------------------------------------------------------------------
+    certify = sub.add_parser("certify", help="Phase 2: source certification and accuracy certification")
+    certify_sub = certify.add_subparsers(dest="certify_command", required=True)
+
+    p = certify_sub.add_parser("sources", help="run the 5 certification checks against live sources")
+    p.add_argument("--source-id", type=int, help="certify one source; default is all active sources")
+    p.add_argument("--max-pages", type=int, default=3)
+    p.add_argument("--download-sample", type=int, default=3)
+    p.set_defaults(func=cmd_certify_sources)
+
+    p = certify_sub.add_parser("status", help="source certification summary")
+    p.set_defaults(func=cmd_certify_status)
+
+    p = certify_sub.add_parser("progress", help="Real GO Acquisition Program progress")
+    p.set_defaults(func=cmd_certify_progress)
+
+    golden2 = certify_sub.add_parser("golden", help="golden dataset built from real archived documents")
+    golden2_sub = golden2.add_subparsers(dest="certify_golden_command", required=True)
+
+    p = golden2_sub.add_parser("add", help="add an archived document to the golden set")
+    p.add_argument("document_id", type=int)
+    p.add_argument("--added-by", required=True)
+    p.add_argument("--notes")
+    p.set_defaults(func=cmd_golden2_add)
+
+    p = golden2_sub.add_parser("annotate", help="record ground truth for one field")
+    p.add_argument("golden_document_id", type=int)
+    p.add_argument("field", choices=list(golden_real.ALL_GOLDEN_FIELDS))
+    p.add_argument("value", nargs="?", default=None)
+    p.add_argument("--annotator", required=True)
+    p.add_argument("--absent", action="store_true", help="assert the field does not appear in the document")
+    p.add_argument("--note")
+    p.set_defaults(func=cmd_golden2_annotate)
+
+    p = golden2_sub.add_parser("list", help="list documents in the golden set")
+    p.set_defaults(func=cmd_golden2_list)
+
+    p = golden2_sub.add_parser("candidates", help="archived documents not yet in the golden set")
+    p.add_argument("--limit", type=int, default=30)
+    p.set_defaults(func=cmd_golden2_candidates)
+
+    p = certify_sub.add_parser("benchmark", help="score the golden set: P/R/F1, failures, calibration")
+    p.set_defaults(func=cmd_certify_benchmark)
+
+    p = certify_sub.add_parser("benchmark-show", help="print a certification benchmark run as JSON")
+    p.add_argument("--run-id", type=int, help="default: most recent run")
+    p.set_defaults(func=cmd_certify_benchmark_show)
+
+    p = certify_sub.add_parser("failures", help="query recorded extraction failures")
+    p.add_argument("--type", choices=list(failure_intel.ALL_FAILURE_TYPES))
+    p.add_argument("--field", choices=list(golden_real.SCORED_FIELDS))
+    p.add_argument("--department")
+    p.add_argument("--language")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=cmd_certify_failures)
+
+    p = certify_sub.add_parser("calibration", help="stated confidence vs. actual accuracy, by bucket")
+    p.set_defaults(func=cmd_certify_calibration)
 
     return parser
 
