@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: thirdeye
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn goengine.workbench.app:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: THIRDEYE_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.11.9
