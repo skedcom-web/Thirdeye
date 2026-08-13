@@ -55,6 +55,7 @@
           </div>
           {% endif %}
 
+          {% if can_review %}
           <form class="inline" method="post" action="/golden/{{ doc.id }}/annotate" style="margin-top:4px;">
             <input type="hidden" name="field_name" value="{{ name }}">
             <input type="text" name="value" placeholder="ground truth value&hellip;"
@@ -62,9 +63,9 @@
             <label class="muted" style="font-size:12px; white-space:nowrap;">
               <input type="checkbox" name="absent" value="1"> absent
             </label>
-            <input type="text" name="annotator" placeholder="your name" required style="width:110px;">
             <button class="ghost" type="submit">Save</button>
           </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

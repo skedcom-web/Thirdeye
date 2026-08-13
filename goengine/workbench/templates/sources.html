@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Source Registry &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Modules 4 &amp; 5 &mdash; Government Source Registry</h2>
+  <table>
+    <tr><th>Name</th><th>State</th><th>Department</th><th>Discovery</th><th>Lifecycle</th><th>Certification</th><th>Version</th><th></th></tr>
+    {% for s in sources %}
+    <tr>
+      <td>{{ s.name }}<div class="mono muted" style="font-size:11px;">{{ s.url }}</div></td>
+      <td>{{ s.state_name or 'state-wide/unset' }}</td>
+      <td>{{ s.department }}</td>
+      <td>{{ s.discovery_method or '—' }}</td>
+      <td>
+        <span class="pill {{ 'ok' if s.lifecycle_status in ('CERTIFIED','ACTIVE') else ('bad' if s.lifecycle_status == 'RETIRED' else 'neutral') }}">{{ s.lifecycle_status }}</span>
+      </td>
+      <td>
+        <span class="pill {{ 'ok' if s.certification_status == 'CERTIFIED' else ('bad' if s.certification_status == 'FAILED' else 'neutral') }}">{{ s.certification_status }}</span>
+      </td>
+      <td class="mono">v{{ s.current_version }}</td>
+      <td><a href="/ops/sources/{{ s.id }}">Manage &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if can_manage %}
+<div class="panel">
+  <h2>Add source</h2>
+  <form class="inline" method="post" action="/ops/sources/add">
+    <input type="text" name="name" placeholder="Source name" required>
+    <input type="text" name="department" placeholder="Department" required>
+    <input type="text" name="url" placeholder="https://..." required style="flex:1;">
+    <select name="source_type" required style="width:auto;">
+      {% for t in source_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    </select>
+    <select name="discovery_method" style="width:auto;">
+      <option value="">No discovery method set</option>
+      {% for m in discovery_methods %}<option value="{{ m }}">{{ m.replace('_',' ') }}</option>{% endfor %}
+    </select>
+    <select name="state_id" style="width:auto;">
+      <option value="">State-wide / unset</option>
+      {% for st in states %}<option value="{{ st.id }}">{{ st.name }}</option>{% endfor %}
+    </select>
+    <button type="submit">Add source</button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}

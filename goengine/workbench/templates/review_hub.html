@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Review Workbench &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="grid cols-4" style="margin-bottom:16px;">
+  <a class="stat" href="/ops/review?queue=extraction" style="text-decoration:none; color:inherit; {% if selected_queue == 'extraction' %}border-color:var(--accent);{% endif %}">
+    <div class="n">{{ counts.extraction }}</div><div class="l">Extraction review</div>
+  </a>
+  <a class="stat" href="/ops/review?queue=ocr" style="text-decoration:none; color:inherit; {% if selected_queue == 'ocr' %}border-color:var(--accent);{% endif %}">
+    <div class="n">{{ counts.ocr }}</div><div class="l">OCR review</div>
+  </a>
+  <a class="stat" href="/ops/review?queue=metadata" style="text-decoration:none; color:inherit; {% if selected_queue == 'metadata' %}border-color:var(--accent);{% endif %}">
+    <div class="n">{{ counts.metadata }}</div><div class="l">Metadata review</div>
+  </a>
+  <a class="stat" href="/ops/review?queue=failure" style="text-decoration:none; color:inherit; {% if selected_queue == 'failure' %}border-color:var(--accent);{% endif %}">
+    <div class="n">{{ counts.failure }}</div><div class="l">Failure review</div>
+  </a>
+</div>
+
+<div class="panel">
+  <h2>Module 7 &mdash; {{ selected_queue|title }} review queue</h2>
+  {% if records %}
+  <table>
+    <tr><th>Record</th><th>File</th><th>Source</th><th></th></tr>
+    {% for r in records %}
+    <tr>
+      <td class="mono">#{{ r.id }}</td>
+      <td class="mono">{{ r.file_name }}</td>
+      <td>{{ r.source_name }}</td>
+      <td><a href="/records/{{ r.id }}">Review &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Nothing in this queue.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Open escalations</h2>
+  {% if open_escalations %}
+  <table>
+    <tr><th>Record</th><th>File</th><th>Escalated by</th><th>When</th><th>Reason</th><th></th></tr>
+    {% for e in open_escalations %}
+    <tr>
+      <td class="mono"><a href="/records/{{ e.record_id }}">#{{ e.record_id }}</a></td>
+      <td class="mono">{{ e.file_name }}</td>
+      <td>{{ e.escalated_by }}</td>
+      <td class="mono">{{ e.escalated_at }}</td>
+      <td>{{ e.reason }}</td>
+      <td>
+        {% if can_escalate %}
+        <form class="inline" method="post" action="/ops/review/escalations/{{ e.id }}/resolve">
+          <input type="text" name="note" placeholder="resolution note">
+          <button class="ghost" type="submit">Resolve</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No open escalations.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

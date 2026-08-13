@@ -9,6 +9,7 @@ from goengine import pipeline, registry
 from goengine.config import Settings
 from goengine.db import init_db
 from goengine.fetching import OfflineFetcher
+from goengine.operations import auth as ops_auth
 from goengine.sampledata import SAMPLES, write_samples
 
 LISTING_URL = "https://cms.tn.gov.in/go-search"
@@ -74,6 +75,28 @@ def fetcher(sample_pdfs) -> OfflineFetcher:
 @pytest.fixture
 def samples():
     return SAMPLES
+
+
+def login_as(
+    test_client,
+    conn: sqlite3.Connection,
+    *,
+    username: str = "admin",
+    password: str = "testpass123",
+    role: str = ops_auth.ROLE_PLATFORM_ADMIN,
+    state_id: int | None = None,
+) -> str:
+    """Bootstrap a user directly in the DB and authenticate `test_client`
+    against it (TestClient persists the session cookie for later requests).
+    Every Phase 3 workbench route requires a session -- HTTP tests need this
+    before hitting anything but /login or /setup."""
+    ops_auth.create_user(
+        conn, username=username, password=password, role=role, state_id=state_id,
+        actor="test-bootstrap",
+    )
+    response = test_client.post("/login", data={"username": username, "password": password})
+    assert response.status_code == 200, f"login failed: {response.status_code} {response.text[:200]}"
+    return username
 
 
 @pytest.fixture

@@ -74,14 +74,15 @@
           </details>
           {% endif %}
 
+          {% if can_review %}
           <form class="inline" method="post" action="/records/{{ record.record_id }}/correct" style="margin-top:6px;">
             <input type="hidden" name="field_name" value="{{ name }}">
             <input type="text" name="new_value" placeholder="Correct {{ name }}&hellip;" required>
             <input type="number" name="source_page" min="1" max="{{ record.page_count }}"
                    value="{{ f.source_page if f else 1 }}" style="width:70px;" title="Source page">
-            <input type="text" name="reviewer" placeholder="your name" required style="width:120px;">
             <button class="ghost" type="submit">Correct</button>
           </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -93,11 +94,11 @@
 <!-- Decision -->
 <div class="panel">
   <h2>Decision</h2>
+  {% if can_review %}
   <div class="split">
     <form method="post" action="/records/{{ record.record_id }}/approve">
-      <p class="muted">Approving moves this record into the Verified GO Database.</p>
+      <p class="muted">Approving moves this record into the Verified GO Database, as <strong>{{ current_user.username }}</strong>.</p>
       <div style="display:flex; gap:8px; align-items:center;">
-        <input type="text" name="reviewer" placeholder="your name" required style="max-width:180px;">
         <input type="text" name="note" placeholder="note (optional)">
         <button type="submit">Approve</button>
       </div>
@@ -111,17 +112,40 @@
     <form method="post" action="/records/{{ record.record_id }}/reject">
       <p class="muted">Rejecting keeps the document and the trail; it just never publishes.</p>
       <div style="display:flex; gap:8px; align-items:center;">
-        <input type="text" name="reviewer" placeholder="your name" required style="max-width:180px;">
         <input type="text" name="reason" placeholder="reason (required)" required>
         <button class="danger" type="submit">Reject</button>
       </div>
     </form>
   </div>
+  {% else %}
+  <p class="muted">Your role ({{ current_user.role.replace('_',' ') }}) cannot approve or reject records.</p>
+  {% endif %}
+  {% if can_escalate %}
+  <form method="post" action="/records/{{ record.record_id }}/escalate" style="margin-top:12px;">
+    <div style="display:flex; gap:8px; align-items:center;">
+      <input type="text" name="reason" placeholder="why this needs higher-authority review" required>
+      <button class="ghost" type="submit">Escalate</button>
+    </div>
+  </form>
+  {% endif %}
   {% if record.reviewed_by %}
-  <p class="muted" style="margin-bottom:0;">
+  <p class="muted" style="margin:12px 0 0;">
     Last reviewed by <strong>{{ record.reviewed_by }}</strong> at {{ record.reviewed_at }}
     {% if record.review_note %}&mdash; &ldquo;{{ record.review_note }}&rdquo;{% endif %}
   </p>
+  {% endif %}
+  {% if escalations %}
+  <table style="margin-top:12px;">
+    <tr><th>Escalated by</th><th>When</th><th>Reason</th><th>Status</th></tr>
+    {% for e in escalations %}
+    <tr>
+      <td>{{ e.escalated_by }}</td>
+      <td class="mono">{{ e.escalated_at }}</td>
+      <td>{{ e.reason }}</td>
+      <td>{% if e.resolved %}<span class="pill ok">resolved</span>{% else %}<span class="pill warn">open</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
   {% endif %}
 </div>
 

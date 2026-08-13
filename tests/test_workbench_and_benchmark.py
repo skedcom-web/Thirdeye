@@ -11,13 +11,16 @@ from goengine import benchmark, review
 from goengine.pipeline import run_all
 from goengine.sampledata import write_samples
 from goengine.workbench.app import create_app
+from tests.conftest import login_as
 
 
 @pytest.fixture
 def client(conn, settings, fetcher, source_id):
     run_all(conn, settings, fetcher, only_due=False)
     conn.commit()
-    return TestClient(create_app(settings))
+    test_client = TestClient(create_app(settings))
+    login_as(test_client, conn)
+    return test_client
 
 
 def test_dashboard_lists_the_queue(client):
@@ -59,7 +62,7 @@ def test_approve_via_http_publishes(client, conn):
     record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
     response = client.post(
         f"/records/{record_id}/approve",
-        data={"reviewer": "alex", "note": "ok"},
+        data={"note": "ok"},
         follow_redirects=False,
     )
     assert response.status_code == 303
@@ -72,8 +75,7 @@ def test_correct_via_http(client, conn):
     record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
     response = client.post(
         f"/records/{record_id}/correct",
-        data={"reviewer": "alex", "field_name": "department", "new_value": "Finance",
-              "source_page": 1},
+        data={"field_name": "department", "new_value": "Finance", "source_page": 1},
         follow_redirects=False,
     )
     assert response.status_code == 303
@@ -84,9 +86,7 @@ def test_reject_requires_a_reason_over_http(client, conn):
     """Refused either by FastAPI's own validation or by review.reject --
     which one depends on whether the client sends the empty field at all."""
     record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
-    response = client.post(
-        f"/records/{record_id}/reject", data={"reviewer": "alex", "reason": ""}
-    )
+    response = client.post(f"/records/{record_id}/reject", data={"reason": ""})
 
     assert response.status_code in (400, 422)
     assert review.get_summary(conn, record_id).status == "pending"

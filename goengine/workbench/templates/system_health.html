@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}System Health &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Module 12 &mdash; System Health Center</h2>
+  {% if health.alerts %}
+  {% for a in health.alerts %}
+  <p class="evidence" style="border-left-color:var(--bad); color:var(--bad); font-style:normal;">&#9888; {{ a.message }}</p>
+  {% endfor %}
+  {% else %}
+  <p class="muted">No active alerts.</p>
+  {% endif %}
+</div>
+
+<div class="grid cols-4" style="margin-bottom:16px;">
+  <div class="stat"><div class="n">{{ health.source_availability.healthy }}/{{ health.source_availability.total_active }}</div><div class="l">Sources healthy</div></div>
+  <div class="stat"><div class="n">{{ health.certification_failures|length }}</div><div class="l">Recent cert. failures</div></div>
+  <div class="stat"><div class="n">{{ 'yes' if health.ocr.available else 'no' }}</div><div class="l">OCR available</div></div>
+  <div class="stat"><div class="n">{{ health.processing_queue_depth }}</div><div class="l">Jobs in queue</div></div>
+</div>
+
+<div class="split">
+  <div class="panel">
+    <h2>Source availability</h2>
+    {% if health.source_availability.down %}
+    <table>
+      <tr><th>Source</th></tr>
+      {% for s in health.source_availability.down %}
+      <tr><td><a href="/ops/sources/{{ s.id }}">{{ s.name }}</a></td></tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">All active sources are healthy.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>OCR health</h2>
+    <table>
+      <tr><th style="width:150px;">Available</th><td>{{ 'yes' if health.ocr.available else 'no' }}</td></tr>
+      <tr><th>Languages</th><td class="mono">{{ health.ocr.languages|join(', ') or '—' }}</td></tr>
+      <tr><th>Documents needing OCR</th><td>{{ health.ocr.documents_needing_ocr }}</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Storage usage</h2>
+  <div style="background:var(--line); border-radius:4px; height:14px; overflow:hidden; max-width:400px;">
+    <div style="background:{{ 'var(--bad)' if health.storage.over_threshold else 'var(--accent)' }}; height:100%; width:{{ [100, health.storage.percent_used]|min }}%;"></div>
+  </div>
+  <p class="muted" style="margin-top:8px;">
+    {{ '%.1f'|format(health.storage.used_bytes / 1048576) }} MB used of
+    {{ '%.0f'|format(health.storage.threshold_bytes / 1073741824) }} GB threshold
+    ({{ health.storage.percent_used }}%)
+  </p>
+</div>
+
+<div class="panel">
+  <h2>Recent certification failures</h2>
+  {% if health.certification_failures %}
+  <table>
+    <tr><th>Source</th><th>When</th><th>Detail</th></tr>
+    {% for f in health.certification_failures %}
+    <tr>
+      <td>{{ f.source_name }}</td>
+      <td class="mono">{{ f.started_at }}</td>
+      <td class="mono muted">{{ (f.detail or '')[:100] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">None.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

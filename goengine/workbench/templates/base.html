@@ -62,13 +62,23 @@
 </head>
 <body>
 <header>
-  <h1>THIRDEYE &middot; GO Intelligence Engine</h1>
-  <a href="/">Workbench</a>
+  <h1>THIRDEYE &middot; Operations Control Center</h1>
+  <a href="/">Dashboard</a>
+  <a href="/ops">Administration</a>
   <a href="/golden">Golden Dataset</a>
   <a href="/certification">Certification</a>
   <a href="/audit">Audit trail</a>
   <a href="/api/verified">Verified GO data (JSON)</a>
-  <span style="margin-left:auto; color:#7d8798; font-size:12px;">Phase 1 + 2</span>
+  <span style="margin-left:auto; display:flex; align-items:center; gap:12px;">
+    {% if current_user %}
+    <span style="color:#b9c6dd; font-size:12px;">
+      {{ current_user.username }} <span class="pill neutral" style="vertical-align:middle;">{{ current_user.role.replace('_',' ') }}</span>
+    </span>
+    <form method="post" action="/logout" style="margin:0;">
+      <button class="ghost" type="submit" style="padding:4px 10px; font-size:12px;">Log out</button>
+    </form>
+    {% endif %}
+  </span>
 </header>
 <main>
 {% block content %}{% endblock %}

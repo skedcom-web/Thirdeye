@@ -1,7 +1,7 @@
 [project]
 name = "thirdeye"
-version = "0.2.0"
-description = "Evidence-First Government Order Intelligence Engine (Phase 1 + 2)"
+version = "0.3.0"
+description = "Evidence-First Government Order Intelligence Engine (Phase 1 + 2 + 3)"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28",

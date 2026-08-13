@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Operations Dashboard &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Module 9 &mdash; Operations Dashboard</h2>
+  <div class="grid cols-4">
+    <div class="stat"><div class="n">{{ summary.active_states }}/{{ summary.total_states }}</div><div class="l">Active states</div></div>
+    <div class="stat"><div class="n">{{ summary.active_districts }}/{{ summary.total_districts }}</div><div class="l">Active districts</div></div>
+    <div class="stat"><div class="n">{{ summary.certified_sources }}</div><div class="l">Certified sources</div></div>
+    <div class="stat"><div class="n">{{ summary.active_sources }}/{{ summary.total_sources }}</div><div class="l">Active sources</div></div>
+    <div class="stat"><div class="n">{{ summary.documents_processed }}</div><div class="l">Documents processed</div></div>
+    <div class="stat"><div class="n">{{ summary.documents_requiring_review }}</div><div class="l">Requiring review</div></div>
+    <div class="stat">
+      <div class="n">{{ (summary.accuracy_score * 100)|round(1) ~ '%' if summary.accuracy_score is not none else '—' }}</div>
+      <div class="l">Accuracy score</div>
+    </div>
+    <div class="stat">
+      <div class="n">{{ summary.publication_coverage.districts_published }}/{{ summary.publication_coverage.districts_total }}</div>
+      <div class="l">Districts published</div>
+    </div>
+  </div>
+  {% if summary.accuracy_score is none %}
+  <p class="muted" style="margin-top:12px;">No certification benchmark has run yet. <a href="/ops/jobs">Start a job</a> or <a href="/certification">run a benchmark</a>.</p>
+  {% else %}
+  <p class="muted" style="margin-top:12px;">Accuracy score from <a href="/certification">benchmark run #{{ summary.latest_benchmark_run_id }}</a>.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Quick links</h2>
+  <div style="display:flex; gap:16px; flex-wrap:wrap;">
+    <a href="/ops/states">States</a>
+    <a href="/ops/districts">Districts</a>
+    <a href="/ops/departments">Departments</a>
+    <a href="/ops/sources">Source Registry</a>
+    <a href="/ops/jobs">Certification Jobs</a>
+    <a href="/ops/review">Review Workbench</a>
+    <a href="/ops/publication">Publication Control</a>
+    <a href="/ops/health">System Health</a>
+    <a href="/audit">Audit trail</a>
+  </div>
+</div>
+
+{% endblock %}

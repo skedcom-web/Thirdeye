@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Users &amp; Roles &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Module 11 &mdash; Users &amp; Roles</h2>
+  <table>
+    <tr><th>Username</th><th>Role</th><th>State</th><th>Active</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.username }}{% if u.id == current_user.id %} <span class="muted">(you)</span>{% endif %}</td>
+      <td><span class="pill neutral">{{ u.role.replace('_',' ') }}</span></td>
+      <td>{{ states_by_id.get(u.state_id, '—') }}</td>
+      <td>{{ 'yes' if u.active else 'no' }}</td>
+      <td>
+        {% if can_manage %}
+        <form class="inline" method="post" action="/ops/users/{{ u.id }}/active">
+          <input type="hidden" name="active" value="{{ '' if u.active else '1' }}">
+          <button class="ghost" type="submit" {% if u.id == current_user.id and u.active %}disabled title="cannot deactivate your own account"{% endif %}>
+            {{ 'Deactivate' if u.active else 'Activate' }}
+          </button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if can_manage %}
+<div class="panel">
+  <h2>Add user</h2>
+  <form class="inline" method="post" action="/ops/users/add">
+    <input type="text" name="username" placeholder="Username" required>
+    <input type="password" name="password" placeholder="Password (min. 8 chars)" required minlength="8">
+    <select name="role" required style="width:auto;">
+      {% for r in roles %}<option value="{{ r }}">{{ r.replace('_',' ') }}</option>{% endfor %}
+    </select>
+    <select name="state_id" style="width:auto;">
+      <option value="">No state (only needed for state_admin)</option>
+      {% for s in states %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+    </select>
+    <button type="submit">Add user</button>
+  </form>
+  <p class="muted" style="margin-top:8px;">Roles: platform_admin (everything), state_admin (their state only),
+    reviewer (review + escalate), auditor (read-only, including audit logs), read_only (read-only).</p>
+</div>
+{% endif %}
+
+{% endblock %}

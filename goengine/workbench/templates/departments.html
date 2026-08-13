@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Departments &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Module 3 &mdash; Department Management</h2>
+  <table>
+    <tr><th>Name</th><th>Active</th><th>Documents</th><th>Target</th><th>Accuracy</th><th></th></tr>
+    {% for department, metrics in rows %}
+    <tr>
+      <td>{{ department.name }}
+        {% if not metrics.tracked %}<div class="muted" style="font-size:11px;">not yet trackable &mdash; no acquisition bucket mapped</div>{% endif %}
+      </td>
+      <td>{{ 'yes' if department.active else 'no' }}</td>
+      <td>{{ metrics.document_count if metrics.tracked else '—' }}</td>
+      <td>{{ metrics.target if metrics.tracked else '—' }}</td>
+      <td>{{ (metrics.accuracy * 100)|round(1) ~ '%' if metrics.accuracy is not none else '—' }}</td>
+      <td>
+        {% if can_manage %}
+        <form class="inline" method="post" action="/ops/departments/{{ department.id }}/active">
+          <input type="hidden" name="active" value="{{ '' if department.active else '1' }}">
+          <button class="ghost" type="submit">{{ 'Disable' if department.active else 'Enable' }}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if can_manage %}
+<div class="panel">
+  <h2>Add department</h2>
+  <form class="inline" method="post" action="/ops/departments/add">
+    <input type="text" name="name" placeholder="Department name" required>
+    <select name="bucket_key" style="width:auto;">
+      <option value="">No acquisition bucket</option>
+      <option value="health">health</option>
+      <option value="education">education</option>
+      <option value="public_works">public_works</option>
+      <option value="rural_development">rural_development</option>
+    </select>
+    <button type="submit">Add department</button>
+  </form>
+  {% if rows|length == 0 %}
+  <form method="post" action="/ops/departments/seed" style="margin-top:10px;">
+    <button class="ghost" type="submit">Seed the blueprint's example departments</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

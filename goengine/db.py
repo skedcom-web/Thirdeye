@@ -12,6 +12,7 @@ from .config import PACKAGE_DIR, Settings
 
 SCHEMA_PATH = PACKAGE_DIR / "schema.sql"
 SCHEMA_PHASE2_PATH = PACKAGE_DIR / "schema_phase2.sql"
+SCHEMA_PHASE3_PATH = PACKAGE_DIR / "schema_phase3.sql"
 
 # Columns added to the pre-existing `sources` table for Phase 1 certification.
 # SQLite's ALTER TABLE has no "ADD COLUMN IF NOT EXISTS", so this is applied
@@ -31,6 +32,17 @@ EXTRACTIONS_PHASE2_COLUMNS: dict[str, str] = {
 }
 EXTRACTION_PAGES_PHASE2_COLUMNS: dict[str, str] = {
     "source": "TEXT NOT NULL DEFAULT 'digital'",
+}
+
+# Modules 1-5 (Phase 3): geography linkage and the operational lifecycle
+# state, distinct from the certification_status *result* columns Phase 2
+# already added.
+SOURCES_PHASE3_COLUMNS: dict[str, str] = {
+    "state_id": "INTEGER REFERENCES states(id)",
+    "district_id": "INTEGER REFERENCES districts(id)",
+    "discovery_method": "TEXT",
+    "lifecycle_status": "TEXT NOT NULL DEFAULT 'NEW'",
+    "current_version": "INTEGER NOT NULL DEFAULT 1",
 }
 
 
@@ -63,6 +75,8 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     _ensure_columns(conn, "sources", SOURCES_PHASE2_COLUMNS)
     _ensure_columns(conn, "extractions", EXTRACTIONS_PHASE2_COLUMNS)
     _ensure_columns(conn, "extraction_pages", EXTRACTION_PAGES_PHASE2_COLUMNS)
+    conn.executescript(SCHEMA_PHASE3_PATH.read_text(encoding="utf-8"))
+    _ensure_columns(conn, "sources", SOURCES_PHASE3_COLUMNS)
     return conn
 
 

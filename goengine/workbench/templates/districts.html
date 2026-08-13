@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Districts &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Module 2 &mdash; District Management</h2>
+  <form class="inline" method="get" action="/ops/districts" style="margin-bottom:12px;">
+    <select name="state_id" style="width:auto;" onchange="this.form.submit()">
+      <option value="">All states</option>
+      {% for s in states %}<option value="{{ s.id }}" {% if s.id == selected_state_id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </form>
+  <table>
+    <tr><th>Name</th><th>Code</th><th>Status</th><th>Certification</th><th>Publication</th><th></th></tr>
+    {% for d in districts %}
+    <tr>
+      <td>{{ d.name }}</td>
+      <td class="mono">{{ d.code }}</td>
+      <td><span class="pill neutral">{{ d.status }}</span></td>
+      <td>
+        <span class="pill {{ 'ok' if d.certification_status == 'CERTIFIED' else ('bad' if d.certification_status == 'FAILED' else 'warn') }}">{{ d.certification_status }}</span>
+      </td>
+      <td><span class="pill {{ 'ok' if d.publication_status == 'PUBLISHED' else 'neutral' }}">{{ d.publication_status }}</span></td>
+      <td>
+        {% if can_manage %}
+        <form class="inline" method="post" action="/ops/districts/{{ d.id }}/refresh-certification">
+          <button class="ghost" type="submit">Refresh certification</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if can_manage %}
+<div class="panel">
+  <h2>Add district</h2>
+  <form class="inline" method="post" action="/ops/districts/add">
+    {% if states|length == 1 %}
+    <input type="hidden" name="state_id" value="{{ states[0].id }}">
+    <span class="muted">{{ states[0].name }}</span>
+    {% else %}
+    <select name="state_id" required style="width:auto;">
+      {% for s in states %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <input type="text" name="name" placeholder="District name" required>
+    <input type="text" name="code" placeholder="Code" required style="width:100px;">
+    <button type="submit">Add district</button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}

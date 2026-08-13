@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ source.name }} &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap;">
+    <h2 style="margin:0;">{{ source.name }}</h2>
+    <span class="pill {{ 'ok' if source.lifecycle_status in ('CERTIFIED','ACTIVE') else ('bad' if source.lifecycle_status == 'RETIRED' else 'neutral') }}">{{ source.lifecycle_status }}</span>
+    <span class="mono muted">v{{ source.current_version }}</span>
+  </div>
+  <table style="margin-top:12px;">
+    <tr><th style="width:150px;">URL</th><td class="mono">{{ source.url }}</td></tr>
+    <tr><th>Department</th><td>{{ source.department }}</td></tr>
+    <tr><th>Discovery method</th><td>{{ source.discovery_method or '—' }}</td></tr>
+    <tr><th>State / District</th><td>{{ source.state_name or 'state-wide' }} / {{ source.district_name or '—' }}</td></tr>
+    <tr><th>Certification status</th>
+        <td><span class="pill {{ 'ok' if source.certification_status == 'CERTIFIED' else ('bad' if source.certification_status == 'FAILED' else 'neutral') }}">{{ source.certification_status }}</span></td></tr>
+  </table>
+</div>
+
+{% if can_manage or can_certify %}
+<div class="panel">
+  <h2>Actions</h2>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    {% if can_manage %}
+    <form method="post" action="/ops/sources/{{ source.id }}/test">
+      <button class="ghost" type="submit">Test source (connectivity)</button>
+    </form>
+    {% endif %}
+    {% if can_certify %}
+    <form method="post" action="/certification/sources/{{ source.id }}/certify">
+      <button class="ghost" type="submit">Run full certification</button>
+    </form>
+    {% endif %}
+    {% if can_manage %}
+    <form method="post" action="/ops/sources/{{ source.id }}/clone">
+      <button class="ghost" type="submit">Clone</button>
+    </form>
+    <form method="post" action="/ops/sources/{{ source.id }}/retire" onsubmit="return confirm('Retire this source? It will stop being crawled.');">
+      <input type="hidden" name="reason" value="retired via admin UI">
+      <button class="danger" type="submit">Retire</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if can_manage %}
+<div class="panel">
+  <h2>Edit</h2>
+  <p class="muted">Every edit creates a new version; nothing is overwritten.</p>
+  <form method="post" action="/ops/sources/{{ source.id }}/edit">
+    <div class="grid cols-4">
+      <div><label class="muted" style="font-size:12px;">Name</label><input type="text" name="name" value="{{ source.name }}"></div>
+      <div><label class="muted" style="font-size:12px;">Department</label><input type="text" name="department" value="{{ source.department }}"></div>
+      <div><label class="muted" style="font-size:12px;">URL</label><input type="text" name="url" value="{{ source.url }}"></div>
+      <div>
+        <label class="muted" style="font-size:12px;">Discovery method</label>
+        <select name="discovery_method">
+          <option value="">unchanged</option>
+          {% for m in discovery_methods %}<option value="{{ m }}" {% if m == source.discovery_method %}selected{% endif %}>{{ m.replace('_',' ') }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:8px; display:flex; gap:8px;">
+      <input type="text" name="reason" placeholder="reason for this change (required)" required style="flex:1;">
+      <button type="submit">Save as new version</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Version history</h2>
+  <table>
+    <tr><th>Version</th><th>Name</th><th>URL</th><th>Changed by</th><th>When</th><th>Reason</th></tr>
+    {% for v in versions %}
+    <tr>
+      <td class="mono">v{{ v.version }}</td>
+      <td>{{ v.name }}</td>
+      <td class="mono">{{ v.url }}</td>
+      <td>{{ v.changed_by }}</td>
+      <td class="mono">{{ v.changed_at }}</td>
+      <td>{{ v.change_reason or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Certification history</h2>
+  {% if certifications %}
+  <table>
+    <tr><th>When</th><th>Result</th><th>Connect</th><th>Discover</th><th>Download</th><th>Stable</th><th>Authentic</th></tr>
+    {% for c in certifications %}
+    <tr>
+      <td class="mono">{{ c.started_at }}</td>
+      <td><span class="pill {{ 'ok' if c.result == 'CERTIFIED' else ('bad' if c.result == 'FAILED' else 'warn') }}">{{ c.result }}</span></td>
+      <td>{{ 'ok' if c.connectivity_ok else 'fail' }}</td>
+      <td>{{ 'ok' if c.discovery_ok else 'fail' }}</td>
+      <td>{{ 'ok' if c.download_ok else 'fail' }}</td>
+      <td>{{ 'ok' if c.stability_ok else 'fail' }}</td>
+      <td>{{ 'ok' if c.authenticity_ok else 'fail' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No certification runs yet.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

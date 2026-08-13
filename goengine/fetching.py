@@ -151,3 +151,8 @@ class OfflineFetcher:
             return self.responses[url]
         except KeyError:
             raise FetchError(f"no offline response registered for {url}") from None
+
+    def close(self) -> None:
+        """No-op: nothing to release. Present so callers can treat every
+        Fetcher uniformly (e.g. `finally: fetcher.close()`) without a
+        HttpFetcher-specific isinstance check."""

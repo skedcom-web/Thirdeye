@@ -77,11 +77,12 @@
       <td>{{ (c.department_bucket or '?').replace('_',' ') }}</td>
       <td>{{ c.language or '?' }}</td>
       <td>
+        {% if can_review %}
         <form class="inline" method="post" action="/golden/add">
           <input type="hidden" name="document_id" value="{{ c.document_id }}">
-          <input type="text" name="added_by" placeholder="your name" required style="width:120px;">
           <button class="ghost" type="submit">Add to golden set</button>
         </form>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

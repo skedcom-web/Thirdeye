@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from goengine.certification import golden
 from goengine.workbench.app import create_app, get_fetcher
+from tests.conftest import login_as
 
 
 @pytest.fixture
@@ -16,7 +17,9 @@ def client(conn, settings, parsed_documents, fetcher):
     # override the route's real-network HttpFetcher with the same
     # OfflineFetcher already serving `parsed_documents`.
     app.dependency_overrides[get_fetcher] = lambda: fetcher
-    return TestClient(app)
+    test_client = TestClient(app)
+    login_as(test_client, conn)
+    return test_client
 
 
 # ---------------------------------------------------------------------------
@@ -30,23 +33,21 @@ def test_golden_list_page_renders(client):
 
 
 def test_add_to_golden_set_via_http(client, conn):
-    response = client.post(
-        "/golden/add", data={"document_id": 1, "added_by": "alex"}, follow_redirects=False
-    )
+    response = client.post("/golden/add", data={"document_id": 1}, follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"] == "/golden/1"
 
     row = conn.execute("SELECT added_by FROM golden_documents WHERE document_id = 1").fetchone()
-    assert row["added_by"] == "alex"
+    assert row["added_by"] == "admin"  # the authenticated session, not a form field
 
 
 def test_add_nonexistent_document_returns_400(client):
-    response = client.post("/golden/add", data={"document_id": 99999, "added_by": "alex"})
+    response = client.post("/golden/add", data={"document_id": 99999})
     assert response.status_code == 400
 
 
 def test_annotate_via_http_shows_machine_suggestion_and_saves(client, conn):
-    client.post("/golden/add", data={"document_id": 1, "added_by": "alex"})
+    client.post("/golden/add", data={"document_id": 1})
 
     detail = client.get("/golden/1")
     assert detail.status_code == 200
@@ -55,20 +56,21 @@ def test_annotate_via_http_shows_machine_suggestion_and_saves(client, conn):
 
     response = client.post(
         "/golden/1/annotate",
-        data={"field_name": "go_number", "value": "G.O.(Ms) No.123", "annotator": "alex"},
+        data={"field_name": "go_number", "value": "G.O.(Ms) No.123"},
         follow_redirects=False,
     )
     assert response.status_code == 303
 
     annotations = golden.get_annotations(conn, 1)
     assert annotations["go_number"]["value"] == "G.O.(Ms) No.123"
+    assert annotations["go_number"]["annotator"] == "admin"
 
 
 def test_annotate_absent_checkbox_stores_none(client, conn):
-    client.post("/golden/add", data={"document_id": 1, "added_by": "alex"})
+    client.post("/golden/add", data={"document_id": 1})
     client.post(
         "/golden/1/annotate",
-        data={"field_name": "scheme_name", "value": "should be ignored", "annotator": "alex", "absent": "1"},
+        data={"field_name": "scheme_name", "value": "should be ignored", "absent": "1"},
     )
     annotations = golden.get_annotations(conn, 1)
     assert annotations["scheme_name"]["value"] is None

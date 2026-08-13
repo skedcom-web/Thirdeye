@@ -1,9 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Audit trail &middot; Thirdeye{% endblock %}
 {% block content %}
+{% set entity_types = ['source', 'discovered_document', 'document', 'extraction', 'go_record',
+                        'certification_benchmark_run', 'state', 'district', 'department', 'user',
+                        'certification_job', 'golden_document'] %}
 <div class="panel">
-  <h2>Audit trail &mdash; newest first</h2>
-  <p class="muted">Append-only. Entries cannot be edited or deleted once written.</p>
+  <h2>Module 10 &mdash; Audit &amp; Governance Center</h2>
+  <p class="muted">Append-only. Entries cannot be edited or deleted once written -- every administrative action in the system lands here.</p>
+  <form class="inline" method="get" action="/audit" style="margin-bottom:12px;">
+    <select name="action" style="width:auto;" onchange="this.form.submit()">
+      <option value="">All actions</option>
+      {% for a in actions %}<option value="{{ a }}" {% if a == selected_action %}selected{% endif %}>{{ a }}</option>{% endfor %}
+    </select>
+    <select name="entity_type" style="width:auto;" onchange="this.form.submit()">
+      <option value="">All entity types</option>
+      {% for t in entity_types %}<option value="{{ t }}" {% if t == selected_entity_type %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+    {% if selected_action or selected_entity_type %}<a href="/audit">clear filters</a>{% endif %}
+  </form>
   <table>
     <tr><th>#</th><th>When</th><th>Actor</th><th>Action</th><th>Entity</th>
         <th>Field</th><th>Before</th><th>After</th><th>Detail</th></tr>

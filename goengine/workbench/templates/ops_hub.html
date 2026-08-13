@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Administration &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Administration</h2>
+  <p class="muted">Everything below is operable without a command line, per the Operations Control Center's core principle.</p>
+  <div class="grid cols-4">
+    <a class="stat" href="/ops/states" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 1</div><div style="font-weight:600; margin-top:4px;">States</div>
+    </a>
+    <a class="stat" href="/ops/districts" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 2</div><div style="font-weight:600; margin-top:4px;">Districts</div>
+    </a>
+    <a class="stat" href="/ops/departments" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 3</div><div style="font-weight:600; margin-top:4px;">Departments</div>
+    </a>
+    <a class="stat" href="/ops/sources" style="text-decoration:none; color:inherit;">
+      <div class="l">Modules 4-5</div><div style="font-weight:600; margin-top:4px;">Source Registry</div>
+    </a>
+    <a class="stat" href="/ops/jobs" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 6</div><div style="font-weight:600; margin-top:4px;">Certification Jobs</div>
+    </a>
+    <a class="stat" href="/ops/review" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 7</div><div style="font-weight:600; margin-top:4px;">Review Workbench</div>
+    </a>
+    <a class="stat" href="/ops/publication" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 8</div><div style="font-weight:600; margin-top:4px;">Publication Control</div>
+    </a>
+    <a class="stat" href="/ops/dashboard" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 9</div><div style="font-weight:600; margin-top:4px;">Operations Dashboard</div>
+    </a>
+    <a class="stat" href="/audit" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 10</div><div style="font-weight:600; margin-top:4px;">Audit &amp; Governance</div>
+    </a>
+    <a class="stat" href="/ops/users" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 11</div><div style="font-weight:600; margin-top:4px;">Users &amp; Roles</div>
+    </a>
+    <a class="stat" href="/ops/health" style="text-decoration:none; color:inherit;">
+      <div class="l">Module 12</div><div style="font-weight:600; margin-top:4px;">System Health</div>
+    </a>
+  </div>
+</div>
+
+{% endblock %}

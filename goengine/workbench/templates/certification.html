@@ -28,9 +28,11 @@
       <td class="mono">{{ s.last_crawl_success_at or '—' }}</td>
       <td class="mono">{{ s.last_crawl_failure_at or '—' }}</td>
       <td>
+        {% if can_certify %}
         <form method="post" action="/certification/sources/{{ s.id }}/certify">
           <button class="ghost" type="submit">Run certification</button>
         </form>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -115,9 +117,11 @@
   <p class="muted">No certification benchmark has run yet.</p>
   {% endif %}
 
+  {% if can_certify %}
   <form method="post" action="/certification/benchmark/run" style="margin-top:12px;">
     <button type="submit">Run certification benchmark now</button>
   </form>
+  {% endif %}
   {% if latest_summary and latest_summary.skipped_incomplete %}
   <p class="muted" style="margin-top:8px;">{{ latest_summary.skipped_incomplete }} golden document(s) skipped: not yet fully annotated.</p>
   {% endif %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Publication Control &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div class="grid cols-4" style="margin-bottom:16px;">
+  <div class="stat"><div class="n">{{ coverage.districts_published }}/{{ coverage.districts_total }}</div><div class="l">Districts published</div></div>
+  <div class="stat"><div class="n">{{ coverage.departments_published }}/{{ coverage.departments_total }}</div><div class="l">Departments published</div></div>
+</div>
+
+<div class="panel">
+  <h2>Module 8 &mdash; Publish districts</h2>
+  <p class="muted">Governance: no publication without certification, without approval, without provenance.</p>
+  <table>
+    <tr><th>District</th><th>Certification</th><th>Publication</th><th></th></tr>
+    {% for d in districts %}
+    <tr>
+      <td>{{ d.name }}</td>
+      <td><span class="pill {{ 'ok' if d.certification_status == 'CERTIFIED' else 'neutral' }}">{{ d.certification_status }}</span></td>
+      <td><span class="pill {{ 'ok' if d.publication_status == 'PUBLISHED' else 'neutral' }}">{{ d.publication_status }}</span></td>
+      <td>
+        {% if can_publish %}
+        {% if d.publication_status == 'PUBLISHED' %}
+        <form class="inline" method="post" action="/ops/publication/districts/{{ d.id }}/unpublish">
+          <input type="text" name="reason" placeholder="reason" required style="width:140px;">
+          <button class="danger" type="submit">Unpublish</button>
+        </form>
+        {% else %}
+        <form method="post" action="/ops/publication/districts/{{ d.id }}/publish">
+          <button type="submit">Publish</button>
+        </form>
+        {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Publish departments</h2>
+  <table>
+    <tr><th>Department</th><th>Publication</th><th></th></tr>
+    {% for dept in departments %}
+    <tr>
+      <td>{{ dept.name }}{% if not dept.bucket_key %}<div class="muted" style="font-size:11px;">no acquisition bucket &mdash; cannot be published</div>{% endif %}</td>
+      <td><span class="pill {{ 'ok' if dept.publication_status == 'PUBLISHED' else 'neutral' }}">{{ dept.publication_status }}</span></td>
+      <td>
+        {% if can_publish and dept.bucket_key %}
+        {% if dept.publication_status == 'PUBLISHED' %}
+        <form class="inline" method="post" action="/ops/publication/departments/{{ dept.id }}/unpublish">
+          <input type="text" name="reason" placeholder="reason" required style="width:140px;">
+          <button class="danger" type="submit">Unpublish</button>
+        </form>
+        {% else %}
+        <form method="post" action="/ops/publication/departments/{{ dept.id }}/publish">
+          <button type="submit">Publish</button>
+        </form>
+        {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% endblock %}
