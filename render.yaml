@@ -7,5 +7,11 @@ services:
     envVars:
       - key: THIRDEYE_ENV
         value: production
+      - key: THIRDEYE_DATA_DIR
+        value: /var/lib/thirdeye
       - key: PYTHON_VERSION
         value: 3.11.9
+    disk:
+      name: thirdeye-data
+      mountPath: /var/lib/thirdeye
+      sizeGB: 1
