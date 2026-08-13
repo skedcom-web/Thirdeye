@@ -17,7 +17,7 @@
 <div class="occ-page-header">
   <div>
     <div class="occ-page-kicker">Operations Control Center</div>
-    <h1 class="occ-page-title">Executive Dashboard</h1>
+    <h1 class="occ-page-title">Operations Dashboard</h1>
   </div>
   <div class="action-strip">
     <a href="/ops/jobs" class="btn-lg btn-primary occ-btn" id="dash-run-extraction-btn">▶ Run Extraction</a>
@@ -78,7 +78,7 @@
           </span>
         </div>
         <div class="kpi-n">{{ summary.certified_sources }}</div>
-        <div class="kpi-l">Certified Sources</div>
+        <div class="kpi-l">Certified sources</div>
       </div>
       <div class="kpi-card occ-kpi">
         <div class="kpi-top">
@@ -164,6 +164,8 @@
         from <a href="/certification">benchmark #{{ summary.latest_benchmark_run_id }}</a>
       </span>
     </div>
+    {% else %}
+    <p class="muted" style="margin-top:8px;">No certification benchmark has run yet. <a href="/ops/jobs">Start a job</a> or <a href="/certification">run a benchmark</a>.</p>
     {% endif %}
   </div>
 
