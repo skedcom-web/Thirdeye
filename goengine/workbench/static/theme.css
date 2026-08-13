@@ -233,6 +233,14 @@ header.app-header nav { display: flex; align-items: center; gap: 18px; margin-le
 header.app-header a { color: var(--header-ink); text-decoration: none; font-size: 13px; }
 header.app-header a:hover { color: var(--header-ink-hover); }
 header.app-header .user-chip { color: var(--header-ink); font-size: 12px; }
+header.app-header button.ghost {
+  color: var(--header-ink);
+  border: 1px solid color-mix(in srgb, var(--header-ink) 45%, transparent);
+}
+header.app-header button.ghost:hover {
+  color: var(--header-ink-hover);
+  border-color: var(--header-ink-hover);
+}
 main.app-main { padding: 20px; max-width: 1500px; margin: 0 auto; }
 
 .panel {

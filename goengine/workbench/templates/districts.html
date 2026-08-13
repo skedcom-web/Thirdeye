@@ -39,16 +39,19 @@
   <form class="inline" method="post" action="/ops/districts/add">
     {% if states|length == 1 %}
     <input type="hidden" name="state_id" value="{{ states[0].id }}">
-    <span class="muted">{{ states[0].name }}</span>
+    <span class="muted" style="margin-right:8px;">State: <strong>{{ states[0].name }}</strong></span>
     {% else %}
     <select name="state_id" required style="width:auto;">
       {% for s in states %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
     </select>
     {% endif %}
-    <input type="text" name="name" placeholder="District name" required>
-    <input type="text" name="code" placeholder="Code" required style="width:100px;">
+    <input type="text" name="name" placeholder="District name (e.g. Chennai)" required>
+    <input type="text" name="code" placeholder="Code (e.g. CHN)" required style="width:140px;">
     <button type="submit">Add district</button>
   </form>
+  <p class="muted" style="margin-top:12px; font-size:12px; line-height:1.4;">
+    💡 <strong>Tip on District Codes:</strong> Use standard 2 or 3-letter abbreviations (e.g., <code>CHN</code> for Chennai, <code>CBE</code> for Coimbatore, <code>MDU</code> for Madurai). These are used to catalog government order records by geographic location.
+  </p>
 </div>
 {% endif %}
 
