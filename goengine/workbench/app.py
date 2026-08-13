@@ -30,6 +30,7 @@ from ..extraction import metadata as meta
 from ..extraction.text import load_pages
 from ..fetching import FetchError
 from ..operations import auth
+from ..operations import departments as ops_departments
 from .deps import (
     Config,
     Conn,
@@ -58,17 +59,26 @@ def _post_login_destination(user: auth.User) -> str:
 
 
 def _landing_stats(conn: sqlite3.Connection, settings: Settings) -> dict:
-    """Real numbers for the landing page -- reuses Module 9's operations
-    summary (same source of truth as the admin dashboard) rather than a
-    second set of queries that could drift out of sync with it."""
+    """Real numbers for the (citizen-facing) landing page -- reuses Module
+    9's operations summary and Module 7's review counts (the same sources
+    of truth as the admin dashboard and /api/verified) rather than a second
+    set of queries that could drift out of sync with them.
+
+    Phase 3.2's blueprint asks for citizen-friendly metrics, not technical
+    ones -- "records available" here is deliberately the *approved* count
+    (what /api/verified actually serves), not the raw ingested count, since
+    that is the number a citizen visitor can actually go look at."""
     from ..operations import dashboard as ops_dashboard
 
     summary = ops_dashboard.operations_summary(conn, settings)
+    review_counts = review.counts_by_status(conn)
     return {
         "documents_processed": summary["documents_processed"],
         "projects_published": summary["publication_coverage"]["districts_published"],
         "certified_sources": summary["certified_sources"],
         "districts_covered": summary["active_districts"],
+        "records_available": review_counts[review.STATUS_APPROVED],
+        "departments_tracked": len(ops_departments.list_departments(conn)),
         "summary": summary,
     }
 

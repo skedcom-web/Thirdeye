@@ -1,4 +1,4 @@
-# Thirdeye — GO Intelligence Engine (Phase 1 + 2 + 3 + 3.1)
+# Thirdeye — GO Intelligence Engine (Phase 1 + 2 + 3 + 3.1 + 3.2)
 
 An evidence-first acquisition pipeline for Tamil Nadu Government Orders.
 
@@ -25,7 +25,12 @@ experience** on top of the same Phase 1-3 engines: a "Third Eye" brand and
 role-based routing, an Executive Command Center restyle of the Operations
 Dashboard, and deployment-readiness config cleanup — no new backend logic,
 no Firebase/Firestore migration (that is explicitly the next activity, not
-part of this one).
+part of this one). Phase 3.2 revamps the public landing page from a
+technology-focused platform page into a **citizen-focused public-awareness
+page** — the same page, same route, same underlying data, rewritten so a
+visitor with no interest in "certification engines" or "source registries"
+understands in seconds what the site is for. Admin platform, authentication,
+and every backend module are unchanged.
 
 ---
 
@@ -262,7 +267,7 @@ built and tested (`operations.dashboard.operations_summary`, `audit.trail`,
 | Design system (6 themes) | `static/theme.css` | Light/Dark/Glass mandatory + Aurora/Emerald/Midnight; CSS custom properties per `[data-theme]`, no build step |
 | Third Eye mark | `templates/_partials.html` (`mark()` macro) | An original SVG (ring + node graph), not the literal OrchestrAI asset — avoids reproducing third-party wordmark/trademark, stays theme-adaptive via CSS-var gradient stops |
 | Theme persistence | `static/theme.js` | `localStorage`, applied via an inline pre-paint script (`theme_init_script()` macro) to avoid a flash of the wrong theme |
-| Public landing page | `templates/landing.html`, `GET /` | No login required; hero, evidence-flow, live metrics pulled from real `operations_summary()` data, not mocked |
+| Public landing page | `templates/landing.html`, `GET /` | No login required. Phase 3.1's version was technology-focused (hero pipeline diagram, live OCC metrics); **Phase 3.2 replaced its content** with a citizen-focused page — see the [Phase 3.2 section](#phase-32--citizen-focused-landing-page-workbenchtemplateslandinghtml) below |
 | Login / first-run setup | `templates/login.html`, `templates/setup.html` | Same `auth.py` session logic as Phase 3 (untouched) — only the template and post-login redirect changed |
 | Role-based post-login routing | `workbench/app.py` (`_post_login_destination`) | `reviewer` → Review Workbench, `auditor` → Audit Center, everyone else → Operations Dashboard |
 | `/admin` entry point | `workbench/app.py` | Logged-in shortcut that 303s to the role-appropriate page above |
@@ -271,6 +276,35 @@ built and tested (`operations.dashboard.operations_summary`, `audit.trail`,
 The Phase 1 dashboard (verification queue) moved from `/` to `/workbench`
 so `/` could become the public landing page; every protected page still
 requires the same session auth Phase 3 built.
+
+### Phase 3.2 — Citizen-focused landing page (`workbench/templates/landing.html`)
+
+A content and framing rewrite of the same `GET /` route Phase 3.1 built — no
+new routes, no backend changes. Phase 3.1's landing page was written for
+someone evaluating the platform (certification engine, source registry, live
+OCC numbers); Phase 3.2's blueprint asked for a page a citizen with no
+technical interest can understand in five seconds, so all of that moved back
+to where it belongs — the admin platform, which Phase 3.1/3.2 leave
+untouched — and the public page now leads with what a citizen actually
+wants: has anything been officially announced for my area, and what happened
+to it.
+
+| Piece | Notes |
+|---|---|
+| Hero | Citizen framing ("Find out what was promised. Find out what happened."), an illustrative Tamil Nadu map (`_partials.html`'s `tn_map()` macro, now shared between the hero and the Coverage section instead of duplicated) with floating category chips (Roads/Schools/Hospitals/Water/Agriculture) |
+| Citizen metrics | Public Records Available, Departments Tracked, Districts Covered, Official Sources Tracked — all four still read from real functions (`operations_summary`, `review.counts_by_status`, `departments.list_departments`), **not** the technical metrics (accuracy score, job queue depth, etc.) Phase 3.1's page showed |
+| "What Can You Find" / "Citizen Benefits" | Category and benefit cards replace the old "Under The Hood" module list (Source Registry, Certification Engine, etc.) — that content wasn't removed from the product, just from the *public* page; it's still the entire Operations Control Center |
+| "Search By Area" | An explicitly illustrative flow (Tamil Nadu → District → Locality → Available Records) with the last two steps visually muted and a stated "on our roadmap" caption — deliberately not a working control, per the blueprint's "do not expose unfinished features" instruction. There is no location-based citizen search built yet |
+| Nav | Trimmed to the blueprint's exact menu: Home, Explore, How It Works, Coverage, About, Login |
+
+**One deliberate deviation from the blueprint's literal text:** the fourth
+citizen metric is specified as "👥 Citizens Connected." No citizen-account or
+visit tracking exists anywhere in this codebase (there are no citizen
+accounts at all yet — Citizen is still a *future* role per Phase 3.1's
+README notes), so showing a number there would mean fabricating it. That
+would contradict the project's own zero-hallucination principle applied to
+its own marketing page. The fourth metric shows **Official Sources
+Tracked** (a real `certified_sources` count) instead.
 
 ---
 
@@ -518,12 +552,34 @@ What Phase 3 does **not** claim:
 |---|---|
 | Third Eye brand (icon only, no wordmark/tagline reused) | ✅ original SVG mark, not the reference asset |
 | 6-theme system (Light/Dark/Glass + Aurora/Emerald/Midnight) | ✅ all six pass WCAG AA contrast (text ≥4.5:1, primary buttons ≥6:1), verified against the literal CSS token values |
-| Public landing page | ✅ hero, evidence-flow, live metrics wired to real data — no mocked numbers |
+| Public landing page | ✅ shipped wired to real data; **content later replaced by Phase 3.2** to be citizen-focused instead of technology-focused — see the Phase 3.2 table below |
 | Redesigned login + role-based routing | ✅ browser-verified for `platform_admin`/`reviewer`/`auditor` destinations |
 | Executive Command Center restyle | ✅ KPI cards, progress rings, alerts, recent-activity feed — all composed from existing Phase 2/3 data functions |
 | Responsive (desktop/tablet/mobile) | ✅ spot-checked at 375/768/1280px; no horizontal overflow, mobile nav collapses correctly |
 | Accessibility | ⚠️ **partial** — focus-visible outlines, `aria-pressed`/`aria-expanded` states, and labeled form fields are in place and were checked; this was a manual spot-check, not a full automated audit (e.g. axe-core) or a screen-reader pass |
 | Deployment readiness prep | ⚠️ **prep only, not a migration** — see below; Firebase/Firestore migration is explicitly the next activity, not part of Phase 3.1 |
+
+Mobile-first pass (added after initial 3.1 delivery, in response to explicit
+feedback that most users will be mobile-only): the admin header now
+collapses into a hamburger menu instead of wrapping across multiple lines,
+every existing admin table scrolls inside its own panel instead of
+overflowing the page (`overflow-x: auto` on `.panel` — no table markup
+changed), inputs are 16px (iOS Safari zooms on focus below that), and
+buttons/inputs meet the 44px touch-target minimum.
+
+### Phase 3.2
+
+| Criterion | Status |
+|---|---|
+| Citizen value proposition understood within 5 seconds | ✅ hero leads with "Find out what was promised. Find out what happened." — no certification/OCR/registry language above the fold, or anywhere on the page |
+| Feels modern and premium | ✅ glassmorphism (Glass theme), mesh-gradient hero/CTA backgrounds, floating category icons, count-up metrics, hover states — reusing Phase 3.1's design system, no new visual language invented |
+| Mobile experience is excellent | ✅ built on Phase 3.1's mobile-first shell (hamburger nav, 44px touch targets, no horizontal scroll); verified at 375px with zero page overflow |
+| Admin platform unchanged | ✅ no file under `operations/`, `certification/`, or any admin template touched |
+| Existing authentication continues working | ✅ `auth.py` untouched; browser-verified login still lands on the correct role-routed admin page |
+| No backend business logic changes | ✅ `_landing_stats()` gained two derived fields (`records_available`, `departments_tracked`), both simple reads through existing functions (`review.counts_by_status`, `departments.list_departments`) — no new tables, no new write paths |
+| Communicates Why/What/How/Trust/Citizen Benefit | ✅ "Why Third Eye Exists," "What Can You Find," "How It Works," "Built On Official Information," "Why Use Third Eye" sections map directly to each |
+| "Citizens Connected" metric | ❌ **deliberately not implemented as specified** — no citizen accounts or visit tracking exist to honestly report a number; see the Phase 3.2 architecture note above for the substitution made instead |
+| "Explore My Area" / location search | ⚠️ **UI only, not a working feature** — the blueprint explicitly asked for this ("future-ready architecture. Do not expose unfinished features"); the CTA scrolls to an illustrative, clearly-labeled roadmap diagram, not a functional search |
 
 ### Before this is exposed beyond localhost
 

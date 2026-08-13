@@ -33,6 +33,19 @@
 {# Progress ring: an SVG donut showing done/total, no JS required -- the
    dash offset is computed here in Jinja from the same numbers the KPI
    cards already display. #}
+{# Illustrative South India outline, Tamil Nadu highlighted -- used by both
+   the citizen landing page's hero visual and its Coverage section, so the
+   markup lives in one place instead of being duplicated per use. Not a
+   surveyed map; approximate shapes for orientation only. #}
+{% macro tn_map() %}
+<svg viewBox="0 0 360 260" role="img" aria-hidden="true">
+  <g><polygon class="state-outline" points="70,20 170,10 200,60 160,90 90,80" /><text class="state-label" x="120" y="52">Karnataka</text></g>
+  <g><polygon class="state-outline" points="200,60 300,50 320,110 260,140 160,90" /><text class="state-label" x="235" y="90">Andhra Pradesh</text></g>
+  <g><polygon class="state-outline highlighted" points="90,80 160,90 260,140 220,230 120,220 60,150" /><text class="state-label highlighted" x="145" y="165">Tamil Nadu</text></g>
+  <g><polygon class="state-outline" points="60,150 90,80 70,20 30,60 20,140" /><text class="state-label" x="35" y="120">Kerala</text></g>
+</svg>
+{% endmacro %}
+
 {% macro progress_ring(done, total, label, size=84) %}
 {% set r = (size / 2) - 8 %}
 {% set c = 2 * 3.14159265 * r %}
