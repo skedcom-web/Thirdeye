@@ -87,71 +87,8 @@ def seed_database():
 
     # Insert Official TN Sources
     print("Seeding official Tamil Nadu government websites...")
-    sources = [
-        {
-            "name": "Tamil Nadu Government Portal",
-            "department": "All Departments",
-            "url": "https://www.tn.gov.in",
-            "source_type": "go_portal",
-            "adapter": "generic_links"
-        },
-        {
-            "name": "Tamil Nadu GO Portal",
-            "department": "General Administration",
-            "url": "https://cms.tn.gov.in/go-search",
-            "source_type": "go_portal",
-            "adapter": "tn_go_portal"
-        },
-        {
-            "name": "Health and Family Welfare Department",
-            "department": "Health and Family Welfare",
-            "url": "https://cms.tn.gov.in/hfw",
-            "source_type": "department_site",
-            "adapter": "generic_links"
-        },
-        {
-            "name": "School Education Department",
-            "department": "School Education",
-            "url": "https://cms.tn.gov.in/school-education",
-            "source_type": "department_site",
-            "adapter": "generic_links"
-        },
-        {
-            "name": "Rural Development Department",
-            "department": "Rural Development and Panchayat Raj",
-            "url": "https://cms.tn.gov.in/rd-pr",
-            "source_type": "department_site",
-            "adapter": "generic_links"
-        },
-        {
-            "name": "Public Works Department",
-            "department": "Public Works",
-            "url": "https://cms.tn.gov.in/pwd",
-            "source_type": "department_site",
-            "adapter": "generic_links"
-        },
-        {
-            "name": "Agriculture and Farmers Welfare",
-            "department": "Agriculture",
-            "url": "https://www.tnagrisnet.tn.gov.in",
-            "source_type": "department_site",
-            "adapter": "generic_links"
-        },
-        {
-            "name": "Highways Department",
-            "department": "Highways",
-            "url": "https://www.tnhighways.gov.in",
-            "source_type": "department_site",
-            "adapter": "generic_links"
-        },
-        {
-            "name": "Municipal Administration and Water Supply",
-            "department": "Municipal Administration",
-            "url": "https://www.tn.gov.in/maws",
-            "source_type": "department_site",
-            "adapter": "generic_links"
-        }
-    ]
+    from . import registry
+    sources = registry.SEED_SOURCES
 
     inserted_sources = 0
     for s in sources:
@@ -181,8 +118,8 @@ def seed_database():
                 )
                 inserted_sources += 1
             else:
-                # Update existing source with state_id
-                conn.execute("UPDATE sources SET state_id = ? WHERE id = ?", (state_id, existing["id"]))
+                # Update existing source with state_id and new URL
+                conn.execute("UPDATE sources SET state_id = ?, url = ?, adapter = ? WHERE id = ?", (state_id, s["url"], s["adapter"], existing["id"]))
         except Exception as e:
             print(f"Error seeding source {s['name']}: {e}")
 

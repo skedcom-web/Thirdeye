@@ -99,19 +99,15 @@ def _seed_tamil_nadu(conn: sqlite3.Connection) -> None:
             (state_id, name, code, "CONFIGURED", "PENDING", "NOT_PUBLISHED", now_ts)
         )
 
-    # Insert 9 Official Sources
-    sources = [
-        ("Tamil Nadu Government Portal", "All Departments", "https://www.tn.gov.in", "go_portal", "generic_links"),
-        ("Tamil Nadu GO Portal", "General Administration", "https://cms.tn.gov.in/go-search", "go_portal", "tn_go_portal"),
-        ("Health and Family Welfare Department", "Health and Family Welfare", "https://cms.tn.gov.in/hfw", "department_site", "generic_links"),
-        ("School Education Department", "School Education", "https://cms.tn.gov.in/school-education", "department_site", "generic_links"),
-        ("Rural Development Department", "Rural Development and Panchayat Raj", "https://cms.tn.gov.in/rd-pr", "department_site", "generic_links"),
-        ("Public Works Department", "Public Works", "https://cms.tn.gov.in/pwd", "department_site", "generic_links"),
-        ("Agriculture and Farmers Welfare", "Agriculture", "https://www.tnagrisnet.tn.gov.in", "department_site", "generic_links"),
-        ("Highways Department", "Highways", "https://www.tnhighways.gov.in", "department_site", "generic_links"),
-        ("Municipal Administration and Water Supply", "Municipal Administration", "https://www.tn.gov.in/maws", "department_site", "generic_links")
-    ]
-    for name, department, url, src_type, adapter in sources:
+    # Insert Official Sources from registry
+    from . import registry
+    for spec in registry.SEED_SOURCES:
+        name = spec["name"]
+        department = spec["department"]
+        url = spec["url"]
+        src_type = spec["source_type"]
+        adapter = spec["adapter"]
+        
         existing = conn.execute("SELECT id FROM sources WHERE name = ?", (name,)).fetchone()
         if existing is None:
             host = url.split("//")[-1].split("/")[0]
