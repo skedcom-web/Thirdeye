@@ -1,0 +1,50 @@
+{# Third Eye mark: an original circular "eye" symbol -- an incomplete ring
+   (evoking both an eye's outline and the OrchestrAI-style circular swoosh)
+   around a small node graph (evidence connected to evidence). Gradient ID
+   is parameterized so the mark can be included more than once per page
+   without SVG id collisions. #}
+{% macro mark(size=32, gradient_id='markGrad') %}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <linearGradient id="{{ gradient_id }}" x1="4" y1="4" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="var(--mark-a)"/>
+      <stop offset="1" stop-color="var(--mark-b)"/>
+    </linearGradient>
+  </defs>
+  <path d="M20 3.5a16.5 16.5 0 1 0 11.7 28.2" stroke="url(#{{ gradient_id }})" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+  <circle cx="20" cy="20" r="5.6" fill="none" stroke="url(#{{ gradient_id }})" stroke-width="1.6"/>
+  <circle cx="20" cy="20" r="2.1" fill="url(#{{ gradient_id }})"/>
+  <circle cx="13.5" cy="14" r="1.7" fill="url(#{{ gradient_id }})"/>
+  <circle cx="27" cy="15.5" r="1.5" fill="url(#{{ gradient_id }})"/>
+  <circle cx="24.5" cy="27" r="1.5" fill="url(#{{ gradient_id }})"/>
+  <path d="M14.7 15.2 18 18M25.7 16.6 22 18.7M23.3 25.6 21 21.6" stroke="url(#{{ gradient_id }})" stroke-width="1.1" stroke-linecap="round"/>
+</svg>
+{% endmacro %}
+
+{# Standard <head> theme-init snippet: applies the saved theme before first
+   paint (avoids a flash of the default theme). Kept as an inline script,
+   not deferred, so it runs before CSS/layout settle. #}
+{% macro theme_init_script() %}
+<script>
+(function(){try{var t=localStorage.getItem("thirdeye-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();
+</script>
+{% endmacro %}
+
+{# Progress ring: an SVG donut showing done/total, no JS required -- the
+   dash offset is computed here in Jinja from the same numbers the KPI
+   cards already display. #}
+{% macro progress_ring(done, total, label, size=84) %}
+{% set r = (size / 2) - 8 %}
+{% set c = 2 * 3.14159265 * r %}
+{% set frac = (done / total) if total else 0 %}
+{% set offset = c * (1 - frac) %}
+<div class="ring-wrap" style="width:{{ size }}px; height:{{ size }}px;">
+  <svg width="{{ size }}" height="{{ size }}" viewBox="0 0 {{ size }} {{ size }}">
+    <circle class="bg" cx="{{ size / 2 }}" cy="{{ size / 2 }}" r="{{ r }}" stroke-width="7"/>
+    <circle class="fg" cx="{{ size / 2 }}" cy="{{ size / 2 }}" r="{{ r }}" stroke-width="7"
+            stroke-dasharray="{{ c }}" stroke-dashoffset="{{ offset }}"/>
+  </svg>
+  <div class="ring-label">{{ done }}/{{ total }}</div>
+</div>
+<div class="ring-caption">{{ label }}</div>
+{% endmacro %}

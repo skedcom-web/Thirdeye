@@ -15,6 +15,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from .. import audit, registry, repository, review
 from ..certification import calibration as calib
@@ -22,7 +23,7 @@ from ..certification import categorize
 from ..certification import failures as failure_intel
 from ..certification import golden, run_full_certification
 from ..certification.sources import certification_summary, certify_source
-from ..config import Settings
+from ..config import COOKIE_SECURE, Settings
 from ..db import init_db
 from ..discovery import crawler
 from ..extraction import metadata as meta
@@ -32,15 +33,44 @@ from ..operations import auth
 from .deps import (
     Config,
     Conn,
+    CurrentUser,
     FetcherDep,
     LoggedIn,
     RequireCertify,
     RequireEscalate,
     RequireReview,
     SESSION_COOKIE,
+    STATIC_DIR,
     get_fetcher,
     templates,
 )
+
+
+def _post_login_destination(user: auth.User) -> str:
+    """Where a role lands after authenticating with no specific `next` in
+    hand -- Phase 3.1's role routing. `/` is the public landing page, so it
+    is never a sensible post-login target."""
+    if user.role == auth.ROLE_REVIEWER:
+        return "/ops/review"
+    if user.role == auth.ROLE_AUDITOR:
+        return "/audit"
+    return "/ops/dashboard"  # platform_admin, state_admin, read_only
+
+
+def _landing_stats(conn: sqlite3.Connection, settings: Settings) -> dict:
+    """Real numbers for the landing page -- reuses Module 9's operations
+    summary (same source of truth as the admin dashboard) rather than a
+    second set of queries that could drift out of sync with it."""
+    from ..operations import dashboard as ops_dashboard
+
+    summary = ops_dashboard.operations_summary(conn, settings)
+    return {
+        "documents_processed": summary["documents_processed"],
+        "projects_published": summary["publication_coverage"]["districts_published"],
+        "certified_sources": summary["certified_sources"],
+        "districts_covered": summary["active_districts"],
+        "summary": summary,
+    }
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -50,8 +80,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # immediately; per-request connections stay short-lived.
     init_db(resolved).close()
 
-    app = FastAPI(title="Thirdeye Operations Control Center", version="0.3.0")
+    app = FastAPI(title="Thirdeye Operations Control Center", version="0.3.1")
     app.state.settings = resolved
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # -----------------------------------------------------------------------
     # Module 11 -- Auth: first-run setup, login, logout
@@ -87,12 +118,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         user = auth.get_user(conn, user_id)
         token = auth.create_session(conn, user)
-        response = RedirectResponse("/", status_code=303)
-        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
+        response = RedirectResponse(_post_login_destination(user), status_code=303)
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", secure=COOKIE_SECURE)
         return response
 
     @app.get("/login", response_class=HTMLResponse)
-    def login_form(request: Request, conn: Conn, next: str = "/"):
+    def login_form(request: Request, conn: Conn, next: str = ""):
         if not auth.has_any_users(conn):
             return RedirectResponse("/setup", status_code=303)
         return templates.TemplateResponse(request, "login.html", {"next": next})
@@ -103,7 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         conn: Conn,
         username: Annotated[str, Form()],
         password: Annotated[str, Form()],
-        next: Annotated[str, Form()] = "/",
+        next: Annotated[str, Form()] = "",
     ):
         user = auth.authenticate(conn, username.strip(), password)
         if user is None:
@@ -112,8 +143,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=401,
             )
         token = auth.create_session(conn, user)
-        response = RedirectResponse(next or "/", status_code=303)
-        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
+        # `next` is only trusted when it's a real deep link a protected page
+        # redirected from (require_login sets it to request.url.path); an
+        # empty value, or literally "/" -- the public landing page -- means
+        # "no specific destination", so route by role instead.
+        destination = next if next and next != "/" else _post_login_destination(user)
+        response = RedirectResponse(destination, status_code=303)
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", secure=COOKIE_SECURE)
         return response
 
     @app.post("/logout")
@@ -126,9 +162,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     # -----------------------------------------------------------------------
-    # Dashboard
+    # Phase 3.1 -- public landing page and role-routed /admin entry point
     # -----------------------------------------------------------------------
     @app.get("/", response_class=HTMLResponse)
+    def landing(request: Request, conn: Conn, config: Config, current_user: CurrentUser):
+        return templates.TemplateResponse(
+            request, "landing.html",
+            {"current_user": current_user, "stats": _landing_stats(conn, config)},
+        )
+
+    @app.get("/admin")
+    def admin_entry(current_user: LoggedIn):
+        return RedirectResponse(_post_login_destination(current_user), status_code=303)
+
+    # -----------------------------------------------------------------------
+    # Validation Workbench dashboard (Phase 1). Lives at /workbench, not /:
+    # `/` is the public landing page (Phase 3.1) and must not require login.
+    # -----------------------------------------------------------------------
+    @app.get("/workbench", response_class=HTMLResponse)
     def dashboard(request: Request, conn: Conn, config: Config, current_user: LoggedIn):
         return templates.TemplateResponse(
             request,
@@ -249,7 +300,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except (review.ReviewError, LookupError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/workbench", status_code=303)
 
     @app.post("/records/{record_id}/reject")
     def post_reject(
@@ -262,7 +313,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             review.reject(conn, record_id, reviewer=current_user.username, reason=reason.strip())
         except (review.ReviewError, LookupError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/workbench", status_code=303)
 
     @app.post("/records/{record_id}/escalate")
     def post_escalate(

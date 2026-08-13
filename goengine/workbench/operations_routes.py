@@ -14,7 +14,7 @@ from typing import Annotated
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from .. import registry
+from .. import audit, registry
 from ..certification.categorize import ALL_BUCKETS
 from ..certification.sources import certification_history
 from ..operations import auth
@@ -487,7 +487,12 @@ def _register_dashboard(app: FastAPI) -> None:
     def operations_dashboard(request: Request, conn: Conn, config: Config, current_user: LoggedIn):
         return templates.TemplateResponse(
             request, "ops_dashboard.html",
-            {"summary": ops_dashboard.operations_summary(conn, config), "current_user": current_user},
+            {
+                "summary": ops_dashboard.operations_summary(conn, config),
+                "alerts": ops_health.system_health(conn, config)["alerts"],
+                "recent_activity": audit.trail(conn, limit=8),
+                "current_user": current_user,
+            },
         )
 
 

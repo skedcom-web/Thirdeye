@@ -1,44 +1,104 @@
 {% extends "base.html" %}
+{% from "_partials.html" import progress_ring %}
 {% block title %}Operations Dashboard &middot; Thirdeye{% endblock %}
 {% block content %}
 
+{% if alerts %}
 <div class="panel">
-  <h2>Module 9 &mdash; Operations Dashboard</h2>
-  <div class="grid cols-4">
-    <div class="stat"><div class="n">{{ summary.active_states }}/{{ summary.total_states }}</div><div class="l">Active states</div></div>
-    <div class="stat"><div class="n">{{ summary.active_districts }}/{{ summary.total_districts }}</div><div class="l">Active districts</div></div>
-    <div class="stat"><div class="n">{{ summary.certified_sources }}</div><div class="l">Certified sources</div></div>
-    <div class="stat"><div class="n">{{ summary.active_sources }}/{{ summary.total_sources }}</div><div class="l">Active sources</div></div>
-    <div class="stat"><div class="n">{{ summary.documents_processed }}</div><div class="l">Documents processed</div></div>
-    <div class="stat"><div class="n">{{ summary.documents_requiring_review }}</div><div class="l">Requiring review</div></div>
-    <div class="stat">
-      <div class="n">{{ (summary.accuracy_score * 100)|round(1) ~ '%' if summary.accuracy_score is not none else '—' }}</div>
-      <div class="l">Accuracy score</div>
-    </div>
-    <div class="stat">
-      <div class="n">{{ summary.publication_coverage.districts_published }}/{{ summary.publication_coverage.districts_total }}</div>
-      <div class="l">Districts published</div>
-    </div>
-  </div>
-  {% if summary.accuracy_score is none %}
-  <p class="muted" style="margin-top:12px;">No certification benchmark has run yet. <a href="/ops/jobs">Start a job</a> or <a href="/certification">run a benchmark</a>.</p>
-  {% else %}
-  <p class="muted" style="margin-top:12px;">Accuracy score from <a href="/certification">benchmark run #{{ summary.latest_benchmark_run_id }}</a>.</p>
-  {% endif %}
+  {% for alert in alerts %}
+  <div class="alert-banner">&#9888; {{ alert.message }}</div>
+  {% endfor %}
+  <p class="muted" style="margin:6px 0 0;"><a href="/ops/health">View System Health &rarr;</a></p>
 </div>
+{% endif %}
 
 <div class="panel">
-  <h2>Quick links</h2>
-  <div style="display:flex; gap:16px; flex-wrap:wrap;">
-    <a href="/ops/states">States</a>
-    <a href="/ops/districts">Districts</a>
-    <a href="/ops/departments">Departments</a>
-    <a href="/ops/sources">Source Registry</a>
-    <a href="/ops/jobs">Certification Jobs</a>
-    <a href="/ops/review">Review Workbench</a>
-    <a href="/ops/publication">Publication Control</a>
-    <a href="/ops/health">System Health</a>
-    <a href="/audit">Audit trail</a>
+  <h2>Executive Command Center</h2>
+  <div class="grid cols-4">
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 4 8.5 9 9 5-.5 9-4 9-9V7l-9-5Z"/></svg></div></div>
+      <div class="kpi-n">{{ summary.certified_sources }}</div>
+      <div class="kpi-l">Certified sources</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div></div>
+      <div class="kpi-n">{{ summary.active_sources }}/{{ summary.total_sources }}</div>
+      <div class="kpi-l">Active sources</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/></svg></div></div>
+      <div class="kpi-n">{{ summary.documents_processed }}</div>
+      <div class="kpi-l">Documents processed</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/></svg></div></div>
+      <div class="kpi-n">{{ summary.documents_requiring_review }}</div>
+      <div class="kpi-l">Requiring review</div>
+      {% if summary.documents_requiring_review %}<span class="pill warn" style="margin-top:2px;">Needs attention</span>{% else %}<span class="pill ok" style="margin-top:2px;">Queue clear</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="split" style="margin-top:20px;">
+    <div>
+      <h2>Coverage</h2>
+      <div class="ring-row">
+        <div class="ring-item">{{ progress_ring(summary.active_states, summary.total_states, "States") }}</div>
+        <div class="ring-item">{{ progress_ring(summary.active_districts, summary.total_districts, "Districts") }}</div>
+        <div class="ring-item">{{ progress_ring(summary.publication_coverage.districts_published, summary.publication_coverage.districts_total, "Published") }}</div>
+      </div>
+    </div>
+    <div>
+      <h2>Accuracy</h2>
+      {% if summary.accuracy_score is none %}
+      <p class="stat"><span class="pill neutral">No benchmark yet</span></p>
+      <p class="muted" style="margin-top:8px;">No certification benchmark has run yet. <a href="/ops/jobs">Start a job</a> or <a href="/certification">run a benchmark</a>.</p>
+      {% else %}
+      {% set pct = (summary.accuracy_score * 100)|round(1) %}
+      <div class="stat" style="max-width:220px;">
+        <div class="n">{{ pct }}%</div>
+        <div class="l">Accuracy score</div>
+      </div>
+      <p class="muted" style="margin-top:8px;">
+        <span class="pill {{ 'ok' if pct >= 90 else ('warn' if pct >= 75 else 'bad') }}">{{ 'On target' if pct >= 90 else ('Watch' if pct >= 75 else 'Below target') }}</span>
+        from <a href="/certification">benchmark run #{{ summary.latest_benchmark_run_id }}</a>
+      </p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="split">
+  <div class="panel">
+    <h2>Recent activity</h2>
+    {% if recent_activity %}
+    <div class="activity-feed">
+      {% for entry in recent_activity %}
+      <div class="activity-item">
+        <span class="a-when mono">{{ entry.ts[:16] }}</span>
+        <span class="a-actor">{{ entry.actor }}</span>
+        <span class="a-action">{{ entry.action }}{% if entry.entity_type %} &middot; {{ entry.entity_type }}{% if entry.entity_id %}#{{ entry.entity_id }}{% endif %}{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="muted" style="margin-top:10px;"><a href="/audit">View full audit trail &rarr;</a></p>
+    {% else %}
+    <p class="muted">No activity recorded yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Quick links</h2>
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+      <a href="/ops/states">States</a>
+      <a href="/ops/districts">Districts</a>
+      <a href="/ops/departments">Departments</a>
+      <a href="/ops/sources">Source Registry</a>
+      <a href="/ops/jobs">Certification Jobs</a>
+      <a href="/ops/review">Review Workbench</a>
+      <a href="/ops/publication">Publication Control</a>
+      <a href="/ops/health">System Health</a>
+      <a href="/audit">Audit trail</a>
+    </div>
   </div>
 </div>
 

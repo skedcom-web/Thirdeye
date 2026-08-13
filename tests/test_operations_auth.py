@@ -157,8 +157,11 @@ def app_client(settings):
     return TestClient(create_app(settings))
 
 
-def test_first_run_redirects_every_page_to_setup(app_client):
-    response = app_client.get("/", follow_redirects=False)
+def test_first_run_redirects_every_protected_page_to_setup(app_client):
+    # `/` is the public landing page (Phase 3.1) and never redirects; a
+    # protected page is what proves first-run routing to /setup.
+    assert app_client.get("/", follow_redirects=False).status_code == 200
+    response = app_client.get("/workbench", follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"].startswith("/setup")
 
@@ -170,7 +173,7 @@ def test_setup_creates_the_first_platform_admin(app_client, conn):
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers["location"] == "/"
+    assert response.headers["location"] == "/ops/dashboard"  # role-routed, not the public "/"
 
     user = auth.authenticate(conn, "admin", "adminpass123")
     assert user is not None
@@ -189,11 +192,16 @@ def test_setup_rejects_mismatched_passwords(app_client):
     assert "do not match" in response.text
 
 
-def test_unauthenticated_request_redirects_to_login(app_client, conn):
+def test_public_landing_page_needs_no_auth(app_client, conn):
     auth.create_user(conn, username="admin", password="adminpass123", role=auth.ROLE_PLATFORM_ADMIN, actor="setup")
-    response = app_client.get("/", follow_redirects=False)
+    assert app_client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_unauthenticated_request_to_a_protected_page_redirects_to_login(app_client, conn):
+    auth.create_user(conn, username="admin", password="adminpass123", role=auth.ROLE_PLATFORM_ADMIN, actor="setup")
+    response = app_client.get("/workbench", follow_redirects=False)
     assert response.status_code == 303
-    assert response.headers["location"] == "/login?next=/"
+    assert response.headers["location"] == "/login?next=/workbench"
 
 
 def test_login_with_wrong_password_shows_error(app_client, conn):
@@ -205,10 +213,10 @@ def test_login_with_wrong_password_shows_error(app_client, conn):
 
 def test_login_logout_round_trip(app_client, conn):
     login_as(app_client, conn)
-    assert app_client.get("/").status_code == 200
+    assert app_client.get("/workbench").status_code == 200
 
     app_client.post("/logout")
-    response = app_client.get("/", follow_redirects=False)
+    response = app_client.get("/workbench", follow_redirects=False)
     assert response.status_code == 303
     assert "/login" in response.headers["location"]
 
@@ -235,7 +243,7 @@ def test_auditor_has_read_access_but_no_write_access(conn, settings, parsed_docu
     client = TestClient(create_app(settings))
     login_as(client, conn, username="auditor1", role=auth.ROLE_AUDITOR)
 
-    assert client.get("/").status_code == 200
+    assert client.get("/workbench").status_code == 200
     assert client.get("/audit").status_code == 200
 
     record_id = conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"]

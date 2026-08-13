@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Third Eye — Evidence-First Public Transparency Platform</title>
+<meta name="description" content="Third Eye transforms authentic Tamil Nadu government records into structured, traceable, citizen-friendly intelligence -- certified at the source, verified by humans, published only with provenance.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css">
+{% from "_partials.html" import mark, theme_init_script %}
+{{ theme_init_script() }}
+<style>
+  .home-only-note { display: none; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <a class="brand" href="/">{{ mark(30, 'headMark') }} Third Eye</a>
+  <button class="nav-toggle" data-nav-toggle aria-label="Toggle navigation" aria-expanded="false">☰</button>
+  <nav>
+    <a href="#home">Home</a>
+    <a href="#why">Why</a>
+    <a href="#how">How It Works</a>
+    <a href="#features">Features</a>
+    <a href="#coverage">Coverage</a>
+    <a href="#about">About</a>
+    <div class="theme-toggle" role="group" aria-label="Theme">
+      <button data-theme-btn="light" aria-pressed="true" title="Light">Light</button>
+      <button data-theme-btn="dark" aria-pressed="false" title="Dark">Dark</button>
+      <button data-theme-btn="glass" aria-pressed="false" title="Glass">Glass</button>
+      <button data-theme-btn="aurora" aria-pressed="false" title="Aurora">Aurora</button>
+      <button data-theme-btn="emerald" aria-pressed="false" title="Emerald">Emerald</button>
+      <button data-theme-btn="midnight" aria-pressed="false" title="Midnight">Midnight</button>
+    </div>
+  </nav>
+  <span class="spacer"></span>
+  <div class="cta">
+    {% if current_user %}
+    <a class="btn-lg btn-secondary" href="/admin" style="padding:8px 16px; font-size:13px;">Go to Admin →</a>
+    {% else %}
+    <a class="btn-lg btn-secondary" href="/login" style="padding:8px 16px; font-size:13px;">Login</a>
+    {% endif %}
+  </div>
+</header>
+
+<section class="hero" id="home">
+  <div class="section-kicker">Evidence-First Public Transparency Platform</div>
+  <h1>See What Was Planned.<br>Know What Is Being Delivered.</h1>
+  <p class="sub">Transforming authentic government records into structured, traceable, citizen-friendly intelligence.</p>
+
+  <div class="evidence-flow" aria-label="Evidence flow">
+    <span class="step"><span class="dot"></span> Government Sources</span>
+    <span class="arrow">→</span>
+    <span class="step"><span class="dot" style="animation-delay:.3s"></span> Certification</span>
+    <span class="arrow">→</span>
+    <span class="step"><span class="dot" style="animation-delay:.6s"></span> Human Review</span>
+    <span class="arrow">→</span>
+    <span class="step"><span class="dot" style="animation-delay:.9s"></span> Publication</span>
+    <span class="arrow">→</span>
+    <span class="step"><span class="dot" style="animation-delay:1.2s"></span> Citizen Visibility</span>
+  </div>
+
+  <div class="actions">
+    <a class="btn-lg btn-primary" href="#how">See how it works</a>
+    <a class="btn-lg btn-secondary" href="/login">Sign in</a>
+  </div>
+
+  <div class="metric-row">
+    <div class="glass-card">
+      <div class="metric-n" data-count-to="{{ stats.documents_processed }}">0</div>
+      <div class="metric-l">Documents Processed</div>
+    </div>
+    <div class="glass-card">
+      <div class="metric-n" data-count-to="{{ stats.certified_sources }}">0</div>
+      <div class="metric-l">Certified Sources</div>
+    </div>
+    <div class="glass-card">
+      <div class="metric-n" data-count-to="{{ stats.projects_published }}">0</div>
+      <div class="metric-l">Districts Published</div>
+    </div>
+    <div class="glass-card">
+      <div class="metric-n" data-count-to="{{ stats.districts_covered }}">0</div>
+      <div class="metric-l">Districts Covered</div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="why">
+  <div class="section-kicker">The Problem</div>
+  <h2 class="section-title">Citizens struggle to know</h2>
+  <p class="section-sub">Government records exist. Understanding them shouldn't require insider access.</p>
+  <div class="card-grid">
+    <div class="feature-card">
+      <div class="icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+      </div>
+      <h3>What was approved</h3>
+      <p>Which Government Order actually authorized a project, and when.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+      <h3>What budget was allocated</h3>
+      <p>The sanctioned amount, sourced from the order itself -- not a rumor.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C8 2 5 6 5 10c0 6 7 12 7 12s7-6 7-12c0-4-3-8-7-8Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      </div>
+      <h3>What affects their locality</h3>
+      <p>Orders and schemes relevant to their own district, surfaced clearly.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4zM4 9h16M9 4v16"/></svg>
+      </div>
+      <h3>Whether delivery matches approval</h3>
+      <p>Traceability from the original document to the published record.</p>
+    </div>
+  </div>
+  <p class="section-sub" style="margin-top:44px; max-width:720px;">
+    Third Eye converts authentic government records into structured, traceable information --
+    nothing enters the platform unless it can be traced back to an official government source
+    and an original document.
+  </p>
+</section>
+
+<section class="section" id="how">
+  <div class="section-kicker">How It Works</div>
+  <h2 class="section-title">From official record to citizen clarity</h2>
+  <p class="section-sub">Every step is real, running infrastructure -- not a diagram of a plan.</p>
+  <div class="timeline">
+    <div class="t-item">
+      <div class="t-marker">1</div>
+      <div class="t-body"><h4>Official Sources</h4><p>Only approved Tamil Nadu government hosts are ever crawled -- an allowlist enforced at registration and re-checked at every download, including after redirects.</p></div>
+    </div>
+    <div class="t-item">
+      <div class="t-marker">2</div>
+      <div class="t-body"><h4>Certification Engine</h4><p>Five checks -- connectivity, discovery, download, stability, authenticity -- before a source counts as certified, plus OCR and Tamil-language extraction with measured precision/recall/F1.</p></div>
+    </div>
+    <div class="t-item">
+      <div class="t-marker">3</div>
+      <div class="t-body"><h4>Human Review</h4><p>Every extracted field carries its source page and source text. A reviewer approves, corrects, rejects, or escalates -- nothing is assumed.</p></div>
+    </div>
+    <div class="t-item">
+      <div class="t-marker">4</div>
+      <div class="t-body"><h4>Publication Control</h4><p>A district or department only publishes once it is certified, has an approved record, and its provenance is intact -- checked in code, every time.</p></div>
+    </div>
+    <div class="t-item">
+      <div class="t-marker">5</div>
+      <div class="t-body"><h4>Citizen Transparency</h4><p>The next phase: putting this verified, evidenced record in front of the people it concerns.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="section tight" id="evidence-first">
+  <div class="section-kicker">Evidence First</div>
+  <h2 class="section-title">Zero-hallucination, by construction</h2>
+  <div class="principle-list">
+    <div class="principle-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg><span>Official sources only</span></div>
+    <div class="principle-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg><span>No hallucinated data</span></div>
+    <div class="principle-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg><span>Human verification</span></div>
+    <div class="principle-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg><span>Full auditability</span></div>
+    <div class="principle-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg><span>Governance controls</span></div>
+    <div class="principle-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg><span>End-to-end traceability</span></div>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <div class="section-kicker">Under The Hood</div>
+  <h2 class="section-title">A governed platform, not a scraper</h2>
+  <p class="section-sub">Twelve operational modules, each independently auditable.</p>
+  <div class="card-grid">
+    <div class="feature-card">
+      <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg></div>
+      <h3>Source Registry</h3>
+      <p>Versioned, host-allowlisted, geography-linked -- every edit keeps its full history.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 4 8.5 9 9 5-.5 9-4 9-9V7l-9-5Z"/></svg></div>
+      <h3>Certification Engine</h3>
+      <p>Connectivity, discovery, download, stability, authenticity -- five real checks.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+      <h3>Review Workbench</h3>
+      <p>Typed queues for extraction, OCR, metadata, and failure review, plus escalation.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg></div>
+      <h3>Publication Control</h3>
+      <p>No publication without certification, approval, and provenance -- enforced, not advised.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg></div>
+      <h3>Audit Trail</h3>
+      <p>Append-only, database-enforced -- an audit record cannot be edited or deleted.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+      <h3>System Health</h3>
+      <p>Source availability, OCR health, storage, and job queue depth, monitored live.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section tight" id="coverage">
+  <div class="section-kicker">Coverage</div>
+  <h2 class="section-title">Built for one state. Ready for more.</h2>
+  <div class="coverage-row">
+    <div class="coverage-chip active"><span class="dot"></span> Tamil Nadu — Active</div>
+    <div class="coverage-chip future"><span class="dot"></span> Andhra Pradesh — Planned</div>
+    <div class="coverage-chip future"><span class="dot"></span> Karnataka — Planned</div>
+    <div class="coverage-chip future"><span class="dot"></span> Kerala — Planned</div>
+  </div>
+  <div class="tn-map" aria-label="South India, Tamil Nadu highlighted">
+    <svg width="360" height="260" viewBox="0 0 360 260" role="img" aria-hidden="true">
+      <g>
+        <polygon class="state-outline" points="70,20 170,10 200,60 160,90 90,80" />
+        <text class="state-label" x="120" y="52">Karnataka</text>
+      </g>
+      <g>
+        <polygon class="state-outline" points="200,60 300,50 320,110 260,140 160,90" />
+        <text class="state-label" x="235" y="90">Andhra Pradesh</text>
+      </g>
+      <g>
+        <polygon class="state-outline highlighted" points="90,80 160,90 260,140 220,230 120,220 60,150" />
+        <text class="state-label highlighted" x="145" y="165">Tamil Nadu</text>
+      </g>
+      <g>
+        <polygon class="state-outline" points="60,150 90,80 70,20 30,60 20,140" />
+        <text class="state-label" x="35" y="120">Kerala</text>
+      </g>
+    </svg>
+  </div>
+  <p class="section-sub" style="margin-top:8px;">Illustrative regional layout, not a surveyed map.</p>
+</section>
+
+<section class="section tight" id="live-preview">
+  <div class="section-kicker">Live From The Platform</div>
+  <h2 class="section-title">The Operations Command Center, right now</h2>
+  <div class="grid cols-4" style="max-width:980px; margin:0 auto;">
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 4 8.5 9 9 5-.5 9-4 9-9V7l-9-5Z"/></svg></div></div>
+      <div class="kpi-n">{{ stats.summary.certified_sources }}</div>
+      <div class="kpi-l">Certified Sources</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/></svg></div></div>
+      <div class="kpi-n">{{ stats.summary.documents_processed }}</div>
+      <div class="kpi-l">Documents Processed</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 3 3L22 4"/></svg></div></div>
+      <div class="kpi-n">{{ stats.summary.documents_requiring_review }}</div>
+      <div class="kpi-l">Awaiting Review</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-top"><div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg></div></div>
+      <div class="kpi-n">{{ stats.summary.publication_coverage.districts_published }}/{{ stats.summary.publication_coverage.districts_total }}</div>
+      <div class="kpi-l">Districts Published</div>
+    </div>
+  </div>
+  <p class="section-sub" style="margin-top:24px;">These are the platform's actual current numbers, not a mockup.</p>
+</section>
+
+<section class="section tight" id="about">
+  <div class="section-kicker">About</div>
+  <h2 class="section-title">Our mission</h2>
+  <p class="section-sub" style="max-width:680px;">
+    Promote evidence-driven transparency through authentic government records
+    and governed publication workflows -- so that what was planned, and what
+    is actually delivered, are both a matter of public, traceable record.
+  </p>
+</section>
+
+<footer class="site-footer">
+  <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:10px;">
+    {{ mark(20, 'footMark') }} <strong style="color:var(--ink);">Third Eye</strong>
+  </div>
+  Evidence-First Public Transparency Platform &middot; <a href="/login">Administrator sign in</a>
+</footer>
+
+<script src="/static/theme.js" defer></script>
+</body>
+</html>

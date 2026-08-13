@@ -3,36 +3,65 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in &middot; Thirdeye</title>
+<title>Sign in — Third Eye</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css">
+{% from "_partials.html" import mark, theme_init_script %}
+{{ theme_init_script() }}
 <style>
-  :root { --bg: #f6f7f9; --panel: #fff; --ink: #16191d; --muted: #666e7a; --line: #dfe3e8; --accent: #1d4ed8; --bad: #b91c1c; }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-         font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 32px;
-          width: 340px; }
-  h1 { font-size: 16px; margin: 0 0 4px; }
-  p.sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
-  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .4px; }
-  input { width: 100%; border: 1px solid var(--line); border-radius: 4px; padding: 9px 10px; font: inherit; }
-  button { width: 100%; margin-top: 20px; background: var(--accent); color: #fff; border: 0;
-           border-radius: 4px; padding: 10px; font-size: 14px; cursor: pointer; }
-  .error { background: #fee2e2; color: var(--bad); border-radius: 4px; padding: 8px 10px; font-size: 13px; margin-top: 16px; }
+  body.auth-page {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background-image: var(--hero-grad); padding: 24px;
+  }
+  .auth-card {
+    width: 100%; max-width: 380px; background: var(--bg-elevated);
+    border: 1px solid var(--panel-border); border-radius: 16px; padding: 36px 32px;
+    box-shadow: var(--shadow-lg);
+    animation: card-in .45s cubic-bezier(.2,.8,.2,1);
+  }
+  :root[data-theme="glass"] .auth-card { background: rgba(255,255,255,.5); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  @keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+  .auth-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 22px; }
+  .auth-brand span { font-weight: 800; font-size: 17px; }
+  .auth-card h1 { font-size: 17px; margin: 0 0 4px; text-align: center; }
+  .auth-card p.sub { color: var(--muted); margin: 0 0 24px; font-size: 13px; text-align: center; }
+  .auth-field { margin-bottom: 16px; }
+  .auth-field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
+  .auth-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+  .auth-actions a { font-size: 12.5px; color: var(--muted); text-decoration: none; }
+  .auth-actions a:hover { color: var(--accent); }
+  .auth-submit { width: 100%; margin-top: 18px; padding: 11px; font-size: 14px; font-weight: 600; border-radius: 10px; }
+  .auth-error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 16px; }
+  .back-home { position: fixed; top: 20px; left: 24px; font-size: 13px; color: var(--muted); text-decoration: none; }
+  .back-home:hover { color: var(--ink); }
 </style>
 </head>
-<body>
-<div class="card">
-  <h1>Thirdeye Operations Control Center</h1>
-  <p class="sub">Sign in to continue.</p>
+<body class="auth-page">
+<a class="back-home" href="/">← Third Eye</a>
+<div class="auth-card">
+  <div class="auth-brand">{{ mark(30, 'loginMark') }} <span>Third Eye</span></div>
+  <h1>Welcome back</h1>
+  <p class="sub">Sign in to the Operations Control Center</p>
   <form method="post" action="/login">
-    <input type="hidden" name="next" value="{{ next or '/' }}">
-    <label for="username">Username</label>
-    <input id="username" type="text" name="username" required autofocus>
-    <label for="password">Password</label>
-    <input id="password" type="password" name="password" required>
-    <button type="submit">Sign in</button>
+    <input type="hidden" name="next" value="{{ next or '' }}">
+    <div class="auth-field">
+      <label for="username">Username</label>
+      <input id="username" type="text" name="username" required autofocus autocomplete="username">
+    </div>
+    <div class="auth-field" style="margin-bottom:0;">
+      <label for="password">Password</label>
+      <input id="password" type="password" name="password" required autocomplete="current-password">
+    </div>
+    <div class="auth-actions">
+      <span></span>
+      <a href="#" title="Contact your platform administrator to reset your password" tabindex="-1" aria-disabled="true" style="pointer-events:none; opacity:.6;">Forgot password?</a>
+    </div>
+    <button class="auth-submit" type="submit">Sign In</button>
   </form>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
 </div>
+<script src="/static/theme.js" defer></script>
 </body>
 </html>

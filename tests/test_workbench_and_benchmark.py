@@ -24,7 +24,9 @@ def client(conn, settings, fetcher, source_id):
 
 
 def test_dashboard_lists_the_queue(client):
-    response = client.get("/")
+    # `/` is Phase 3.1's public landing page; the Phase 1 workbench dashboard
+    # moved to /workbench so it can stay behind login.
+    response = client.get("/workbench")
     assert response.status_code == 200
     assert "Verification queue" in response.text
 

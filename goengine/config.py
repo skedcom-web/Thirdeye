@@ -35,6 +35,14 @@ USER_AGENT = (
     "contact: admin@thirdeye.local)"
 )
 
+# Deployment mode. "development" (default) is what every local/demo run uses.
+# Set THIRDEYE_ENV=production when serving over HTTPS behind a real domain --
+# this is the one flag a deployment must remember to flip, since it controls
+# the session cookie's Secure attribute (see workbench/app.py). Cookies can't
+# be marked Secure in local dev because plain http://localhost has no TLS.
+ENVIRONMENT = os.environ.get("THIRDEYE_ENV", "development")
+COOKIE_SECURE = ENVIRONMENT == "production"
+
 # Politeness: seconds between requests to the same host.
 CRAWL_DELAY_SECONDS = 1.5
 REQUEST_TIMEOUT_SECONDS = 60.0

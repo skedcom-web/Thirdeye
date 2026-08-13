@@ -1,4 +1,4 @@
-# Thirdeye — GO Intelligence Engine (Phase 1 + 2 + 3)
+# Thirdeye — GO Intelligence Engine (Phase 1 + 2 + 3 + 3.1)
 
 An evidence-first acquisition pipeline for Tamil Nadu Government Orders.
 
@@ -19,7 +19,13 @@ what each phase could and could not close from code alone — every engine is
 complete and tested; the actual certification of 10 sources, 200 real
 orders, and real operational usage are data-collection and adoption
 exercises that happen next, by humans running this tool against the live
-internet and the live organization.
+internet and the live organization. Phase 3.1 builds the **public-facing
+experience** on top of the same Phase 1-3 engines: a "Third Eye" brand and
+6-theme design system, a public landing page, a redesigned login with
+role-based routing, an Executive Command Center restyle of the Operations
+Dashboard, and deployment-readiness config cleanup — no new backend logic,
+no Firebase/Firestore migration (that is explicitly the next activity, not
+part of this one).
 
 ---
 
@@ -242,6 +248,29 @@ publication is therefore a coarse, honest proxy — "are this district's
 sources certified, and does at least one approved, evidenced record exist
 anywhere" — not a claim that any specific order is *about* that district.
 That precision doesn't exist until Phase 4.
+
+### Phase 3.1 — Public experience & deployment prep (`workbench/static`, `workbench/templates`)
+
+Presentation layer only, built on the existing FastAPI/Jinja2 stack — no new
+routes' worth of business logic, no rewrite of Phases 1-3. Every number shown
+on every new page is read through the same functions Phases 1-3 already
+built and tested (`operations.dashboard.operations_summary`, `audit.trail`,
+`operations.health.system_health`); Phase 3.1 only composes and styles them.
+
+| Piece | Code | Notes |
+|---|---|---|
+| Design system (6 themes) | `static/theme.css` | Light/Dark/Glass mandatory + Aurora/Emerald/Midnight; CSS custom properties per `[data-theme]`, no build step |
+| Third Eye mark | `templates/_partials.html` (`mark()` macro) | An original SVG (ring + node graph), not the literal OrchestrAI asset — avoids reproducing third-party wordmark/trademark, stays theme-adaptive via CSS-var gradient stops |
+| Theme persistence | `static/theme.js` | `localStorage`, applied via an inline pre-paint script (`theme_init_script()` macro) to avoid a flash of the wrong theme |
+| Public landing page | `templates/landing.html`, `GET /` | No login required; hero, evidence-flow, live metrics pulled from real `operations_summary()` data, not mocked |
+| Login / first-run setup | `templates/login.html`, `templates/setup.html` | Same `auth.py` session logic as Phase 3 (untouched) — only the template and post-login redirect changed |
+| Role-based post-login routing | `workbench/app.py` (`_post_login_destination`) | `reviewer` → Review Workbench, `auditor` → Audit Center, everyone else → Operations Dashboard |
+| `/admin` entry point | `workbench/app.py` | Logged-in shortcut that 303s to the role-appropriate page above |
+| Executive Command Center | `templates/ops_dashboard.html`, `operations_routes.py` | KPI cards, progress rings (computed in Jinja, no chart library), alerts banner (`system_health()["alerts"]`), recent-activity feed (`audit.trail(limit=8)`) — all reused data, new presentation |
+
+The Phase 1 dashboard (verification queue) moved from `/` to `/workbench`
+so `/` could become the public landing page; every protected page still
+requires the same session auth Phase 3 built.
 
 ---
 
@@ -483,11 +512,44 @@ What Phase 3 does **not** claim:
   unauthenticated, much simpler concern this endpoint deliberately doesn't try
   to be.
 
+### Phase 3.1
+
+| Criterion | Status |
+|---|---|
+| Third Eye brand (icon only, no wordmark/tagline reused) | ✅ original SVG mark, not the reference asset |
+| 6-theme system (Light/Dark/Glass + Aurora/Emerald/Midnight) | ✅ all six pass WCAG AA contrast (text ≥4.5:1, primary buttons ≥6:1), verified against the literal CSS token values |
+| Public landing page | ✅ hero, evidence-flow, live metrics wired to real data — no mocked numbers |
+| Redesigned login + role-based routing | ✅ browser-verified for `platform_admin`/`reviewer`/`auditor` destinations |
+| Executive Command Center restyle | ✅ KPI cards, progress rings, alerts, recent-activity feed — all composed from existing Phase 2/3 data functions |
+| Responsive (desktop/tablet/mobile) | ✅ spot-checked at 375/768/1280px; no horizontal overflow, mobile nav collapses correctly |
+| Accessibility | ⚠️ **partial** — focus-visible outlines, `aria-pressed`/`aria-expanded` states, and labeled form fields are in place and were checked; this was a manual spot-check, not a full automated audit (e.g. axe-core) or a screen-reader pass |
+| Deployment readiness prep | ⚠️ **prep only, not a migration** — see below; Firebase/Firestore migration is explicitly the next activity, not part of Phase 3.1 |
+
 ### Before this is exposed beyond localhost
 
 Real session auth now exists (Phase 3), which closes the biggest gap from
-Phase 1/2 — but a few things still matter before wider exposure: cookies are
-not marked `secure` (fine for local HTTP, wrong for anything not behind
-TLS), there is no password-reset flow, no rate limiting on `/login`, and no
-CSRF protection on the form-based POST routes (mitigated somewhat by
-`samesite=lax` cookies, not eliminated).
+Phase 1/2. Phase 3.1 made the session cookie's `Secure` attribute
+environment-driven (`THIRDEYE_ENV=production` → `secure=True`; the default,
+`development`, keeps it `False` so local `http://localhost` still works) —
+but a deployment still has to remember to set that variable, and a few
+things still matter beyond it: there is no password-reset flow, no rate
+limiting on `/login`, and no CSRF protection on the form-based POST routes
+(mitigated somewhat by `samesite=lax` cookies, not eliminated).
+
+### Configuration (environment variables)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `THIRDEYE_DATA_DIR` | `./data` | Where the SQLite DB and document repository live |
+| `THIRDEYE_ENV` | `development` | Set to `production` when serving over real TLS — flips the session cookie's `Secure` attribute on |
+| `THIRDEYE_TESSERACT_CMD` | auto-detected | Path to the Tesseract binary, if not on `PATH` |
+| `THIRDEYE_TESSDATA_DIR` | `vendor/tessdata/` | Where `eng.traineddata`/`tam.traineddata` live |
+
+None of these are secrets — there is no `SECRET_KEY` in this codebase to
+manage, because sessions are opaque random tokens looked up in the `sessions`
+table (`secrets.token_urlsafe`), not signed/encrypted cookies. A production
+deployment's actual remaining checklist is: put a real TLS-terminating
+reverse proxy in front, set `THIRDEYE_ENV=production`, point
+`THIRDEYE_DATA_DIR` at persistent storage, and address the auth gaps listed
+above — none of which is Firebase/Firestore-shaped, which is why that
+migration is scoped as its own separate activity rather than folded in here.
