@@ -12,37 +12,142 @@
 {{ theme_init_script() }}
 </head>
 <body>
-<header class="app-header">
+<header class="app-header" id="appHeader">
   <h1><a href="/admin" style="color:inherit; text-decoration:none; display:flex; align-items:center; gap:8px;">{{ mark(22, 'appMark') }} Third Eye</a></h1>
-  <button class="nav-toggle" data-nav-toggle aria-label="Toggle navigation" aria-expanded="false">&#9776;</button>
-  <nav>
-    <a href="/workbench">Dashboard</a>
-    <a href="/ops">Administration</a>
-    <a href="/golden">Golden Dataset</a>
-    <a href="/certification">Certification</a>
-    <a href="/audit">Audit trail</a>
-    <a href="/api/verified">Verified GO data (JSON)</a>
+  <button class="nav-toggle" data-nav-toggle aria-label="Toggle navigation" aria-expanded="false" aria-controls="appNav">
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+  </button>
+  <nav id="appNav" aria-label="Administration navigation">
+
+    {# ── Dashboard ─────────────────────────────────────────────── #}
+    <a href="/ops/dashboard" class="nav-link {% block nav_dashboard %}{% endblock %}">Dashboard</a>
+
+    {# ── Coverage Management ────────────────────────────────────── #}
+    <div class="nav-group" data-nav-group>
+      <button class="nav-group-toggle" aria-expanded="false" aria-haspopup="true" id="navCoverage">
+        Coverage <span class="nav-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="nav-group-menu" role="menu" aria-labelledby="navCoverage">
+        <a href="/ops/states"      role="menuitem">🗺 States</a>
+        <a href="/ops/districts"   role="menuitem">🏙 Districts</a>
+        <a href="/ops/departments" role="menuitem">🏛 Departments</a>
+      </div>
+    </div>
+
+    {# ── Government Sources ─────────────────────────────────────── #}
+    <div class="nav-group" data-nav-group>
+      <button class="nav-group-toggle" aria-expanded="false" aria-haspopup="true" id="navSources">
+        Govt Sources <span class="nav-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="nav-group-menu" role="menu" aria-labelledby="navSources">
+        <a href="/ops/sources"       role="menuitem">🌐 Authorized Websites</a>
+        <a href="/ops/sources"       role="menuitem">✅ Certification Status</a>
+      </div>
+    </div>
+
+    {# ── Extraction Center ──────────────────────────────────────── #}
+    <div class="nav-group" data-nav-group>
+      <button class="nav-group-toggle" aria-expanded="false" aria-haspopup="true" id="navExtract">
+        Extraction <span class="nav-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="nav-group-menu" role="menu" aria-labelledby="navExtract">
+        <a href="/ops/jobs"  role="menuitem">▶ Run Extraction</a>
+        <a href="/ops/jobs"  role="menuitem">🕐 Extraction History</a>
+      </div>
+    </div>
+
+    {# ── Review Center ──────────────────────────────────────────── #}
+    <div class="nav-group" data-nav-group>
+      <button class="nav-group-toggle" aria-expanded="false" aria-haspopup="true" id="navReview">
+        Review <span class="nav-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="nav-group-menu" role="menu" aria-labelledby="navReview">
+        <a href="/ops/review?queue=extraction" role="menuitem">📄 Pending Review</a>
+        <a href="/ops/review?queue=ocr"        role="menuitem">🔬 OCR Review</a>
+        <a href="/ops/review?queue=failure"    role="menuitem">⚠ Failed Documents</a>
+      </div>
+    </div>
+
+    {# ── Publication Center ─────────────────────────────────────── #}
+    <a href="/ops/publication" class="nav-link">Publication</a>
+
+    {# ── Audit ──────────────────────────────────────────────────── #}
+    <a href="/audit" class="nav-link">Audit</a>
+
+    {# ── Users ──────────────────────────────────────────────────── #}
+    <a href="/ops/users" class="nav-link">Users</a>
+
+    {# ── Advanced (platform_admin only) ─────────────────────────── #}
+    {% if current_user and current_user.role == 'platform_admin' %}
+    <div class="nav-group nav-group-advanced" data-nav-group>
+      <button class="nav-group-toggle" aria-expanded="false" aria-haspopup="true" id="navAdvanced">
+        Advanced <span class="nav-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="nav-group-menu" role="menu" aria-labelledby="navAdvanced">
+        <a href="/golden"           role="menuitem">📊 Golden Dataset</a>
+        <a href="/certification"    role="menuitem">🎯 Benchmarking</a>
+        <a href="/ops/health"       role="menuitem">🩺 System Health</a>
+        <a href="/api/verified"     role="menuitem">🔗 Verified GO Data (JSON)</a>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Theme + User ────────────────────────────────────────────── #}
     <div class="theme-toggle" role="group" aria-label="Theme">
-      <button data-theme-btn="light" aria-pressed="true" title="Light">Light</button>
-      <button data-theme-btn="dark" aria-pressed="false" title="Dark">Dark</button>
-      <button data-theme-btn="glass" aria-pressed="false" title="Glass">Glass</button>
-      <button data-theme-btn="aurora" aria-pressed="false" title="Aurora">Aurora</button>
-      <button data-theme-btn="emerald" aria-pressed="false" title="Emerald">Emerald</button>
+      <button data-theme-btn="light"    aria-pressed="true"  title="Light">Light</button>
+      <button data-theme-btn="dark"     aria-pressed="false" title="Dark">Dark</button>
+      <button data-theme-btn="glass"    aria-pressed="false" title="Glass">Glass</button>
+      <button data-theme-btn="aurora"   aria-pressed="false" title="Aurora">Aurora</button>
+      <button data-theme-btn="emerald"  aria-pressed="false" title="Emerald">Emerald</button>
       <button data-theme-btn="midnight" aria-pressed="false" title="Midnight">Midnight</button>
     </div>
+
     {% if current_user %}
     <span class="user-chip">
-      {{ current_user.username }} <span class="pill neutral" style="vertical-align:middle;">{{ current_user.role.replace('_',' ') }}</span>
+      {{ current_user.username }}
+      <span class="pill neutral" style="vertical-align:middle;">{{ current_user.role.replace('_',' ') }}</span>
     </span>
     <form method="post" action="/logout" style="margin:0;">
       <button class="ghost" type="submit" style="padding:4px 10px; font-size:12px;">Log out</button>
     </form>
     {% endif %}
+
   </nav>
 </header>
 <main class="app-main">
 {% block content %}{% endblock %}
 </main>
 <script src="/static/theme.js" defer></script>
+<script>
+// Nav group dropdowns
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('[data-nav-group]').forEach(function (group) {
+    var toggle = group.querySelector('.nav-group-toggle');
+    var menu   = group.querySelector('.nav-group-menu');
+    if (!toggle || !menu) return;
+    toggle.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = toggle.getAttribute('aria-expanded') === 'true';
+      // close all others
+      document.querySelectorAll('.nav-group-toggle[aria-expanded="true"]').forEach(function (t) {
+        t.setAttribute('aria-expanded', 'false');
+        t.closest('[data-nav-group]').classList.remove('open');
+      });
+      if (!open) {
+        toggle.setAttribute('aria-expanded', 'true');
+        group.classList.add('open');
+      }
+    });
+  });
+  document.addEventListener('click', function () {
+    document.querySelectorAll('.nav-group-toggle[aria-expanded="true"]').forEach(function (t) {
+      t.setAttribute('aria-expanded', 'false');
+      t.closest('[data-nav-group]').classList.remove('open');
+    });
+  });
+});
+</script>
 </body>
 </html>

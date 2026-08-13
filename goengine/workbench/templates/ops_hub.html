@@ -1,45 +1,140 @@
 {% extends "base.html" %}
-{% block title %}Administration &middot; Thirdeye{% endblock %}
+{% block title %}Administration · Third Eye{% endblock %}
 {% block content %}
 
-<div class="panel">
-  <h2>Administration</h2>
-  <p class="muted">Everything below is operable without a command line, per the Operations Control Center's core principle.</p>
-  <div class="grid cols-4">
-    <a class="stat" href="/ops/states" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 1</div><div style="font-weight:600; margin-top:4px;">States</div>
-    </a>
-    <a class="stat" href="/ops/districts" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 2</div><div style="font-weight:600; margin-top:4px;">Districts</div>
-    </a>
-    <a class="stat" href="/ops/departments" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 3</div><div style="font-weight:600; margin-top:4px;">Departments</div>
-    </a>
-    <a class="stat" href="/ops/sources" style="text-decoration:none; color:inherit;">
-      <div class="l">Modules 4-5</div><div style="font-weight:600; margin-top:4px;">Source Registry</div>
-    </a>
-    <a class="stat" href="/ops/jobs" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 6</div><div style="font-weight:600; margin-top:4px;">Certification Jobs</div>
-    </a>
-    <a class="stat" href="/ops/review" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 7</div><div style="font-weight:600; margin-top:4px;">Review Workbench</div>
-    </a>
-    <a class="stat" href="/ops/publication" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 8</div><div style="font-weight:600; margin-top:4px;">Publication Control</div>
-    </a>
-    <a class="stat" href="/ops/dashboard" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 9</div><div style="font-weight:600; margin-top:4px;">Operations Dashboard</div>
-    </a>
-    <a class="stat" href="/audit" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 10</div><div style="font-weight:600; margin-top:4px;">Audit &amp; Governance</div>
-    </a>
-    <a class="stat" href="/ops/users" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 11</div><div style="font-weight:600; margin-top:4px;">Users &amp; Roles</div>
-    </a>
-    <a class="stat" href="/ops/health" style="text-decoration:none; color:inherit;">
-      <div class="l">Module 12</div><div style="font-weight:600; margin-top:4px;">System Health</div>
-    </a>
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Administration</h1>
   </div>
+</div>
+<p class="muted" style="margin-bottom:28px;">Everything below is operable without a command line. Choose a center to manage.</p>
+
+{# ═══ Primary workflow centers ═══════════════════════════════════════ #}
+<div class="workflow-card-grid">
+
+  <a class="workflow-card" href="/ops/states" id="hub-coverage-btn">
+    <div class="wf-card-icon" aria-hidden="true">📍</div>
+    <div class="wf-card-body">
+      <h3>Coverage Management</h3>
+      <p>Configure which states, districts, and departments Third Eye operates in.</p>
+      <div class="wf-card-links">
+        <span>🗺 States</span>
+        <span>🏙 Districts</span>
+        <span>🏛 Departments</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
+  <a class="workflow-card" href="/ops/sources" id="hub-sources-btn">
+    <div class="wf-card-icon" aria-hidden="true">🌐</div>
+    <div class="wf-card-body">
+      <h3>Government Sources</h3>
+      <p>Add, certify, and manage authorized government websites for document extraction.</p>
+      <div class="wf-card-links">
+        <span>🌐 Authorized Websites</span>
+        <span>✅ Certification Status</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
+  <a class="workflow-card workflow-card-accent" href="/ops/jobs" id="hub-extraction-btn">
+    <div class="wf-card-icon" aria-hidden="true">▶</div>
+    <div class="wf-card-body">
+      <h3>Extraction Center</h3>
+      <p>Run extraction manually or on a schedule. Monitor progress and view results.</p>
+      <div class="wf-card-links">
+        <span>▶ Run Now</span>
+        <span>🕐 History</span>
+        <span>📊 Results</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
+  <a class="workflow-card" href="/ops/review" id="hub-review-btn">
+    <div class="wf-card-icon" aria-hidden="true">📋</div>
+    <div class="wf-card-body">
+      <h3>Review Center</h3>
+      <p>Human review of extracted documents before they are published to citizens.</p>
+      <div class="wf-card-links">
+        <span>📄 Pending Review</span>
+        <span>🔬 OCR Review</span>
+        <span>⚠ Failed Documents</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
+  <a class="workflow-card" href="/ops/publication" id="hub-publication-btn">
+    <div class="wf-card-icon" aria-hidden="true">🚀</div>
+    <div class="wf-card-body">
+      <h3>Publication Center</h3>
+      <p>Publish or unpublish approved records for public visibility by district and department.</p>
+      <div class="wf-card-links">
+        <span>📢 Publish</span>
+        <span>📋 Publication Queue</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
+  <a class="workflow-card" href="/audit" id="hub-audit-btn">
+    <div class="wf-card-icon" aria-hidden="true">🔍</div>
+    <div class="wf-card-body">
+      <h3>Audit & Monitoring</h3>
+      <p>Complete append-only audit trail of every action taken on the platform.</p>
+      <div class="wf-card-links">
+        <span>📝 Audit Trail</span>
+        <span>🩺 System Health</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
+  <a class="workflow-card" href="/ops/users" id="hub-users-btn">
+    <div class="wf-card-icon" aria-hidden="true">👤</div>
+    <div class="wf-card-body">
+      <h3>Users & Roles</h3>
+      <p>Manage administrator accounts and role-based access permissions.</p>
+      <div class="wf-card-links">
+        <span>👤 Accounts</span>
+        <span>🔐 Roles</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
+  {% if current_user and current_user.role == 'platform_admin' %}
+  <div class="workflow-card-section-label">Advanced Administration</div>
+  <a class="workflow-card workflow-card-muted" href="/ops/health" id="hub-health-btn">
+    <div class="wf-card-icon" aria-hidden="true">🩺</div>
+    <div class="wf-card-body">
+      <h3>System Health</h3>
+      <p>Source availability, OCR engine status, storage metrics, and job queue health.</p>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+  <a class="workflow-card workflow-card-muted" href="/golden" id="hub-golden-btn">
+    <div class="wf-card-icon" aria-hidden="true">📊</div>
+    <div class="wf-card-body">
+      <h3>Golden Dataset</h3>
+      <p>Human-annotated ground truth for benchmarking extraction accuracy.</p>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+  <a class="workflow-card workflow-card-muted" href="/certification" id="hub-benchmark-btn">
+    <div class="wf-card-icon" aria-hidden="true">🎯</div>
+    <div class="wf-card-body">
+      <h3>Benchmarking & Calibration</h3>
+      <p>Precision/recall/F1 metrics, confidence calibration, and failure intelligence.</p>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+  {% endif %}
+
 </div>
 
 {% endblock %}

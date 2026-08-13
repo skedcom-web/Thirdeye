@@ -476,6 +476,191 @@ section.section.tight { padding-top: 48px; padding-bottom: 48px; }
 footer.site-footer { border-top: 1px solid var(--panel-border); padding: 40px 32px; text-align: center; color: var(--muted); font-size: 13px; }
 footer.site-footer a { color: var(--muted); }
 
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — OCC Admin Navigation: grouped dropdown nav               */
+/* ---------------------------------------------------------------------- */
+.nav-group { position: relative; }
+.nav-group-toggle {
+  background: transparent; border: 0; color: var(--header-ink); font-size: 13px;
+  font-family: inherit; cursor: pointer; display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px; border-radius: 4px; transition: color .15s ease;
+}
+.nav-group-toggle:hover { color: var(--header-ink-hover); opacity: 1; }
+.nav-chevron { font-size: 9px; transition: transform .2s ease; }
+.nav-group.open .nav-chevron { transform: rotate(180deg); }
+.nav-group-menu {
+  display: none; position: absolute; top: calc(100% + 8px); left: 0;
+  background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); min-width: 210px; z-index: 60; padding: 6px 0;
+  animation: nav-drop-in .15s ease;
+}
+@keyframes nav-drop-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+.nav-group.open .nav-group-menu { display: block; }
+.nav-group-menu a {
+  display: flex; align-items: center; gap: 8px; padding: 9px 16px;
+  color: var(--ink); text-decoration: none; font-size: 13px; font-weight: 500;
+  transition: background .12s ease;
+}
+.nav-group-menu a:hover { background: var(--accent-soft); color: var(--accent); }
+.nav-group-advanced .nav-group-toggle { opacity: .7; font-size: 12px; }
+
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — OCC Page header + action strip                            */
+/* ---------------------------------------------------------------------- */
+.occ-page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; gap: 16px; margin-bottom: 24px;
+}
+.occ-page-kicker {
+  color: var(--accent); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .8px; margin-bottom: 4px;
+}
+.occ-page-title { font-size: clamp(20px, 3vw, 28px); font-weight: 800; margin: 0; letter-spacing: -.01em; }
+
+.action-strip { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.occ-btn { padding: 10px 20px; font-size: 14px; border-radius: 8px; }
+
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — Executive Dashboard KPI groups                            */
+/* ---------------------------------------------------------------------- */
+.occ-kpi-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px; margin-bottom: 20px;
+}
+.occ-metric-group {
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.occ-metric-group-title {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--accent);
+}
+.occ-metric-group-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 10px; }
+.occ-metric-group-link { font-size: 12px; color: var(--muted); text-decoration: none; margin-top: auto; }
+.occ-metric-group-link:hover { color: var(--accent); }
+.occ-kpi { box-shadow: none; border: 1px solid var(--panel-border); padding: 12px; }
+.occ-kpi .kpi-n { font-size: 22px; }
+.occ-kpi .kpi-icon { font-size: 16px; }
+
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — Operational Workflow Steps (Dashboard)                    */
+/* ---------------------------------------------------------------------- */
+.workflow-steps {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px; margin-top: 16px;
+}
+.workflow-step-card {
+  display: flex; gap: 14px; align-items: flex-start;
+  background: var(--bg-elevated); border: 1px solid var(--panel-border);
+  border-radius: var(--radius); padding: 18px;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.workflow-step-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.wf-step-num {
+  width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800;
+}
+.wf-step-icon { font-size: 20px; flex-shrink: 0; }
+.wf-step-body h3 { margin: 0 0 4px; font-size: 14px; font-weight: 700; }
+.wf-step-body p  { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.wf-step-link { font-size: 13px; color: var(--accent); text-decoration: none; font-weight: 600; }
+
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — Administration Hub Workflow Cards                         */
+/* ---------------------------------------------------------------------- */
+.workflow-card-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px; margin-bottom: 24px;
+}
+.workflow-card-section-label {
+  grid-column: 1 / -1; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .7px; color: var(--muted); padding: 4px 0;
+  border-top: 1px solid var(--panel-border); margin-top: 8px;
+}
+.workflow-card {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: var(--radius); padding: 20px 18px;
+  text-decoration: none; color: inherit;
+  box-shadow: var(--shadow); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.workflow-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
+.workflow-card-accent { border-left: 4px solid var(--accent); }
+.workflow-card-muted { opacity: .8; }
+.wf-card-icon {
+  font-size: 28px; width: 52px; height: 52px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); border-radius: 12px;
+}
+.wf-card-body { flex: 1; }
+.wf-card-body h3 { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
+.wf-card-body p  { margin: 0 0 8px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.wf-card-links { display: flex; gap: 10px; flex-wrap: wrap; }
+.wf-card-links span { font-size: 12px; color: var(--muted); }
+.wf-card-arrow { color: var(--muted); font-size: 18px; flex-shrink: 0; }
+.workflow-card:hover .wf-card-arrow { color: var(--accent); }
+
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — Review Center queue cards                                 */
+/* ---------------------------------------------------------------------- */
+.review-queue-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px; margin-bottom: 20px;
+}
+.review-queue-card {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 6px; padding: 22px 16px; border-radius: var(--radius);
+  background: var(--panel); border: 2px solid var(--panel-border);
+  text-decoration: none; color: inherit;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.review-queue-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.review-queue-card.active { border-color: var(--accent); background: var(--accent-soft); }
+.rq-icon { font-size: 26px; }
+.rq-count { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.rq-count-warn { color: var(--warn); }
+.rq-count-bad  { color: var(--bad); }
+.rq-label { font-size: 13px; font-weight: 700; }
+.rq-desc  { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.rq-badge { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); }
+.rq-badge-bad { background: var(--bad-soft); color: var(--bad); }
+
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — Extraction Center form + schedule                        */
+/* ---------------------------------------------------------------------- */
+.extract-form-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
+}
+@media (max-width: 640px) { .extract-form-grid { grid-template-columns: 1fr; } }
+.extract-form-group { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.dept-checkbox-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.dept-checkbox-item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+
+.schedule-options-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.schedule-option {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 14px 20px; border-radius: var(--radius);
+  background: var(--bg-elevated); border: 1px solid var(--panel-border);
+  min-width: 100px; text-align: center;
+}
+.schedule-option-muted { opacity: .6; }
+.schedule-icon { font-size: 20px; }
+.schedule-label { font-size: 13px; font-weight: 600; }
+.schedule-sublabel { font-size: 11px; color: var(--muted); }
+
+/* ---------------------------------------------------------------------- */
+/* Phase 3.2A — Empty states                                              */
+/* ---------------------------------------------------------------------- */
+.occ-empty-state {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 48px 24px; color: var(--muted);
+}
+.occ-empty-icon { font-size: 40px; margin-bottom: 12px; opacity: .5; }
+
 /* Progress rings (Executive Command Center) */
 .ring-wrap { position: relative; width: 84px; height: 84px; }
 .ring-wrap svg { transform: rotate(-90deg); }

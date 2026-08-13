@@ -1,59 +1,181 @@
 {% extends "base.html" %}
-{% block title %}Certification Jobs &middot; Thirdeye{% endblock %}
+{% block title %}Extraction Center · Third Eye{% endblock %}
 {% block content %}
 
+{# ═══ Page header + primary actions ═════════════════════════════════ #}
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Extraction Center</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Discover, download, and parse government documents from authorized sources.
+    </p>
+  </div>
+  {% if can_run %}
+  <div class="action-strip">
+    <form method="post" action="/ops/jobs/start" style="margin:0; display:contents;">
+      <input type="hidden" name="state_id" value="">
+      <button type="submit" class="btn-lg btn-primary occ-btn" id="extract-run-all-btn">▶ Run All Sources</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+{# ═══ Top metrics bar ════════════════════════════════════════════════ #}
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🌐</div></div>
+    <div class="kpi-n">{{ jobs|selectattr('status','ne','RUNNING')|list|length + (jobs|selectattr('status','eq','RUNNING')|list|length) }}</div>
+    <div class="kpi-l">Extraction Runs</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--warn);">⏳</div></div>
+    <div class="kpi-n">{{ jobs|selectattr('status','eq','RUNNING')|list|length }}</div>
+    <div class="kpi-l">Running Jobs</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--ok);">✅</div></div>
+    <div class="kpi-n">{{ jobs|selectattr('status','eq','COMPLETED')|list|length }}</div>
+    <div class="kpi-l">Completed Jobs</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--bad);">❌</div></div>
+    <div class="kpi-n">{{ jobs|selectattr('status','eq','FAILED')|list|length }}</div>
+    <div class="kpi-l">Failed Jobs</div>
+  </div>
+</div>
+
+{# ═══ Run extraction form ════════════════════════════════════════════ #}
 {% if can_run %}
-<div class="panel">
-  <h2>Module 6 &mdash; Start a certification job</h2>
-  <p class="muted">Select State &rarr; District &rarr; Departments &rarr; Start Certification. Runs discovery, download, OCR, extraction and benchmarking in the background.</p>
+<div class="panel" id="run-extraction-panel">
+  <h2>▶ Run Extraction</h2>
+  <p class="muted" style="margin-bottom:16px;">
+    Select a target scope to run extraction now. Runs document discovery, download, OCR (if needed), and parsing automatically in the background.
+  </p>
   <form method="post" action="/ops/jobs/start">
-    <div class="grid cols-4">
-      <div>
-        <label class="muted" style="font-size:12px;">State</label>
-        <select name="state_id" style="width:auto;">
-          <option value="">All states</option>
+    <div class="extract-form-grid">
+
+      <div class="extract-form-group">
+        <label class="field-label" for="extract-state">State (optional — leave blank for all)</label>
+        <select name="state_id" id="extract-state" style="width:100%;">
+          <option value="">All States</option>
           {% for s in states %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
         </select>
       </div>
-      <div>
-        <label class="muted" style="font-size:12px;">District (optional)</label>
-        <input type="number" name="district_id" placeholder="district id">
+
+      <div class="extract-form-group">
+        <label class="field-label" for="extract-district">District ID (optional)</label>
+        <input type="number" name="district_id" id="extract-district" placeholder="Leave blank for all districts">
       </div>
-      <div style="grid-column: span 2;">
-        <label class="muted" style="font-size:12px;">Departments (optional, leave blank for all)</label>
-        <div>
+
+      <div class="extract-form-group" style="grid-column:span 2;">
+        <label class="field-label">Departments (optional — leave blank to include all)</label>
+        <div class="dept-checkbox-row">
           {% for b in buckets %}
-          <label style="margin-right:10px; font-size:13px;"><input type="checkbox" name="departments" value="{{ b }}"> {{ b.replace('_',' ') }}</label>
+          <label class="dept-checkbox-item">
+            <input type="checkbox" name="departments" value="{{ b }}">
+            {{ b.replace('_',' ')|title }}
+          </label>
           {% endfor %}
         </div>
       </div>
+
     </div>
-    <button type="submit" style="margin-top:12px;">Start certification</button>
+
+    <div style="margin-top:20px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <button type="submit" class="btn-lg btn-primary" id="extract-start-btn">▶ Start Extraction</button>
+      <span class="muted" style="font-size:13px;">Runs in the background. Refresh to see live progress below.</span>
+    </div>
   </form>
 </div>
 {% endif %}
 
+{# ═══ Extraction History ═════════════════════════════════════════════ #}
 <div class="panel">
-  <h2>Job history</h2>
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:4px;">
+    <h2 style="margin:0;">🕐 Extraction History</h2>
+    <span class="muted" style="font-size:12px;">Most recent runs first</span>
+  </div>
+
+  {% if jobs %}
   <table>
-    <tr><th>ID</th><th>Status</th><th>Sources</th><th>Found</th><th>Downloaded</th><th>Parsed</th><th>Needs OCR</th><th>Failed</th><th>Started</th><th></th></tr>
-    {% for j in jobs %}
-    <tr>
-      <td class="mono">#{{ j.id }}</td>
-      <td>
-        <span class="pill {{ 'ok' if j.status == 'COMPLETED' else ('bad' if j.status == 'FAILED' else 'warn') }}">{{ j.status }}</span>
-      </td>
-      <td>{{ j.sources_completed }}/{{ j.sources_total }}</td>
-      <td>{{ j.documents_found }}</td>
-      <td>{{ j.documents_downloaded }}</td>
-      <td>{{ j.documents_parsed }}</td>
-      <td>{{ j.documents_needs_ocr }}</td>
-      <td>{{ j.documents_failed }}</td>
-      <td class="mono">{{ j.started_at or '—' }}</td>
-      <td><a href="/ops/jobs/{{ j.id }}">View &rarr;</a></td>
-    </tr>
-    {% endfor %}
+    <thead>
+      <tr>
+        <th>Run</th>
+        <th>Status</th>
+        <th>Sources</th>
+        <th>📥 Found</th>
+        <th>⬇ Downloaded</th>
+        <th>✅ Parsed</th>
+        <th>🔬 OCR Required</th>
+        <th>❌ Failed</th>
+        <th>Started</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for j in jobs %}
+      <tr>
+        <td class="mono">#{{ j.id }}</td>
+        <td>
+          <span class="pill {{ 'ok' if j.status == 'COMPLETED' else ('warn' if j.status == 'RUNNING' else ('bad' if j.status == 'FAILED' else 'neutral')) }}">
+            {{ j.status }}
+          </span>
+        </td>
+        <td>{{ j.sources_completed }}/{{ j.sources_total }}</td>
+        <td>{{ j.documents_found }}</td>
+        <td>{{ j.documents_downloaded }}</td>
+        <td>{{ j.documents_parsed }}</td>
+        <td>{{ j.documents_needs_ocr }}</td>
+        <td {% if j.documents_failed %}style="color:var(--bad); font-weight:700;"{% endif %}>{{ j.documents_failed }}</td>
+        <td class="mono" style="font-size:12px;">{{ j.started_at or '—' }}</td>
+        <td><a href="/ops/jobs/{{ j.id }}">View Results →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
   </table>
+  {% else %}
+  <div class="occ-empty-state">
+    <div class="occ-empty-icon" aria-hidden="true">▶</div>
+    <p>No extraction runs yet.</p>
+    {% if can_run %}
+    <a href="#run-extraction-panel" class="btn-lg btn-primary" style="margin-top:8px;">Run Your First Extraction</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{# ═══ Schedule info panel ════════════════════════════════════════════ #}
+<div class="panel">
+  <h2>⏰ Scheduled Extraction</h2>
+  <p class="muted">
+    Automatic extraction schedules are configured per government source.
+    Go to <a href="/ops/sources">Government Sources</a> and edit a source to set its extraction frequency.
+  </p>
+  <div class="schedule-options-row">
+    <div class="schedule-option">
+      <div class="schedule-icon">⚡</div>
+      <div class="schedule-label">Every 6 Hours</div>
+    </div>
+    <div class="schedule-option">
+      <div class="schedule-icon">🕛</div>
+      <div class="schedule-label">Every 12 Hours</div>
+    </div>
+    <div class="schedule-option">
+      <div class="schedule-icon">📅</div>
+      <div class="schedule-label">Daily</div>
+    </div>
+    <div class="schedule-option">
+      <div class="schedule-icon">📆</div>
+      <div class="schedule-label">Weekly</div>
+    </div>
+    <div class="schedule-option schedule-option-muted">
+      <div class="schedule-icon">⚙</div>
+      <div class="schedule-label">Custom Cron</div>
+      <div class="schedule-sublabel">(Advanced)</div>
+    </div>
+  </div>
+  <a href="/ops/sources" class="muted" style="font-size:13px; margin-top:12px; display:inline-block;">Configure schedules in Government Sources →</a>
 </div>
 
 {% endblock %}

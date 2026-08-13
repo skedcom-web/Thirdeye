@@ -1,67 +1,138 @@
 {% extends "base.html" %}
-{% block title %}Review Workbench &middot; Thirdeye{% endblock %}
+{% block title %}Review Center · Third Eye{% endblock %}
 {% block content %}
 
-<div class="grid cols-4" style="margin-bottom:16px;">
-  <a class="stat" href="/ops/review?queue=extraction" style="text-decoration:none; color:inherit; {% if selected_queue == 'extraction' %}border-color:var(--accent);{% endif %}">
-    <div class="n">{{ counts.extraction }}</div><div class="l">Extraction review</div>
+{# ═══ Page header ════════════════════════════════════════════════════ #}
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Review Center</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Human review and approval of extracted documents before publication. Select a queue to start reviewing.
+    </p>
+  </div>
+</div>
+
+{# ═══ Queue selector cards ══════════════════════════════════════════ #}
+<div class="review-queue-grid">
+  <a class="review-queue-card {% if selected_queue == 'extraction' %}active{% endif %}"
+     href="/ops/review?queue=extraction" id="review-queue-extraction-btn">
+    <div class="rq-icon" aria-hidden="true">📄</div>
+    <div class="rq-count {% if counts.extraction %}rq-count-warn{% endif %}">{{ counts.extraction }}</div>
+    <div class="rq-label">Pending Review</div>
+    <div class="rq-desc">Newly extracted documents awaiting approval</div>
+    {% if counts.extraction %}<div class="rq-badge">{{ counts.extraction }} waiting</div>{% endif %}
   </a>
-  <a class="stat" href="/ops/review?queue=ocr" style="text-decoration:none; color:inherit; {% if selected_queue == 'ocr' %}border-color:var(--accent);{% endif %}">
-    <div class="n">{{ counts.ocr }}</div><div class="l">OCR review</div>
+
+  <a class="review-queue-card {% if selected_queue == 'ocr' %}active{% endif %}"
+     href="/ops/review?queue=ocr" id="review-queue-ocr-btn">
+    <div class="rq-icon" aria-hidden="true">🔬</div>
+    <div class="rq-count {% if counts.ocr %}rq-count-warn{% endif %}">{{ counts.ocr }}</div>
+    <div class="rq-label">OCR Review</div>
+    <div class="rq-desc">Scanned documents that needed OCR processing</div>
+    {% if counts.ocr %}<div class="rq-badge">{{ counts.ocr }} waiting</div>{% endif %}
   </a>
-  <a class="stat" href="/ops/review?queue=metadata" style="text-decoration:none; color:inherit; {% if selected_queue == 'metadata' %}border-color:var(--accent);{% endif %}">
-    <div class="n">{{ counts.metadata }}</div><div class="l">Metadata review</div>
+
+  <a class="review-queue-card {% if selected_queue == 'metadata' %}active{% endif %}"
+     href="/ops/review?queue=metadata" id="review-queue-metadata-btn">
+    <div class="rq-icon" aria-hidden="true">📊</div>
+    <div class="rq-count {% if counts.metadata %}rq-count-warn{% endif %}">{{ counts.metadata }}</div>
+    <div class="rq-label">Metadata Review</div>
+    <div class="rq-desc">Documents needing metadata verification</div>
+    {% if counts.metadata %}<div class="rq-badge">{{ counts.metadata }} waiting</div>{% endif %}
   </a>
-  <a class="stat" href="/ops/review?queue=failure" style="text-decoration:none; color:inherit; {% if selected_queue == 'failure' %}border-color:var(--accent);{% endif %}">
-    <div class="n">{{ counts.failure }}</div><div class="l">Failure review</div>
+
+  <a class="review-queue-card {% if selected_queue == 'failure' %}active{% endif %}"
+     href="/ops/review?queue=failure" id="review-queue-failures-btn">
+    <div class="rq-icon" aria-hidden="true">⚠</div>
+    <div class="rq-count {% if counts.failure %}rq-count-bad{% endif %}">{{ counts.failure }}</div>
+    <div class="rq-label">Failed Documents</div>
+    <div class="rq-desc">Documents that failed extraction or processing</div>
+    {% if counts.failure %}<div class="rq-badge rq-badge-bad">{{ counts.failure }} failed</div>{% endif %}
   </a>
 </div>
 
+{# ═══ Active review queue table ═════════════════════════════════════ #}
 <div class="panel">
-  <h2>Module 7 &mdash; {{ selected_queue|title }} review queue</h2>
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:4px;">
+    <h2 style="margin:0;">
+      {% if selected_queue == 'extraction' %}📄 Pending Review Queue
+      {% elif selected_queue == 'ocr' %}🔬 OCR Review Queue
+      {% elif selected_queue == 'metadata' %}📊 Metadata Review Queue
+      {% elif selected_queue == 'failure' %}⚠ Failed Documents
+      {% else %}Review Queue
+      {% endif %}
+    </h2>
+    <div class="muted" style="font-size:12px;">
+      Use Approve / Reject / Escalate / Correct on each record
+    </div>
+  </div>
+
   {% if records %}
   <table>
-    <tr><th>Record</th><th>File</th><th>Source</th><th></th></tr>
-    {% for r in records %}
-    <tr>
-      <td class="mono">#{{ r.id }}</td>
-      <td class="mono">{{ r.file_name }}</td>
-      <td>{{ r.source_name }}</td>
-      <td><a href="/records/{{ r.id }}">Review &rarr;</a></td>
-    </tr>
-    {% endfor %}
+    <thead>
+      <tr>
+        <th>Record</th>
+        <th>Document</th>
+        <th>Source</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in records %}
+      <tr>
+        <td class="mono">#{{ r.id }}</td>
+        <td class="mono">{{ r.file_name }}</td>
+        <td>{{ r.source_name }}</td>
+        <td><a href="/records/{{ r.id }}" id="review-record-{{ r.id }}-btn">Review →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
   </table>
   {% else %}
-  <p class="muted">Nothing in this queue.</p>
+  <div class="occ-empty-state">
+    <div class="occ-empty-icon" aria-hidden="true">✅</div>
+    <p>This queue is empty. Nothing to review.</p>
+  </div>
   {% endif %}
 </div>
 
+{# ═══ Escalated records ══════════════════════════════════════════════ #}
+{% if open_escalations %}
 <div class="panel">
-  <h2>Open escalations</h2>
-  {% if open_escalations %}
+  <h2>🔺 Escalated Records <span class="pill warn" style="margin-left:8px;">{{ open_escalations|length }}</span></h2>
   <table>
-    <tr><th>Record</th><th>File</th><th>Escalated by</th><th>When</th><th>Reason</th><th></th></tr>
-    {% for e in open_escalations %}
-    <tr>
-      <td class="mono"><a href="/records/{{ e.record_id }}">#{{ e.record_id }}</a></td>
-      <td class="mono">{{ e.file_name }}</td>
-      <td>{{ e.escalated_by }}</td>
-      <td class="mono">{{ e.escalated_at }}</td>
-      <td>{{ e.reason }}</td>
-      <td>
-        {% if can_escalate %}
-        <form class="inline" method="post" action="/ops/review/escalations/{{ e.id }}/resolve">
-          <input type="text" name="note" placeholder="resolution note">
-          <button class="ghost" type="submit">Resolve</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
+    <thead>
+      <tr>
+        <th>Record</th>
+        <th>Document</th>
+        <th>Escalated By</th>
+        <th>When</th>
+        <th>Reason</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in open_escalations %}
+      <tr>
+        <td class="mono"><a href="/records/{{ e.record_id }}">#{{ e.record_id }}</a></td>
+        <td class="mono">{{ e.file_name }}</td>
+        <td>{{ e.escalated_by }}</td>
+        <td class="mono" style="font-size:12px;">{{ e.escalated_at }}</td>
+        <td>{{ e.reason }}</td>
+        <td>
+          {% if can_escalate %}
+          <form class="inline" method="post" action="/ops/review/escalations/{{ e.id }}/resolve">
+            <input type="text" name="note" placeholder="Resolution note" style="min-width:160px;">
+            <button class="ghost" type="submit" id="review-resolve-{{ e.id }}-btn">Resolve</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
   </table>
-  {% else %}
-  <p class="muted">No open escalations.</p>
-  {% endif %}
 </div>
+{% endif %}
 
 {% endblock %}
