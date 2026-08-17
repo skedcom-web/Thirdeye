@@ -27,6 +27,7 @@ from ..operations import jobs as ops_jobs
 from ..operations import publication as ops_publication
 from ..operations import review as ops_review
 from ..operations import sources as ops_sources
+from ..discovery import crawler
 from .deps import (
     Config,
     Conn,

@@ -1,6 +1,8 @@
 import pytest
 import sqlite3
 import os
+from pathlib import Path
+from fastapi.testclient import TestClient
 from goengine.db import init_db, utcnow
 from goengine.config import Settings
 from goengine.fetching import OfflineFetcher, Response, FetchError, HttpFetcher
@@ -8,6 +10,8 @@ from goengine.discovery import crawler
 from goengine.operations import sources as ops_sources
 from goengine.operations import jobs as ops_jobs
 from goengine.workbench.operations_routes import _get_failure_stats
+from goengine.workbench.app import create_app
+from tests.conftest import login_as
 
 
 @pytest.fixture
@@ -196,3 +200,48 @@ def test_db_seeding_tamil_nadu(tmp_path):
     finally:
         if old_env:
             os.environ["PYTEST_CURRENT_TEST"] = old_env
+
+
+def test_source_diagnostic_route(conn):
+    # Register an active source
+    source_id = ops_sources.create_source(
+        conn,
+        name="Test Diag Source",
+        department="Health",
+        url="https://tn.gov.in/diag",
+        source_type="go_portal",
+        actor="test-actor",
+    )
+
+    # Resolve database file path
+    db_file = conn.execute("PRAGMA database_list").fetchone()["file"]
+    db_path = Path(db_file)
+    settings = Settings(
+        data_dir=db_path.parent,
+        db_path=db_path,
+        repository_dir=db_path.parent / "repo",
+    )
+
+    # Setup test client with standard auth
+    app = create_app(settings)
+    
+    # Configure offline responses for crawler run
+    fetcher = OfflineFetcher()
+    fetcher.add_html("https://tn.gov.in/diag", "<html><body><a href='https://tn.gov.in/diag/go1.pdf'>GO 1</a></body></html>")
+    fetcher.add_bytes("https://tn.gov.in/diag/go1.pdf", b"%PDF-1.4 dummy content")
+    
+    # Override get_fetcher_factory dependency
+    from goengine.workbench.deps import get_fetcher_factory
+    app.dependency_overrides[get_fetcher_factory] = lambda: (lambda: fetcher)
+    
+    client = TestClient(app)
+    
+    # Bootstrap platform admin and login
+    login_as(client, conn)
+    
+    # Run diagnostic POST
+    response = client.post(f"/ops/sources/{source_id}/diagnose", follow_redirects=True)
+    assert response.status_code == 200
+    assert b"DIAGNOSTIC REPORT FOR SOURCE" in response.content
+    assert b"Test Diag Source" in response.content
+
