@@ -199,7 +199,12 @@ def _run_one_source(
     if source is None:
         return
 
-    crawl_result = crawler.crawl_source(conn, fetcher, source, actor="job")
+    # 5 (the crawler's own default) is only enough for a single listing page.
+    # A directory-style source like the TN GO Portal hub now legitimately
+    # follows into per-department listing pages (see TnGoPortalAdapter), so
+    # a real crawl needs more hops -- still bounded, still polite (each hop
+    # respects the same per-host delay), just not capped before it starts.
+    crawl_result = crawler.crawl_source(conn, fetcher, source, actor="job", max_pages=20)
     conn.execute(
         "UPDATE certification_jobs SET documents_found = documents_found + ? WHERE id = ?",
         (crawl_result.new_documents, job_id),

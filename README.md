@@ -154,6 +154,50 @@ Official Source → Crawler → Downloader → Repository → Text Extraction �
 | 7 Validation Workbench | `workbench/` | FastAPI review UI |
 | 8 Audit & Traceability | `audit.py` | Append-only trail, provenance chains |
 
+### GO extraction engine hardening (2026-08-17)
+
+The first real crawl against a deployed instance found 0 documents on a
+seeded source. Diagnosed by loading the actual live `tn.gov.in` pages in a
+real browser (not just reading the code) rather than guessing:
+
+- **The seeded TN sources were wired to the wrong adapter.** `TnGoPortalAdapter`
+  (`discovery/adapters/tn_go_portal.py`) — table-row parsing with GO
+  number/date/department/subject hint extraction — already existed but was
+  never attached to any seed source; every one of them used the generic
+  fallback adapter instead. All six `SEED_SOURCES` (`registry.py`) now use it.
+- **The crawler never followed listing/directory pages.** The "TN GO Portal"
+  seed source points at `godept_list.php`, a real, working department
+  directory with links to all 39 departments' own GO listing pages — but
+  `GenericLinksAdapter`'s follow-heuristic only recognizes pagination
+  controls, not "this links to another listing page." `TnGoPortalAdapter`
+  now separately recognizes TN-specific listing-page URL patterns
+  (`go.php`, `godept_list`, `document_dept_list`, `whatsnew.php`) and queues
+  them, so a crawl starting on the directory page actually reaches the
+  per-department tables instead of dead-ending on page one.
+- **The seeded `year` query parameter was a hardcoded literal.** `go.php`
+  takes a base64-encoded year (`year=MjAyNg==` → `"2026"`); it was baked in
+  as a fixed string that would silently go stale every January. `registry.py`
+  now computes it from the current date at seed time.
+- **`max_pages` was too tight for the fix above.** Bumped from the crawler's
+  default of 5 to 20 for the certification job's crawl step
+  (`operations/jobs.py`) so a hub-page crawl has room to actually follow
+  into department pages, not just discover their URLs and immediately hit
+  the page cap.
+- **`HttpFetcher` sends more realistic headers now** — `Referer` (tracked
+  per host across a crawl session, so subsequent requests to the same host
+  look like organic in-site navigation) plus `Accept`/`Accept-Language` —
+  as defensive hardening against portals that vary behavior by header, even
+  though the specific site tested did not turn out to require it.
+
+**What this does not claim:** these are code-level fixes verified against
+one specific site's current structure and against the adapter's own parsing
+logic (unit-tested against realistic markup shaped like the live pages,
+committed in `tests/test_discovery.py`) — not a guarantee that a live crawl
+against `tn.gov.in` today will find every real GO, since government sites
+change layout without notice and this repository has no automated way to
+re-verify the live site's structure. If a source stops finding documents,
+that is the first thing to re-check by hand.
+
 ### Phase 2 — certification layer (`certification/`)
 
 | Module | Code | Notes |

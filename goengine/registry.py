@@ -6,8 +6,10 @@ active row in `sources` is never crawled and never downloaded.
 
 from __future__ import annotations
 
+import base64
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from . import audit
@@ -194,52 +196,67 @@ def _row_to_source(row: sqlite3.Row) -> Source:
 
 
 # ---------------------------------------------------------------------------
-# Seed set from the blueprint. URLs point at Tamil Nadu government hosts and
-# must be confirmed against the live portals before a production crawl --
-# department landing paths on cms.tn.gov.in change between site revisions.
+# Seed set from the blueprint. URLs point at Tamil Nadu government hosts.
+#
+# The `go.php` department listing pages take a base64-encoded `year` query
+# param (e.g. `year=MjAyNg==` decodes to "2026"). Hardcoding that value goes
+# stale every January, so it is templated as `{year}` here and filled in with
+# the current year at seed time by `_year_param()`. The `dep_id` values below
+# were verified against the live site's own department directory
+# (`godept_list.php`, which every one of these department-specific sources
+# was in turn discovered from) on 2026-08-17 -- confirm again if a source
+# stops finding documents, since the site can renumber departments.
 # ---------------------------------------------------------------------------
+def _year_param() -> str:
+    """Base64-encode the current year the way tn.gov.in's own links do."""
+    year = str(datetime.now(timezone.utc).year)
+    return base64.b64encode(year.encode()).decode()
+
+
 SEED_SOURCES: tuple[dict[str, str], ...] = (
     {
         "name": "Tamil Nadu GO Portal",
         "department": "All Departments",
+        # The department directory itself: no PDFs here, but every
+        # department's go.php listing link is, which the crawler follows.
         "url": "https://www.tn.gov.in/godept_list.php",
         "source_type": "go_portal",
-        "adapter": "generic_links",
+        "adapter": "tn_go_portal",
     },
     {
         "name": "Tamil Nadu Government Gazette",
         "department": "Stationery and Printing",
         "url": "https://stationeryprinting.tn.gov.in/extraordinary_gazette.php",
         "source_type": "gazette",
-        "adapter": "generic_links",
+        "adapter": "tn_go_portal",
     },
     {
         "name": "Health and Family Welfare Department",
         "department": "Health and Family Welfare",
-        "url": "https://www.tn.gov.in/go.php?dep_id=MTE=&year=MjAyNg==",
+        "url": "https://www.tn.gov.in/go.php?dep_id=MTE=&year={year}",
         "source_type": "department_site",
-        "adapter": "generic_links",
+        "adapter": "tn_go_portal",
     },
     {
         "name": "School Education Department",
         "department": "School Education",
-        "url": "https://www.tn.gov.in/go.php?dep_id=Mjg=&year=MjAyNg==",
+        "url": "https://www.tn.gov.in/go.php?dep_id=Mjg=&year={year}",
         "source_type": "department_site",
-        "adapter": "generic_links",
+        "adapter": "tn_go_portal",
     },
     {
         "name": "Rural Development Department",
         "department": "Rural Development and Panchayat Raj",
-        "url": "https://www.tn.gov.in/go.php?dep_id=Mjc=&year=MjAyNg==",
+        "url": "https://www.tn.gov.in/go.php?dep_id=Mjc=&year={year}",
         "source_type": "department_site",
-        "adapter": "generic_links",
+        "adapter": "tn_go_portal",
     },
     {
         "name": "Public Works Department",
         "department": "Public Works",
-        "url": "https://www.tn.gov.in/go.php?dep_id=NDI=&year=MjAyNg==",
+        "url": "https://www.tn.gov.in/go.php?dep_id=NDI=&year={year}",
         "source_type": "department_site",
-        "adapter": "generic_links",
+        "adapter": "tn_go_portal",
     },
 )
 
@@ -247,6 +264,7 @@ SEED_SOURCES: tuple[dict[str, str], ...] = (
 def seed(conn: sqlite3.Connection, *, actor: str = audit.SYSTEM_ACTOR) -> list[int]:
     """Register the blueprint's source list. Idempotent by source name."""
     ids: list[int] = []
+    year = _year_param()
     for spec in SEED_SOURCES:
         existing = get_by_name(conn, spec["name"])
         if existing is not None:
@@ -257,10 +275,10 @@ def seed(conn: sqlite3.Connection, *, actor: str = audit.SYSTEM_ACTOR) -> list[i
                 conn,
                 name=spec["name"],
                 department=spec["department"],
-                url=spec["url"],
+                url=spec["url"].format(year=year),
                 source_type=spec["source_type"],
                 adapter=spec["adapter"],
-                notes="Seeded from Phase 1 blueprint; confirm path against live portal.",
+                notes="Seeded from Phase 1 blueprint; dep_id values verified live 2026-08-17.",
                 actor=actor,
             )
         )

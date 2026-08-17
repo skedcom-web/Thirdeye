@@ -67,6 +67,18 @@ def test_seed_is_idempotent(conn):
     assert len(registry.list_sources(conn)) == len(first)
 
 
+def test_seed_department_urls_carry_the_current_year_and_the_tn_adapter(conn):
+    import base64
+    from datetime import datetime, timezone
+
+    registry.seed(conn)
+    expected_year = base64.b64encode(str(datetime.now(timezone.utc).year).encode()).decode()
+
+    health = registry.get_by_name(conn, "Health and Family Welfare Department")
+    assert f"year={expected_year}" in health.url
+    assert health.adapter == "tn_go_portal"
+
+
 def test_deactivating_a_source_is_audited(conn, source_id):
     registry.set_active(conn, source_id, False, actor="operator")
     assert registry.get_source(conn, source_id).active is False

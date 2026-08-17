@@ -14,7 +14,7 @@ from typing import Annotated
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from .. import audit, registry
+from .. import audit, registry, repository
 from ..certification.categorize import ALL_BUCKETS
 from ..certification.sources import certification_history
 from ..operations import auth
@@ -51,6 +51,7 @@ def register(app: FastAPI) -> None:
     _register_departments(app)
     _register_sources(app)
     _register_jobs(app)
+    _register_documents(app)
     _register_review(app)
     _register_publication(app)
     _register_dashboard(app)
@@ -379,6 +380,29 @@ def _register_jobs(app: FastAPI) -> None:
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
         return JSONResponse(dict(job))
+
+
+# ---------------------------------------------------------------------------
+# Document Library -- every downloaded file, independent of review status,
+# with a download link. Composition only: reads through repository.py and
+# the same tables the review workbench and dashboard already use.
+# ---------------------------------------------------------------------------
+def _register_documents(app: FastAPI) -> None:
+    @app.get("/ops/documents", response_class=HTMLResponse)
+    def documents_list(
+        request: Request, conn: Conn, current_user: LoggedIn,
+        source_id: int | None = None, q: str | None = None,
+    ):
+        return templates.TemplateResponse(
+            request, "documents.html",
+            {
+                "documents": repository.list_documents(conn, source_id=source_id, search=q),
+                "sources": registry.list_sources(conn),
+                "selected_source_id": source_id,
+                "search": q or "",
+                "current_user": current_user,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

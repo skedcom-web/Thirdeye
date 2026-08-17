@@ -110,6 +110,51 @@ def test_portal_adapter_captures_listing_hints(sample_pdfs):
     assert hints["department"] == sample_pdfs[0][0].department
 
 
+def test_portal_adapter_follows_department_directory_pages():
+    """A directory page (tn.gov.in/godept_list.php-shaped) has no PDFs of its
+    own -- only links to each department's own listing page. Those must be
+    queued for follow, or a crawl that starts on the directory dead-ends."""
+    adapter = get_adapter("tn_go_portal")
+    html = """
+      <a href="go.php?dep_id=Mg==&year=MjAyNw==">Agriculture Department</a>
+      <a href="go.php?dep_id=MTE=&year=MjAyNw==">Health and Family Welfare Department</a>
+      <a href="https://cms.tn.gov.in/cms_migrated/document/GO/rd_e_ms_134_2026.pdf">Direct GO PDF</a>
+      <a href="https://news.example.com/unrelated">off-site link</a>
+      <a href="javascript:void(0)">no-op</a>
+    """
+    page = adapter.parse(html, "https://www.tn.gov.in/godept_list.php")
+
+    assert [d.url for d in page.documents] == [
+        "https://cms.tn.gov.in/cms_migrated/document/GO/rd_e_ms_134_2026.pdf"
+    ]
+    assert page.follow == [
+        "https://www.tn.gov.in/go.php?dep_id=Mg==&year=MjAyNw==",
+        "https://www.tn.gov.in/go.php?dep_id=MTE=&year=MjAyNw==",
+    ]
+
+
+def test_portal_adapter_parses_a_real_shaped_department_table():
+    """Shaped after the live tn.gov.in/go.php department listing table."""
+    adapter = get_adapter("tn_go_portal")
+    html = """
+      <table>
+        <tr><th>Date</th><th>G.O. Number</th><th>Subject</th></tr>
+        <tr>
+          <td>31-07-2026</td>
+          <td><a href="https://cms.tn.gov.in/cms_migrated/document/GO/health_ms_221_2026.pdf">G.O.(MS)No.221</a></td>
+          <td>Implementation of Advance Medical Directives - Guidelines - Issued.</td>
+        </tr>
+      </table>
+    """
+    page = adapter.parse(html, "https://www.tn.gov.in/go.php?dep_id=MTE=&year=MjAyNg==")
+
+    assert len(page.documents) == 1
+    doc = page.documents[0]
+    assert doc.url == "https://cms.tn.gov.in/cms_migrated/document/GO/health_ms_221_2026.pdf"
+    assert doc.hints["go_date"] == "31-07-2026"
+    assert doc.hints["go_number"] == "G.O.(MS)No.221"
+
+
 def test_is_due_respects_frequency():
     def make(frequency: str, last: str | None, active: bool = True) -> Source:
         return Source(

@@ -128,6 +128,60 @@ def version_history(conn: sqlite3.Connection, discovered_id: int) -> list[sqlite
     ).fetchall()
 
 
+def list_documents(
+    conn: sqlite3.Connection,
+    *,
+    source_id: int | None = None,
+    search: str | None = None,
+    limit: int = 500,
+) -> list[sqlite3.Row]:
+    """Every downloaded file, newest first, with enough context (source,
+    department, parse/review status, GO number if extracted) for an admin
+    to find and download a specific document without a command line."""
+    clauses: list[str] = []
+    params: list[object] = []
+    if source_id is not None:
+        clauses.append("d.source_id = ?")
+        params.append(source_id)
+    if search:
+        clauses.append("(d.file_name LIKE ? OR go_number.value LIKE ?)")
+        needle = f"%{search}%"
+        params.extend([needle, needle])
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    return conn.execute(
+        f"""
+        SELECT
+            d.id AS document_id,
+            d.file_name,
+            d.byte_size,
+            d.downloaded_at,
+            d.source_url,
+            d.version,
+            s.id AS source_id,
+            s.name AS source_name,
+            s.department AS source_department,
+            dd.status AS discovery_status,
+            r.id AS record_id,
+            r.status AS review_status,
+            go_number.value AS go_number
+          FROM documents d
+          JOIN sources s ON s.id = d.source_id
+          LEFT JOIN discovered_documents dd ON dd.id = d.discovered_id
+          LEFT JOIN extractions e ON e.document_id = d.id
+          LEFT JOIN go_records r ON r.extraction_id = e.id
+          LEFT JOIN go_fields go_number
+                 ON go_number.record_id = r.id
+                AND go_number.field_name = 'go_number'
+                AND go_number.superseded_by IS NULL
+         {where}
+         ORDER BY d.downloaded_at DESC
+         LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
 def stats(settings: Settings, conn: sqlite3.Connection) -> dict[str, int]:
     row = conn.execute(
         "SELECT COUNT(*) AS n, COALESCE(SUM(byte_size), 0) AS bytes,"

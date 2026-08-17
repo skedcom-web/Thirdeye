@@ -17,6 +17,16 @@ from ...registry import is_approved
 from .base import DiscoveredLink, PageResult
 from .generic_links import GenericLinksAdapter, looks_like_document, normalize
 
+# Directory and per-department listing pages on tn.gov.in-style portals.
+# These carry no PDF in their own URL (so `looks_like_document` never
+# matches them), but they are exactly the pages a department directory
+# links to and that a department listing page paginates into -- without
+# recognizing them, a crawl that starts on a hub page like `godept_list.php`
+# never reaches the tables that actually contain the GO links.
+LISTING_PAGE_RE = re.compile(
+    r"(?:godept_list|document_dept_list|go\.php|whatsnew\.php)", re.IGNORECASE
+)
+
 HEADER_HINTS: dict[str, tuple[str, ...]] = {
     "go_number": ("g.o", "go no", "order no", "number", "ms no"),
     "go_date": ("date",),
@@ -81,7 +91,24 @@ class TnGoPortalAdapter:
                 seen.add(link.url)
                 documents.append(link)
 
-        return PageResult(documents=documents, follow=fallback.follow)
+        follow = list(fallback.follow)
+        follow_seen = set(follow)
+        for anchor in soup.find_all("a", href=True):
+            href = str(anchor["href"]).strip()
+            if not href or href.lower().startswith("javascript:"):
+                continue
+            resolved = normalize(urljoin(page_url, href))
+            if (
+                resolved not in seen
+                and resolved not in follow_seen
+                and resolved != page_url
+                and is_approved(resolved)
+                and LISTING_PAGE_RE.search(resolved)
+            ):
+                follow_seen.add(resolved)
+                follow.append(resolved)
+
+        return PageResult(documents=documents, follow=follow)
 
     def _header_map(self, table) -> dict[int, str]:
         header_row = table.find("tr")

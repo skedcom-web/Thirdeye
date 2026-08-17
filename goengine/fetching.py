@@ -64,11 +64,19 @@ class HttpFetcher:
         self._client = httpx.Client(
             follow_redirects=True,
             timeout=timeout,
-            headers={"User-Agent": USER_AGENT},
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9,ta;q=0.8",
+            },
         )
         self._delay = delay_seconds
         self._max_bytes = max_bytes
         self._last_request_at: dict[str, float] = {}
+        # A same-site Referer on every request, not just the first: mimics a
+        # visitor who arrived by clicking a link rather than typing a URL,
+        # which some government portals treat differently.
+        self._last_url_by_host: dict[str, str] = {}
 
     def get(self, url: str) -> Response:
         assert_approved(url)
@@ -76,8 +84,12 @@ class HttpFetcher:
 
         import httpx
 
+        host = urlparse(url).hostname or ""
+        scheme = urlparse(url).scheme
+        referer = self._last_url_by_host.get(host, f"{scheme}://{host}/")
+
         try:
-            with self._client.stream("GET", url) as response:
+            with self._client.stream("GET", url, headers={"Referer": referer}) as response:
                 # Redirects can leave the approved domain; the final URL is
                 # what we would actually be archiving, so re-check it.
                 final_url = str(response.url)
@@ -96,6 +108,7 @@ class HttpFetcher:
                         )
                     chunks.append(chunk)
 
+                self._last_url_by_host[host] = final_url
                 return Response(
                     url=final_url,
                     status_code=response.status_code,

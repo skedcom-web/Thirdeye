@@ -250,7 +250,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # The original PDF, served from the repository
     # -----------------------------------------------------------------------
     @app.get("/documents/{document_id}/pdf")
-    def document_pdf(document_id: int, conn: Conn, config: Config, current_user: LoggedIn):
+    def document_pdf(
+        document_id: int, conn: Conn, config: Config, current_user: LoggedIn, download: bool = False,
+    ):
         row = conn.execute(
             "SELECT stored_path, file_name FROM documents WHERE id = ?", (document_id,)
         ).fetchone()
@@ -259,13 +261,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = repository.absolute_path(config, row["stored_path"])
         if not path.exists():
             raise HTTPException(status_code=410, detail="file missing from repository")
-        # "inline" so the reviewer sees the original beside the extracted
-        # fields; FileResponse's `filename=` would force a download instead.
+        # Default "inline" so the reviewer sees the original beside the
+        # extracted fields; ?download=1 (the Document Library's Download
+        # link) switches to "attachment" so the browser saves it instead.
         safe_name = row["file_name"].replace('"', "")
+        disposition = "attachment" if download else "inline"
         return FileResponse(
             path,
             media_type="application/pdf",
-            headers={"content-disposition": f'inline; filename="{safe_name}"'},
+            headers={"content-disposition": f'{disposition}; filename="{safe_name}"'},
         )
 
     @app.get("/documents/{document_id}/verify")

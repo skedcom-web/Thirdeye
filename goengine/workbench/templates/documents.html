@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Document Library · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Document Library</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Every Government Order downloaded from an authorized source, independent of review status.
+    </p>
+  </div>
+</div>
+
+<div class="panel">
+  <form method="get" action="/ops/documents" class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+    <div>
+      <label class="field-label" for="doc-source">Source</label>
+      <select name="source_id" id="doc-source" onchange="this.form.submit()">
+        <option value="">All sources</option>
+        {% for s in sources %}
+        <option value="{{ s.id }}" {% if selected_source_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="flex:1; min-width:200px;">
+      <label class="field-label" for="doc-search">Search filename or GO number</label>
+      <input type="text" name="q" id="doc-search" value="{{ search }}" placeholder="e.g. GO-123-2026 or G.O.(Ms) No.221">
+    </div>
+    <button type="submit" class="ghost">Filter</button>
+    {% if selected_source_id or search %}
+    <a href="/ops/documents" class="muted" style="font-size:13px;">Clear filters</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="panel">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:4px;">
+    <h2 style="margin:0;">📁 Downloaded documents</h2>
+    <span class="muted" style="font-size:12px;">{{ documents|length }} shown, most recent first</span>
+  </div>
+
+  {% if documents %}
+  <table>
+    <thead>
+      <tr>
+        <th>File</th>
+        <th>Source / Department</th>
+        <th>GO Number</th>
+        <th>Status</th>
+        <th>Size</th>
+        <th>Downloaded</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in documents %}
+      <tr>
+        <td>{{ d.file_name }}{% if d.version > 1 %} <span class="pill neutral">v{{ d.version }}</span>{% endif %}</td>
+        <td>
+          {{ d.source_name }}
+          {% if d.source_department %}<br><span class="muted" style="font-size:12px;">{{ d.source_department }}</span>{% endif %}
+        </td>
+        <td class="mono">{{ d.go_number or '—' }}</td>
+        <td>
+          {% if d.review_status == 'approved' %}<span class="pill ok">Approved</span>
+          {% elif d.review_status == 'rejected' %}<span class="pill bad">Rejected</span>
+          {% elif d.review_status == 'pending' %}<span class="pill warn">Pending review</span>
+          {% elif d.discovery_status %}<span class="pill neutral">{{ d.discovery_status|title }}</span>
+          {% else %}<span class="pill neutral">Downloaded</span>
+          {% endif %}
+        </td>
+        <td class="mono" style="font-size:12px;">{{ (d.byte_size / 1024)|round(1) }} KB</td>
+        <td class="mono" style="font-size:12px;">{{ d.downloaded_at[:16] if d.downloaded_at else '—' }}</td>
+        <td style="white-space:nowrap;">
+          <a href="/documents/{{ d.document_id }}/pdf" target="_blank" rel="noopener">View</a>
+          &nbsp;·&nbsp;
+          <a href="/documents/{{ d.document_id }}/pdf?download=1">Download</a>
+          {% if d.record_id %}
+          &nbsp;·&nbsp;
+          <a href="/records/{{ d.record_id }}">Record →</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="occ-empty-state">
+    <div class="occ-empty-icon" aria-hidden="true">📁</div>
+    <p>No documents downloaded yet{% if selected_source_id or search %} matching this filter{% endif %}.</p>
+    <a href="/ops/jobs" class="btn-lg btn-primary" style="margin-top:8px;">Run Extraction →</a>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
