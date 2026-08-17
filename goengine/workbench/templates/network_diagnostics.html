@@ -71,8 +71,18 @@
 
     {% if t.error_message %}
     <div class="evidence" style="margin-top:12px; background:rgba(255,0,0,0.04); border:1px solid rgba(255,0,0,0.1); color:var(--bad); font-size:12px;">
-      <strong>Error:</strong> {{ t.error_message }}
-      {% if t.failure_category %} (Category: {{ t.failure_category }} / {{ t.failure_subtype }}){% endif %}
+      <strong>Root Cause:</strong> <span class="pill bad">{{ t.failure_category }}</span>
+      &middot; Failed at <strong>{{ t.failure_stage or '—' }}</strong> (last successful: {{ t.last_successful_stage or 'none' }})
+      &middot; Confidence: <strong>{{ t.confidence_level or '—' }}</strong>
+      <br>{{ t.error_message }}
+    </div>
+    {% endif %}
+    {% if t.comparison_conclusion %}
+    <div class="evidence" style="margin-top:8px; font-size:12px; background:rgba(0,0,0,0.02);">
+      <strong>Comparative conclusion:</strong>
+      <span class="pill {% if t.comparison_conclusion == 'Render outbound connectivity healthy' %}ok{% elif t.comparison_conclusion == 'Target-specific failure detected' %}warn{% else %}bad{% endif %}">
+        {{ t.comparison_conclusion }}
+      </span>
     </div>
     {% endif %}
   </div>

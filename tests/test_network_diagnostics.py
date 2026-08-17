@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from goengine.db import init_db, utcnow
 from goengine.config import Settings
 from goengine.fetching import OfflineFetcher, Response, FetchError
+from goengine.operations import network_diagnosis as diag
 from goengine.operations import network_diagnostics as ops_net_diag
 from goengine.operations import sources as ops_sources
 from goengine.workbench.app import create_app
@@ -27,10 +28,12 @@ def test_run_diagnostic_test_success(conn):
     fetcher = OfflineFetcher()
     fetcher.add_html("https://www.google.com", "<html>Google</html>")
     
-    test_id = ops_net_diag.run_diagnostic_test(
+    test_id, result = ops_net_diag.run_diagnostic_test(
         conn, "Google", "https://www.google.com", fetcher
     )
-    
+    assert result is not None
+    assert result.ok  # no root cause to report on success, but the result itself is real
+
     test = conn.execute("SELECT * FROM network_connectivity_tests WHERE id = ?", (test_id,)).fetchone()
     assert test is not None
     assert test["target_name"] == "Google"
@@ -49,16 +52,19 @@ def test_run_diagnostic_test_failure(conn):
     # Trigger KeyError to simulate connection error / FetchError
     # OfflineFetcher get raises FetchError for unregistered URLs
     
-    test_id = ops_net_diag.run_diagnostic_test(
+    test_id, result = ops_net_diag.run_diagnostic_test(
         conn, "Failure Target", "https://does-not-exist.example.com", fetcher
     )
-    
+    assert result is not None
+    assert result.root_cause == diag.UNKNOWN_FAILURE  # never the old literal "network_failure"
+
     test = conn.execute("SELECT * FROM network_connectivity_tests WHERE id = ?", (test_id,)).fetchone()
     assert test is not None
     assert test["target_name"] == "Failure Target"
     assert test["status"] == "FAILED"
     assert test["status_code"] == 0
-    assert test["failure_category"] == "network_failure"
+    assert test["failure_category"] != "network_failure"
+    assert test["failure_category"] == diag.UNKNOWN_FAILURE
     assert "no offline response" in test["error_message"]
 
 
@@ -77,15 +83,22 @@ def test_run_all_diagnostics(conn):
     fetcher = OfflineFetcher()
     fetcher.add_html("https://www.google.com", "Google")
     fetcher.add_html("https://www.wikipedia.org", "Wikipedia")
+    fetcher.add_html("https://www.example.com", "Example")
     fetcher.add_html("https://www.tn.gov.in", "TN Home")
     fetcher.add_html("https://www.tn.gov.in/go_view/dept.php", "TN Directory")
     fetcher.add_html("https://tn.gov.in/edu", "Source URL")
-    
+
     test_ids = ops_net_diag.run_all_diagnostics(conn, fetcher)
-    
-    # Built-in (4) + Active Sources (1) = 5 tests
-    assert len(test_ids) == 5
-    
+
+    # Built-in (5, including the Example.com control target) + Active Sources (1) = 6 tests
+    assert len(test_ids) == 6
+
+    # Every target's comparison_conclusion should say healthy, since every
+    # control and every target succeeded in this run.
+    conclusions = conn.execute("SELECT comparison_conclusion FROM network_connectivity_tests").fetchall()
+    non_control_conclusions = [c["comparison_conclusion"] for c in conclusions if c["comparison_conclusion"] is not None]
+    assert all(c == diag.CONCLUSION_HEALTHY for c in non_control_conclusions)
+
     tests = conn.execute("SELECT target_name FROM network_connectivity_tests ORDER BY id").fetchall()
     names = [t["target_name"] for t in tests]
     assert "Google" in names

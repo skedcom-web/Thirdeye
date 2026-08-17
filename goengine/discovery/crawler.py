@@ -151,10 +151,23 @@ def crawl_source(
             failure_category = response.failure_category if (response and response.failure_category) else ""
             failure_subtype = response.failure_subtype if (response and response.failure_subtype) else ""
             err_msg = response.error_message if (response and response.error_message) else (fetch_error_msg or "")
+            last_successful_stage = response.last_successful_stage if response else None
+            failure_stage = response.failure_stage if response else None
+            confidence_level = response.confidence_level if response else ""
+            exception_type = response.exception_type if response else ""
+            exception_message = response.exception_message if response else ""
 
             if fetch_error_msg and not failure_category:
-                failure_category = "network_failure"
-                failure_subtype = "unknown_network"
+                # HttpFetcher always attaches a classified Response now (see
+                # network_diagnosis.py); reaching this branch means the
+                # exception came from somewhere the classifier hasn't been
+                # taught about yet -- UNKNOWN_FAILURE, not the old
+                # "network_failure" default, is itself useful signal that
+                # the classifier needs extending, not a resigned guess.
+                from ..operations import network_diagnosis as diag
+                failure_category = diag.UNKNOWN_FAILURE
+                failure_subtype = diag.UNKNOWN_FAILURE
+                confidence_level = diag.CONFIDENCE_LOW
 
             conn.execute(
                 """
@@ -162,14 +175,18 @@ def crawl_source(
                     (crawl_run_id, url, status_code, response_size, content_type,
                      response_time_ms, duration_ms, redirect_count, timestamp,
                      user_agent, proxy_used, ssl_verified, error_message,
-                     failure_category, failure_subtype)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     failure_category, failure_subtype,
+                     last_successful_stage, failure_stage, confidence_level,
+                     exception_type, exception_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id, page_url, status_code, response_size, content_type,
                     response_time_ms, duration_ms, redirect_count, utcnow(),
                     user_agent, proxy_used, ssl_verified_num, err_msg,
-                    failure_category, failure_subtype
+                    failure_category, failure_subtype,
+                    last_successful_stage, failure_stage, confidence_level,
+                    exception_type, exception_message
                 )
             )
 

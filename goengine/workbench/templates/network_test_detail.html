@@ -28,14 +28,35 @@
     <tr><th>Redirects Followed</th><td>{{ test.redirect_count }}</td></tr>
     <tr><th>SSL Verification Mode</th><td>{{ 'Enabled' if test.ssl_verified else 'Bypassed (Fallback)' }}</td></tr>
     <tr><th>Egress User Agent</th><td class="mono" style="font-size:11px;">{{ test.user_agent or '—' }}</td></tr>
-    {% if test.failure_category %}
-    <tr><th>Failure Classification</th><td><span class="pill bad">{{ test.failure_category }}</span> / <span class="pill neutral">{{ test.failure_subtype }}</span></td></tr>
-    {% endif %}
-    {% if test.error_message %}
-    <tr><th>Error Message</th><td style="color:var(--bad); font-weight:bold;">{{ test.error_message }}</td></tr>
-    {% endif %}
   </table>
 </div>
+
+{% if test.failure_category %}
+<div class="panel" style="margin-top:16px;">
+  <h3>Root Cause Classification</h3>
+  <table style="margin-top:12px;">
+    <tr><th style="width:200px;">Target URL</th><td class="mono" style="word-break:break-all;">{{ test.url }}</td></tr>
+    <tr><th>Last Successful Stage</th><td class="mono">{{ test.last_successful_stage or '(none — first stage failed)' }}</td></tr>
+    <tr><th>Failure Stage</th><td class="mono">{{ test.failure_stage or '—' }}</td></tr>
+    <tr><th>Root Cause Category</th><td><span class="pill bad">{{ test.failure_category }}</span></td></tr>
+    <tr><th>Technical Evidence</th><td style="color:var(--bad);">{{ test.error_message or '—' }}</td></tr>
+    <tr><th>Exception Type</th><td class="mono">{{ test.exception_type or '—' }}</td></tr>
+    <tr><th>Exception Message</th><td class="mono">{{ test.exception_message or '—' }}</td></tr>
+    <tr><th>Confidence Level</th>
+        <td><span class="pill {{ 'ok' if test.confidence_level == 'HIGH' else ('warn' if test.confidence_level == 'MEDIUM' else 'neutral') }}">{{ test.confidence_level or '—' }}</span></td></tr>
+  </table>
+</div>
+{% endif %}
+
+{% if test.comparison_conclusion %}
+<div class="panel" style="margin-top:16px;">
+  <h3>Comparative Diagnosis</h3>
+  <p class="muted">Based only on whether the control targets (Google, Wikipedia, Example.com) tested in the same run also failed.</p>
+  <span class="pill {% if test.comparison_conclusion == 'Render outbound connectivity healthy' %}ok{% elif test.comparison_conclusion == 'Target-specific failure detected' %}warn{% else %}bad{% endif %}" style="font-size:14px; padding:8px 16px;">
+    {{ test.comparison_conclusion }}
+  </span>
+</div>
+{% endif %}
 
 <!-- Response Headers -->
 <div class="panel" style="margin-top:16px;">

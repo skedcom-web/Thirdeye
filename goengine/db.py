@@ -86,6 +86,28 @@ SOURCES_DIAGNOSTICS_COLUMNS: dict[str, str] = {
     "allow_ssl_fallback": "INTEGER NOT NULL DEFAULT 0",
 }
 
+# Root Cause Classification Framework fields (operations/network_diagnosis.py).
+# `failure_category` already existed and used to hold the literal string
+# "network_failure" for almost everything; it now holds one of the fourteen
+# definitive root-cause categories instead. These three columns are what
+# make "last successful stage" / "failure stage" / "confidence" queryable
+# rather than only visible if you read `error_message` by eye.
+ROOT_CAUSE_COLUMNS: dict[str, str] = {
+    "last_successful_stage": "TEXT",
+    "failure_stage": "TEXT",
+    "confidence_level": "TEXT",
+    "exception_type": "TEXT",
+    "exception_message": "TEXT",
+}
+
+# Comparative diagnostics (requirement 5): the conclusion drawn from
+# comparing a target against control targets in the same run. Only
+# meaningful for network_connectivity_tests, which is the only table that
+# runs control targets alongside real targets in one batch.
+NETWORK_TEST_COMPARISON_COLUMNS: dict[str, str] = {
+    "comparison_conclusion": "TEXT",
+}
+
 
 def utcnow() -> str:
     """Timestamps are ISO-8601 UTC everywhere; audit trails need one clock."""
@@ -196,7 +218,10 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_DIAGNOSTICS_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "crawl_runs", CRAWL_RUNS_DIAGNOSTICS_COLUMNS)
     _ensure_columns(conn, "sources", SOURCES_DIAGNOSTICS_COLUMNS)
+    _ensure_columns(conn, "crawl_evidences", ROOT_CAUSE_COLUMNS)
     conn.executescript(SCHEMA_NETWORK_TESTS_PATH.read_text(encoding="utf-8"))
+    _ensure_columns(conn, "network_connectivity_tests", ROOT_CAUSE_COLUMNS)
+    _ensure_columns(conn, "network_connectivity_tests", NETWORK_TEST_COMPARISON_COLUMNS)
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

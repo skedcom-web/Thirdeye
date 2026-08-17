@@ -790,17 +790,27 @@ def _register_diagnostics(app: FastAPI) -> None:
             report_lines.append(f"Last Error: {run_data['error'] or 'None'}")
             report_lines.append("\n=== Visited URL Evidences ===")
             for ev in evidences:
-                report_lines.append(
-                    f"URL: {ev['url']}\n"
-                    f"  Status: {ev['status_code']}\n"
-                    f"  Size: {ev['response_size']} bytes\n"
-                    f"  Duration: {ev['duration_ms']:.1f}ms\n"
-                    f"  Redirects: {ev['redirect_count']}\n"
-                    f"  SSL Verified: {ev['ssl_verified']}\n"
-                    f"  Category: {ev['failure_category'] or 'None'}\n"
-                    f"  Subtype: {ev['failure_subtype'] or 'None'}\n"
-                    f"  Error: {ev['error_message'] or 'None'}\n"
-                )
+                lines = [
+                    f"Target URL: {ev['url']}",
+                    f"  HTTP Status: {ev['status_code']}",
+                    f"  Size: {ev['response_size']} bytes",
+                    f"  Duration: {ev['duration_ms']:.1f}ms",
+                    f"  Redirects: {ev['redirect_count']}",
+                    f"  SSL Verified: {ev['ssl_verified']}",
+                ]
+                if ev["failure_category"]:
+                    # The eight fields the Network Truth Framework requires
+                    # every diagnostic report to state explicitly.
+                    lines += [
+                        f"  Last Successful Stage: {ev['last_successful_stage'] or '(none)'}",
+                        f"  Failure Stage: {ev['failure_stage'] or 'None'}",
+                        f"  Root Cause Category: {ev['failure_category']}",
+                        f"  Technical Evidence: {ev['error_message'] or 'None'}",
+                        f"  Exception Type: {ev['exception_type'] or 'None'}",
+                        f"  Exception Message: {ev['exception_message'] or 'None'}",
+                        f"  Confidence Level: {ev['confidence_level'] or 'None'}",
+                    ]
+                report_lines.append("\n".join(lines) + "\n")
             
             report_text = "\n".join(report_lines)
             
@@ -887,12 +897,15 @@ def _register_diagnostics(app: FastAPI) -> None:
         stats_7days = _get_failure_stats(conn, 7)
         stats_30days = _get_failure_stats(conn, 30)
 
+        # Breakdown across the actual Network Truth Framework categories --
+        # not filtered to one literal category name, since every row's
+        # failure_category is already one of the fourteen definitive causes.
         subtype_breakdown = conn.execute(
             """
-            SELECT failure_subtype, COUNT(*) AS n
+            SELECT failure_category AS failure_subtype, COUNT(*) AS n
               FROM crawl_evidences
-             WHERE failure_category = 'network_failure'
-             GROUP BY failure_subtype
+             WHERE failure_category IS NOT NULL AND failure_category != ''
+             GROUP BY failure_category
              ORDER BY n DESC
             """
         ).fetchall()
@@ -1018,8 +1031,13 @@ def _get_failure_stats(conn: sqlite3.Connection, days_ago: int) -> dict:
     else:
         start_date = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
 
+    # Every one of the fourteen Network Truth Framework categories represents
+    # a network/HTTP-layer failure (that is the whole domain this
+    # classification covers) -- any non-empty failure_category counts here,
+    # not a literal-string match against one specific category name.
     net_failures = conn.execute(
-        "SELECT COUNT(*) FROM crawl_evidences WHERE failure_category = 'network_failure' AND timestamp >= ?",
+        "SELECT COUNT(*) FROM crawl_evidences WHERE failure_category IS NOT NULL "
+        "AND failure_category != '' AND timestamp >= ?",
         (start_date,)
     ).fetchone()[0]
 
