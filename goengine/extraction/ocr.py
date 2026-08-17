@@ -193,18 +193,9 @@ def apply_to_extraction(
 ) -> OcrOutput | None:
     """OCR the weak pages of an existing extraction and merge in improvements.
 
-    A page's digital text is replaced only when the OCR result is both longer
-    and above `min_confidence` -- otherwise the sparse digital text is kept
-    rather than risk seeding field extraction with low-confidence OCR noise.
     Returns None if there was nothing worth OCRing (e.g. Tesseract missing).
     """
-    pages = conn.execute(
-        "SELECT page_number, text, char_count FROM extraction_pages WHERE extraction_id = ?",
-        (extraction_id,),
-    ).fetchall()
-    weak_pages = [
-        int(r["page_number"]) for r in pages if int(r["char_count"]) < MIN_CHARS_PER_PAGE_FOR_TEXT
-    ]
+    weak_pages = _weak_pages(conn, extraction_id)
     if not weak_pages:
         return None
     if not is_available():
@@ -219,18 +210,70 @@ def apply_to_extraction(
         return None
 
     output = ocr_pdf(document_path, weak_pages, languages=languages, dpi=dpi)
+    _merge_ocr_output(conn, extraction_id, output, min_confidence=min_confidence, actor=actor, source="server")
+    return output
+
+
+def apply_precomputed_ocr(
+    conn: sqlite3.Connection,
+    extraction_id: int,
+    output: OcrOutput,
+    *,
+    min_confidence: float = OCR_MIN_CONFIDENCE,
+    actor: str = audit.SYSTEM_ACTOR,
+) -> None:
+    """Merges OCR results a local agent already computed (Tesseract may not
+    be installed on this machine at all -- see the Phase 3.4 design note in
+    goengine/pipeline.py -- so this never calls ocr_pdf()/is_available()).
+    Only the OCR page text crosses the trust boundary; everything downstream
+    (categorization, field extraction) still runs from this server's own
+    code on the merged text, exactly as for any other document."""
+    if not output.pages:
+        return
+    _merge_ocr_output(conn, extraction_id, output, min_confidence=min_confidence, actor=actor, source="local_agent")
+
+
+def _weak_pages(conn: sqlite3.Connection, extraction_id: int) -> list[int]:
+    pages = conn.execute(
+        "SELECT page_number, char_count FROM extraction_pages WHERE extraction_id = ?",
+        (extraction_id,),
+    ).fetchall()
+    return [int(r["page_number"]) for r in pages if int(r["char_count"]) < MIN_CHARS_PER_PAGE_FOR_TEXT]
+
+
+def _merge_ocr_output(
+    conn: sqlite3.Connection,
+    extraction_id: int,
+    output: OcrOutput,
+    *,
+    min_confidence: float,
+    actor: str,
+    source: str,
+) -> None:
+    """Records an OCR run and merges its results into `extraction_pages`.
+
+    A page's digital text is replaced only when the OCR result is both longer
+    and above `min_confidence` -- otherwise the sparse digital text is kept
+    rather than risk seeding field extraction with low-confidence OCR noise.
+    `source` ('server' | 'local_agent') records whether this ran live on this
+    machine or was submitted pre-computed by a local extraction agent."""
+    pages = conn.execute(
+        "SELECT page_number, text, char_count FROM extraction_pages WHERE extraction_id = ?",
+        (extraction_id,),
+    ).fetchall()
+    weak_pages = [int(r["page_number"]) for r in pages if int(r["char_count"]) < MIN_CHARS_PER_PAGE_FOR_TEXT]
 
     ran_at = utcnow()
     cur = conn.execute(
         """
         INSERT INTO ocr_runs
             (extraction_id, engine, engine_version, languages, pages_ocred,
-             mean_word_confidence, ran_at, log)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             mean_word_confidence, ran_at, log, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             extraction_id, output.engine, output.engine_version, output.languages,
-            len(output.pages), output.mean_confidence, ran_at, "\n".join(output.log),
+            len(output.pages), output.mean_confidence, ran_at, "\n".join(output.log), source,
         ),
     )
     ocr_run_id = int(cur.lastrowid)
@@ -296,8 +339,8 @@ def apply_to_extraction(
             "ocr_run_id": ocr_run_id,
             "weak_pages": weak_pages,
             "improved_pages": improved_pages,
-            "languages": languages,
+            "languages": output.languages,
             "mean_confidence": output.mean_confidence,
+            "source": source,
         },
     )
-    return output

@@ -80,6 +80,8 @@ def parse_document(
     *,
     preferred_backend: str | None = None,
     enable_ocr: bool = True,
+    precomputed_ocr: ocrengine.OcrOutput | None = None,
+    actor: str = audit.SYSTEM_ACTOR,
 ) -> int:
     """Text + OCR + metadata extraction for one archived document.
 
@@ -88,20 +90,31 @@ def parse_document(
     Engine -> Text Output pipeline: it only touches pages the digital text
     layer left sparse, and never runs at all if Tesseract isn't installed
     (a document just stays flagged `needs_ocr` for later reprocessing).
+
+    `precomputed_ocr` (Phase 3.4): when a local extraction agent already ran
+    OCR on hardware that has Tesseract (this server may not -- see the
+    module-level note below), its results are merged here via
+    `apply_precomputed_ocr` instead of attempting a live `apply_to_extraction`
+    call. Only the OCR page *text* crosses this trust boundary; the
+    categorization and field-extraction steps below always run from this
+    server's own code on the merged text, exactly as for any other document,
+    so evidence offsets are never trusted from outside this process.
     Returns the GO record id.
     """
     extraction_id = textengine.extract_document(
         conn, settings, document_id, preferred_backend=preferred_backend
     )
 
-    if enable_ocr:
+    if precomputed_ocr is not None:
+        ocrengine.apply_precomputed_ocr(conn, extraction_id, precomputed_ocr, actor=actor)
+    elif enable_ocr:
         row = conn.execute(
             "SELECT stored_path FROM documents WHERE id = ?", (document_id,)
         ).fetchone()
         if row is not None:
             document_path = repository.absolute_path(settings, row["stored_path"])
             try:
-                ocrengine.apply_to_extraction(conn, extraction_id, document_path)
+                ocrengine.apply_to_extraction(conn, extraction_id, document_path, actor=actor)
             except ocrengine.OcrError as exc:
                 audit.record(
                     conn,
@@ -192,28 +205,32 @@ def run_all(
     return report
 
 
-def ingest_local_file(
+def ingest_document_bytes(
     conn: sqlite3.Connection,
     settings: Settings,
-    path: Path,
+    payload: bytes,
     *,
     source_id: int,
     source_url: str,
+    file_name: str,
     link_text: str = "",
-) -> int:
-    """Archive and parse a PDF already on disk. Returns the GO record id.
+    precomputed_ocr: "ocrengine.OcrOutput | None" = None,
+    actor: str = audit.SYSTEM_ACTOR,
+) -> tuple[int, int, bool]:
+    """Archive and parse a PDF already in memory. Returns (document_id,
+    go_record_id, is_new_version).
 
-    For back-filling documents obtained outside the crawler -- an RTI response,
-    a manual download. The declared source URL is still policy-checked and
-    still recorded, so provenance is no weaker than the crawled path.
+    The bytes-accepting core shared by `ingest_local_file` (CLI `thirdeye
+    ingest`, a file on disk) and the Phase 3.4 agent sync endpoint (bytes
+    from an HTTP upload) -- the discovered_documents upsert + archive +
+    parse sequence exists in exactly one place.
     """
     registry.assert_approved(source_url)
     if registry.get_source(conn, source_id) is None:
         raise LookupError(f"no source with id {source_id}")
 
-    payload = path.read_bytes()
     if not acquisition.looks_like_pdf(payload, "application/pdf"):
-        raise ValueError(f"{path} is not a PDF")
+        raise ValueError(f"{file_name}: not a PDF")
 
     now_row = conn.execute(
         "SELECT id FROM discovered_documents WHERE source_id = ? AND url = ?",
@@ -243,15 +260,40 @@ def ingest_local_file(
         discovered_id = int(now_row["id"])
 
     stored = repository.store(settings, payload)
-    document_id, _ = repository.record_document(
+    document_id, is_new_version = repository.record_document(
         conn,
         discovered_id=discovered_id,
         source_id=source_id,
         source_url=source_url,
-        file_name=acquisition.derive_file_name(source_url, link_text) if link_text else path.name,
+        file_name=file_name,
         stored=stored,
         content_type="application/pdf",
         http_status=None,
+        actor=actor,
     )
     crawler.set_status(conn, discovered_id, crawler.STATUS_DOWNLOADED)
-    return parse_document(conn, settings, document_id)
+    record_id = parse_document(conn, settings, document_id, precomputed_ocr=precomputed_ocr, actor=actor)
+    return document_id, record_id, is_new_version
+
+
+def ingest_local_file(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    path: Path,
+    *,
+    source_id: int,
+    source_url: str,
+    link_text: str = "",
+) -> int:
+    """Archive and parse a PDF already on disk. Returns the GO record id.
+
+    For back-filling documents obtained outside the crawler -- an RTI response,
+    a manual download. The declared source URL is still policy-checked and
+    still recorded, so provenance is no weaker than the crawled path.
+    """
+    _, record_id, _ = ingest_document_bytes(
+        conn, settings, path.read_bytes(),
+        source_id=source_id, source_url=source_url, link_text=link_text,
+        file_name=acquisition.derive_file_name(source_url, link_text) if link_text else path.name,
+    )
+    return record_id

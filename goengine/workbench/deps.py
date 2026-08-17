@@ -24,7 +24,7 @@ from fastapi.templating import Jinja2Templates
 from ..config import Settings
 from ..db import connect
 from ..fetching import Fetcher, HttpFetcher
-from ..operations import auth
+from ..operations import agent_auth, auth
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -124,3 +124,27 @@ RequireStates = Annotated[auth.User, Depends(require_permission(auth.PERM_MANAGE
 RequireDepartments = Annotated[auth.User, Depends(require_permission(auth.PERM_MANAGE_DEPARTMENTS))]
 RequirePublish = Annotated[auth.User, Depends(require_permission(auth.PERM_PUBLISH))]
 RequireUsers = Annotated[auth.User, Depends(require_permission(auth.PERM_MANAGE_USERS))]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.4 -- Local Extraction Agent bearer-token auth. Separate from the
+# session/role dependencies above: callers are scripts, not browsers, so a
+# missing/invalid/revoked key is a 401 JSON response, never a login redirect.
+# ---------------------------------------------------------------------------
+def get_agent_key(request: Request, conn: Conn) -> agent_auth.AgentKey | None:
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        return None
+    return agent_auth.verify_key(conn, header[7:].strip())
+
+
+AgentKeyOpt = Annotated[agent_auth.AgentKey | None, Depends(get_agent_key)]
+
+
+def require_agent_key(agent_key: AgentKeyOpt) -> agent_auth.AgentKey:
+    if agent_key is None or not agent_key.active:
+        raise HTTPException(status_code=401, detail="invalid or revoked agent key")
+    return agent_key
+
+
+RequireAgentKey = Annotated[agent_auth.AgentKey, Depends(require_agent_key)]

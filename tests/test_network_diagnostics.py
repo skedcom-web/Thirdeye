@@ -109,10 +109,28 @@ def test_run_all_diagnostics(conn):
 
 
 def test_diagnostics_ui_endpoints(client, conn):
-    # Run tests POST
+    # Run tests POST -- this now starts a background job and redirects
+    # immediately instead of blocking the request for the full run (see
+    # network_diagnostics.start_diagnostic_run), so the UI shows live
+    # progress instead of a request that can hang for minutes with no
+    # feedback. Wait for the background job to finish before asserting on
+    # dashboard content.
     res_run = client.post("/ops/diagnostics/network/run", follow_redirects=False)
     assert res_run.status_code == 303
-    
+    run_id = int(res_run.headers["location"].rsplit("/", 1)[-1])
+
+    import time
+    for _ in range(60):
+        run = ops_net_diag.get_diagnostic_run(conn, run_id)
+        if run["status"] in ("COMPLETED", "FAILED"):
+            break
+        time.sleep(0.5)
+    assert run["status"] == "COMPLETED", run["error"]
+
+    res_run_detail = client.get(f"/ops/diagnostics/network/runs/{run_id}")
+    assert res_run_detail.status_code == 200
+    assert b"COMPLETED" in res_run_detail.content
+
     # Get dashboard GET
     res_dashboard = client.get("/ops/diagnostics/network")
     assert res_dashboard.status_code == 200

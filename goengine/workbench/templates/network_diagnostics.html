@@ -5,12 +5,41 @@
 <div style="display:flex; justify-content:space-between; align-items:center;">
   <h2>Network Connectivity Diagnostics</h2>
   <div style="display:flex; gap:12px;">
+    {% if active_run %}
+    <a href="/ops/diagnostics/network/runs/{{ active_run.id }}" class="btn btn-primary">
+      Run #{{ active_run.id }} in progress ({{ active_run.targets_completed }}/{{ active_run.targets_total or '?' }})&hellip;
+    </a>
+    {% else %}
     <form method="post" action="/ops/diagnostics/network/run" style="margin:0;">
       <button type="submit" class="btn btn-primary" id="run-net-test-btn">Execute Connectivity Test</button>
     </form>
+    {% endif %}
     <a href="/ops/diagnostics" class="btn btn-secondary">Source Diagnostics</a>
   </div>
 </div>
+
+{% if recent_runs %}
+<div class="panel" style="margin-top:12px;">
+  <h3 style="margin:0 0 8px;">Recent Runs</h3>
+  <table style="margin:0;">
+    <thead>
+      <tr><th>Run</th><th>Status</th><th>Progress</th><th>Started</th><th>Finished</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in recent_runs %}
+      <tr>
+        <td class="mono">#{{ r.id }}</td>
+        <td><span class="pill {{ 'ok' if r.status == 'COMPLETED' else ('bad' if r.status == 'FAILED' else 'warn') }}">{{ r.status }}</span></td>
+        <td class="mono">{{ r.targets_completed }}/{{ r.targets_total or '?' }}</td>
+        <td class="mono" style="font-size:12px;">{{ r.started_at or '—' }}</td>
+        <td class="mono" style="font-size:12px;">{{ r.finished_at or '—' }}</td>
+        <td><a href="/ops/diagnostics/network/runs/{{ r.id }}" class="btn btn-sm btn-secondary">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <!-- Executive Summary -->
 <div class="panel" style="margin-top:20px;">

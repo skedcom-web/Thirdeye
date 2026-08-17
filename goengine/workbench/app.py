@@ -83,12 +83,44 @@ def _landing_stats(conn: sqlite3.Connection, settings: Settings) -> dict:
     }
 
 
+def _bootstrap_admin_from_env(settings: Settings) -> None:
+    """If the DB has no users yet and THIRDEYE_ADMIN_USERNAME/PASSWORD are
+    set, create the first platform_admin automatically instead of forcing a
+    human through /setup on every deploy. This matters specifically on
+    platforms where the DB file doesn't survive a redeploy (e.g. no
+    persistent disk actually attached) -- without it, every deploy locks
+    everyone out until someone manually re-runs /setup. No-op (falls back to
+    the manual /setup flow) if the env vars aren't set, so no default
+    credential is ever baked into the app itself."""
+    import os
+
+    username = os.environ.get("THIRDEYE_ADMIN_USERNAME")
+    password = os.environ.get("THIRDEYE_ADMIN_PASSWORD")
+    if not username or not password:
+        return
+
+    conn = init_db(settings)
+    try:
+        if auth.has_any_users(conn):
+            return
+        try:
+            auth.create_user(
+                conn, username=username.strip(), password=password,
+                role=auth.ROLE_PLATFORM_ADMIN, actor="startup-bootstrap",
+            )
+        except auth.AuthError:
+            pass  # e.g. password too short -- leave it to manual /setup rather than crash startup
+    finally:
+        conn.close()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings.load()
     resolved.ensure_dirs()
     # Create the schema once at startup so a fresh checkout can serve
     # immediately; per-request connections stay short-lived.
     init_db(resolved).close()
+    _bootstrap_admin_from_env(resolved)
 
     app = FastAPI(title="Thirdeye Operations Control Center", version="0.3.1")
     app.state.settings = resolved
@@ -547,6 +579,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     _register_operations_routes(app)
+    _register_agent_routes(app)
 
     return app
 
@@ -556,6 +589,13 @@ def _register_operations_routes(app: FastAPI) -> None:
     from . import operations_routes
 
     operations_routes.register(app)
+
+
+def _register_agent_routes(app: FastAPI) -> None:
+    """Phase 3.4 -- Local Extraction Agent sync API."""
+    from . import agent_routes
+
+    agent_routes.register(app)
 
 
 app = create_app()

@@ -59,6 +59,7 @@ def register(app: FastAPI) -> None:
     _register_dashboard(app)
     _register_health(app)
     _register_users(app)
+    _register_agents(app)
     _register_diagnostics(app)
 
 
@@ -642,6 +643,51 @@ def _register_users(app: FastAPI) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 3.4: Local Extraction Agent key management + sync log
+# ---------------------------------------------------------------------------
+def _register_agents(app: FastAPI) -> None:
+    from ..operations import agent_auth
+
+    def _agents_context(request: Request, conn, current_user, *, new_token: str | None = None):
+        sync_log = conn.execute(
+            """
+            SELECT l.*, s.name AS source_name, d.file_name, r.id AS record_id
+              FROM agent_sync_log l
+              LEFT JOIN sources s ON s.id = l.source_id
+              LEFT JOIN documents d ON d.id = l.document_id
+              LEFT JOIN go_records r ON r.id = l.go_record_id
+             ORDER BY l.id DESC LIMIT 200
+            """
+        ).fetchall()
+        return {
+            "keys": agent_auth.list_keys(conn),
+            "sync_log": sync_log,
+            "current_user": current_user,
+            "can_manage": current_user.has_permission(auth.PERM_MANAGE_USERS),
+            "new_token": new_token,
+        }
+
+    @app.get("/ops/agents", response_class=HTMLResponse)
+    def agents_list(request: Request, conn: Conn, current_user: RequireUsers):
+        return templates.TemplateResponse(request, "agents.html", _agents_context(request, conn, current_user))
+
+    @app.post("/ops/agents/add", response_class=HTMLResponse)
+    def agents_add(request: Request, conn: Conn, current_user: RequireUsers, label: Annotated[str, Form()]):
+        try:
+            _, token = agent_auth.generate_key(conn, label=label, created_by=current_user.username)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return templates.TemplateResponse(
+            request, "agents.html", _agents_context(request, conn, current_user, new_token=token)
+        )
+
+    @app.post("/ops/agents/{agent_key_id}/revoke")
+    def agents_revoke(agent_key_id: int, conn: Conn, current_user: RequireUsers):
+        agent_auth.revoke_key(conn, agent_key_id, actor=current_user.username)
+        return RedirectResponse("/ops/agents", status_code=303)
+
+
+# ---------------------------------------------------------------------------
 # Diagnostics & Observability endpoints
 # ---------------------------------------------------------------------------
 def _register_diagnostics(app: FastAPI) -> None:
@@ -963,6 +1009,10 @@ def _register_diagnostics(app: FastAPI) -> None:
             """
         ).fetchall()
 
+        from ..operations import network_diagnostics as ops_net_diag
+        recent_runs = ops_net_diag.list_diagnostic_runs(conn, limit=5)
+        active_run = next((r for r in recent_runs if r["status"] in ("QUEUED", "RUNNING")), None)
+
         return templates.TemplateResponse(
             request, "network_diagnostics.html",
             {
@@ -970,21 +1020,47 @@ def _register_diagnostics(app: FastAPI) -> None:
                 "most_common_failure": most_common_failure,
                 "latest_targets": latest_targets,
                 "history": history,
+                "recent_runs": recent_runs,
+                "active_run": active_run,
                 "current_user": current_user,
             }
         )
 
     @app.post("/ops/diagnostics/network/run")
-    def run_network_diagnostics(conn: Conn, current_user: LoggedIn, fetcher_factory: FetcherFactory):
+    def run_network_diagnostics(
+        conn: Conn, current_user: LoggedIn, config: Config, fetcher_factory: FetcherFactory
+    ):
         if not current_user.has_permission("manage_sources"):
             raise HTTPException(status_code=403, detail="Not authorized")
         from ..operations import network_diagnostics as ops_net_diag
-        fetcher = fetcher_factory()
-        try:
-            ops_net_diag.run_all_diagnostics(conn, fetcher)
-        finally:
-            fetcher.close()
-        return RedirectResponse("/ops/diagnostics/network", status_code=303)
+        run_id = ops_net_diag.start_diagnostic_run(
+            config, created_by=current_user.username, fetcher_factory=fetcher_factory,
+        )
+        return RedirectResponse(f"/ops/diagnostics/network/runs/{run_id}", status_code=303)
+
+    @app.get("/ops/diagnostics/network/runs/{run_id}", response_class=HTMLResponse)
+    def network_diagnostic_run_detail(request: Request, run_id: int, conn: Conn, current_user: LoggedIn):
+        from ..operations import network_diagnostics as ops_net_diag
+        run = ops_net_diag.get_diagnostic_run(conn, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Diagnostic run not found")
+
+        results = []
+        if run["started_at"]:
+            end_time = run["finished_at"] or utcnow()
+            results = conn.execute(
+                """
+                SELECT * FROM network_connectivity_tests
+                 WHERE timestamp >= ? AND timestamp <= ?
+                 ORDER BY id
+                """,
+                (run["started_at"], end_time),
+            ).fetchall()
+
+        return templates.TemplateResponse(
+            request, "network_diagnostic_run.html",
+            {"run": run, "results": results, "current_user": current_user},
+        )
 
     @app.get("/ops/diagnostics/network/{test_id}", response_class=HTMLResponse)
     def network_test_detail(request: Request, test_id: int, conn: Conn, current_user: LoggedIn):

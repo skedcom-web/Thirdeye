@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from .certification.sources import (
     certify_source,
 )
 from .config import Settings
-from .db import init_db, session
+from .db import init_db, session, utcnow
 from .discovery import crawler
 from .discovery.adapters import available as available_adapters
 from .extraction.metadata import ALL_FIELDS
@@ -194,6 +195,116 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             return 2
     print(f"Ingested {path.name} as GO record #{record_id}")
     return 0
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Phase 3.4 -- push locally-downloaded (and locally-OCR'd) documents to
+    a Third Eye server. Pairs with `thirdeye run --data-dir <local>`, which
+    does the discovery/download/parse/OCR that this command then syncs:
+
+        thirdeye run --data-dir localdata && thirdeye sync --server-url https://...
+
+    One bad document never aborts the batch, same principle as run/download/
+    parse -- it's recorded on that document's `agent_sync_error` and the
+    command moves on, so a Task Scheduler/cron job can retry it next time.
+    """
+    settings = _settings(args)
+    server_url = args.server_url.rstrip("/")
+    api_key = args.api_key or os.environ.get("THIRDEYE_AGENT_KEY")
+    if not api_key:
+        print("No API key: pass --api-key or set THIRDEYE_AGENT_KEY", file=sys.stderr)
+        return 2
+
+    import httpx
+
+    with session(settings) as conn:
+        sql = "SELECT id, source_id, source_url, file_name, stored_path FROM documents WHERE agent_synced_at IS NULL"
+        params: list = []
+        if not args.retry_failed:
+            sql += " AND agent_sync_error IS NULL"
+        if args.source_id is not None:
+            sql += " AND source_id = ?"
+            params.append(args.source_id)
+        sql += " ORDER BY id LIMIT ?"
+        params.append(args.limit)
+        rows = conn.execute(sql, params).fetchall()
+
+        results: list[list] = []
+        failed = 0
+        auth_headers = {"Authorization": f"Bearer {api_key}"}
+        with httpx.Client(timeout=60.0) as client:
+            for row in rows:
+                document_id = int(row["id"])
+                extraction = conn.execute(
+                    "SELECT id FROM extractions WHERE document_id = ? ORDER BY id DESC LIMIT 1",
+                    (document_id,),
+                ).fetchone()
+                ocr_pages_payload: list[dict] = []
+                if extraction is not None:
+                    ocr_rows = conn.execute(
+                        """
+                        SELECT op.page_number, op.text, op.mean_word_confidence
+                          FROM ocr_pages op
+                          JOIN ocr_runs orun ON orun.id = op.ocr_run_id
+                         WHERE orun.extraction_id = ? AND orun.source = 'server'
+                         ORDER BY orun.id DESC, op.page_number
+                        """,
+                        (extraction["id"],),
+                    ).fetchall()
+                    seen_pages: set[int] = set()
+                    for r in ocr_rows:
+                        if r["page_number"] in seen_pages:
+                            continue
+                        seen_pages.add(r["page_number"])
+                        ocr_pages_payload.append(
+                            {
+                                "page_number": r["page_number"],
+                                "text": r["text"],
+                                "mean_confidence": r["mean_word_confidence"] or 0.0,
+                            }
+                        )
+
+                payload = {
+                    "source_id": int(row["source_id"]),
+                    "source_url": row["source_url"],
+                    "file_name": row["file_name"],
+                    "ocr_pages": ocr_pages_payload,
+                }
+                file_path = repository.absolute_path(settings, row["stored_path"])
+                try:
+                    with open(file_path, "rb") as fh:
+                        resp = client.post(
+                            f"{server_url}/api/agent/sync/document",
+                            headers=auth_headers,
+                            files={"file": (row["file_name"], fh, "application/pdf")},
+                            data={"payload": json.dumps(payload)},
+                        )
+                    if resp.status_code == 200:
+                        conn.execute(
+                            "UPDATE documents SET agent_synced_at = ?, agent_sync_error = NULL WHERE id = ?",
+                            (utcnow(), document_id),
+                        )
+                        body = resp.json()
+                        status = "already-synced" if body.get("already_synced") else "synced"
+                        results.append([row["file_name"], status, body.get("go_record_id"), ""])
+                    else:
+                        error = f"HTTP {resp.status_code}: {resp.text[:150]}"
+                        conn.execute(
+                            "UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id)
+                        )
+                        results.append([row["file_name"], "failed", "", error])
+                        failed += 1
+                except httpx.HTTPError as exc:
+                    error = str(exc)
+                    conn.execute(
+                        "UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id)
+                    )
+                    results.append([row["file_name"], "failed", "", error])
+                    failed += 1
+
+    _print_table(["DOCUMENT", "STATUS", "SERVER RECORD ID", "ERROR"], results)
+    print(f"\n{len(results) - failed}/{len(results)} synced")
+    return 1 if failed else 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -777,6 +888,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source-id", type=int, required=True)
     p.add_argument("--source-url", required=True, help="official URL this file came from")
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("sync", help="Phase 3.4: push locally-downloaded documents to a Third Eye server")
+    p.add_argument("--server-url", required=True, help="e.g. https://thirdeye-xyz.onrender.com")
+    p.add_argument("--api-key", help="or set THIRDEYE_AGENT_KEY (preferred -- avoids shell history/saved task args)")
+    p.add_argument("--source-id", type=int, help="sync only this source's documents; default: all")
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--retry-failed", action="store_true", help="also re-attempt documents whose last sync failed")
+    p.set_defaults(func=cmd_sync)
 
     # review
     p = sub.add_parser("status", help="pipeline counts")

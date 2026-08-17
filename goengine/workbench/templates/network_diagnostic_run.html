@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Diagnostic Run #{{ run.id }} &middot; Thirdeye{% endblock %}
+{% block content %}
+
+{% if run.status in ('QUEUED', 'RUNNING') %}
+<meta http-equiv="refresh" content="2">
+{% endif %}
+
+<div class="panel">
+  <div style="display:flex; gap:16px; align-items:baseline; justify-content:space-between;">
+    <div style="display:flex; gap:16px; align-items:baseline;">
+      <h2 style="margin:0;">Connectivity Diagnostic Run #{{ run.id }}</h2>
+      <span class="pill {{ 'ok' if run.status == 'COMPLETED' else ('bad' if run.status == 'FAILED' else 'warn') }}">{{ run.status }}</span>
+      {% if run.status in ('QUEUED', 'RUNNING') %}<span class="muted" style="font-size:12px;">auto-refreshing&hellip;</span>{% endif %}
+    </div>
+    <a href="/ops/diagnostics/network" class="btn btn-secondary">Back to Connectivity Diagnostics</a>
+  </div>
+
+  {% if run.status in ('QUEUED', 'RUNNING') %}
+  <div style="margin-top:16px;">
+    <div style="background:rgba(0,0,0,0.06); border-radius:6px; height:10px; overflow:hidden;">
+      <div style="background:var(--ok); height:100%; width:{% if run.targets_total %}{{ (100 * run.targets_completed / run.targets_total)|round(0, 'floor') }}{% else %}0{% endif %}%; transition:width 0.3s;"></div>
+    </div>
+    <div class="muted" style="font-size:12px; margin-top:6px;">
+      {{ run.targets_completed }} of {{ run.targets_total or '?' }} targets tested
+    </div>
+  </div>
+  {% endif %}
+
+  <table style="margin-top:16px;">
+    <tr><th style="width:150px;">Created by</th><td>{{ run.created_by }} at {{ run.created_at }}</td></tr>
+    <tr><th>Started</th><td class="mono">{{ run.started_at or '—' }}</td></tr>
+    <tr><th>Finished</th><td class="mono">{{ run.finished_at or '—' }}</td></tr>
+    <tr><th>Targets</th><td>{{ run.targets_completed }} / {{ run.targets_total }}</td></tr>
+  </table>
+
+  {% if run.error %}
+  <div class="evidence" style="margin-top:12px; white-space:pre-wrap;">{{ run.error }}</div>
+  {% endif %}
+</div>
+
+{% if results %}
+<div class="panel" style="margin-top:16px;">
+  <h3>Results So Far</h3>
+  <table style="margin-top:12px;">
+    <thead>
+      <tr>
+        <th>Target</th>
+        <th>Status</th>
+        <th>HTTP</th>
+        <th>Root Cause</th>
+        <th>Duration</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td><strong>{{ r.target_name }}</strong></td>
+        <td><span class="pill {{ 'ok' if r.status == 'SUCCESS' else 'bad' }}">{{ r.status }}</span></td>
+        <td class="mono">{{ r.status_code or '—' }}</td>
+        <td>{% if r.failure_category %}<span class="pill bad">{{ r.failure_category }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="mono">{% if r.duration_ms is not none %}{{ '%.1f'|format(r.duration_ms) }}ms{% else %}—{% endif %}</td>
+        <td><a href="/ops/diagnostics/network/{{ r.id }}" class="btn btn-sm btn-secondary">Inspect</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif run.status in ('QUEUED', 'RUNNING') %}
+<p class="muted" style="margin-top:16px;">Waiting for the first result to come in&hellip;</p>
+{% endif %}
+
+{% endblock %}

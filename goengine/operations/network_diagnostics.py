@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import traceback
+from typing import Callable
 from . import network_diagnosis as diag
-from ..db import utcnow
+from ..config import Settings
+from ..db import connect, utcnow
 from ..fetching import Fetcher, FetchError, HttpFetcher, Response
+
+STATUS_QUEUED = "QUEUED"
+STATUS_RUNNING = "RUNNING"
+STATUS_COMPLETED = "COMPLETED"
+STATUS_FAILED = "FAILED"
 
 # Known-good, always-off-policy hosts used purely as control targets: if
 # these also fail in the same diagnostic run, the honest conclusion is that
@@ -164,6 +173,8 @@ def run_diagnostic_test(
 def run_all_diagnostics(
     conn: sqlite3.Connection,
     fetcher: Fetcher,
+    *,
+    run_id: int | None = None,
 ) -> list[int]:
     """Runs connectivity checks against all built-in targets and any active
     registered sources, then computes a comparative conclusion for every
@@ -171,10 +182,23 @@ def run_all_diagnostics(
     "Target-specific failure detected", or "Global network issue detected"
     -- based only on whether the control targets (Google/Wikipedia/
     Example.com) also failed in this same run. The target's own
-    `failure_category` is never rewritten by this step."""
+    `failure_category` is never rewritten by this step.
+
+    Every target (5 builtin + N active sources) is probed with its own
+    request timeout, so a full run can take minutes -- if `run_id` is given
+    (set by `start_diagnostic_run`'s background thread), `targets_completed`
+    on that row is incremented after each one so the UI can poll live
+    progress instead of the caller blocking silently."""
     test_ids: list[int] = []
     control_results: list[diag.StageResult] = []
     target_rows: list[tuple[int, diag.StageResult | None]] = []
+
+    sources = conn.execute("SELECT id, name, url FROM sources WHERE active = 1").fetchall()
+    if run_id is not None:
+        conn.execute(
+            "UPDATE network_diagnostic_runs SET targets_total = ? WHERE id = ?",
+            (len(BUILTIN_TARGETS) + len(sources), run_id),
+        )
 
     for name, url in BUILTIN_TARGETS:
         row_id, result = run_diagnostic_test(conn, name, url, fetcher, enforce_policy=False)
@@ -183,14 +207,23 @@ def run_all_diagnostics(
             control_results.append(result)
         elif result is not None:
             target_rows.append((row_id, result))
+        if run_id is not None:
+            conn.execute(
+                "UPDATE network_diagnostic_runs SET targets_completed = targets_completed + 1 WHERE id = ?",
+                (run_id,),
+            )
 
-    sources = conn.execute("SELECT id, name, url FROM sources WHERE active = 1").fetchall()
     for s in sources:
         name = f"Source: {s['name']}"
         row_id, result = run_diagnostic_test(conn, name, s["url"], fetcher, enforce_policy=True)
         test_ids.append(row_id)
         if result is not None:
             target_rows.append((row_id, result))
+        if run_id is not None:
+            conn.execute(
+                "UPDATE network_diagnostic_runs SET targets_completed = targets_completed + 1 WHERE id = ?",
+                (run_id,),
+            )
 
     for row_id, result in target_rows:
         conclusion = diag.build_comparison_conclusion(result, control_results)
@@ -200,3 +233,63 @@ def run_all_diagnostics(
         )
 
     return test_ids
+
+
+# ---------------------------------------------------------------------------
+# Background job wrapper -- mirrors operations/jobs.py's certification job
+# pattern: a daemon thread with its own connection, writing progress to a row
+# that the workbench polls via GET, so "Execute Connectivity Test" returns
+# immediately instead of holding the HTTP request open for the full run.
+# ---------------------------------------------------------------------------
+def start_diagnostic_run(
+    settings: Settings,
+    *,
+    created_by: str,
+    fetcher_factory: Callable[[], Fetcher] = HttpFetcher,
+) -> int:
+    conn = connect(settings.db_path)
+    try:
+        cur = conn.execute(
+            "INSERT INTO network_diagnostic_runs (status, created_by, created_at) VALUES (?, ?, ?)",
+            (STATUS_QUEUED, created_by, utcnow()),
+        )
+        run_id = int(cur.lastrowid)
+    finally:
+        conn.close()
+
+    thread = threading.Thread(target=_run_diagnostic_run, args=(settings, run_id, fetcher_factory), daemon=True)
+    thread.start()
+    return run_id
+
+
+def _run_diagnostic_run(settings: Settings, run_id: int, fetcher_factory: Callable[[], Fetcher]) -> None:
+    conn = connect(settings.db_path)
+    fetcher = fetcher_factory()
+    try:
+        conn.execute(
+            "UPDATE network_diagnostic_runs SET status = ?, started_at = ? WHERE id = ?",
+            (STATUS_RUNNING, utcnow(), run_id),
+        )
+        run_all_diagnostics(conn, fetcher, run_id=run_id)
+        conn.execute(
+            "UPDATE network_diagnostic_runs SET status = ?, finished_at = ? WHERE id = ?",
+            (STATUS_COMPLETED, utcnow(), run_id),
+        )
+    except Exception as exc:
+        conn.execute(
+            "UPDATE network_diagnostic_runs SET status = ?, finished_at = ?, error = ? WHERE id = ?",
+            (STATUS_FAILED, utcnow(), f"{exc}\n{traceback.format_exc()}", run_id),
+        )
+    finally:
+        fetcher.close()
+        conn.close()
+
+
+def get_diagnostic_run(conn: sqlite3.Connection, run_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM network_diagnostic_runs WHERE id = ?", (run_id,)).fetchone()
+
+
+def list_diagnostic_runs(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM network_diagnostic_runs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()

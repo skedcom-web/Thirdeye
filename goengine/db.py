@@ -16,6 +16,7 @@ SCHEMA_PHASE2_PATH = PACKAGE_DIR / "schema_phase2.sql"
 SCHEMA_PHASE3_PATH = PACKAGE_DIR / "schema_phase3.sql"
 SCHEMA_DIAGNOSTICS_PATH = PACKAGE_DIR / "schema_diagnostics.sql"
 SCHEMA_NETWORK_TESTS_PATH = PACKAGE_DIR / "schema_network_tests.sql"
+SCHEMA_AGENT_PATH = PACKAGE_DIR / "schema_agent.sql"
 
 # Columns added to the pre-existing `sources` table for Phase 1 certification.
 # SQLite's ALTER TABLE has no "ADD COLUMN IF NOT EXISTS", so this is applied
@@ -106,6 +107,23 @@ ROOT_CAUSE_COLUMNS: dict[str, str] = {
 # runs control targets alongside real targets in one batch.
 NETWORK_TEST_COMPARISON_COLUMNS: dict[str, str] = {
     "comparison_conclusion": "TEXT",
+}
+
+# Phase 3.4 -- Local Extraction Agent. `source` distinguishes an OCR run
+# produced live on this machine (the normal Render path -- when Tesseract is
+# actually installed) from one submitted pre-computed by a local agent
+# syncing a document it already OCR'd on hardware that has Tesseract.
+OCR_RUNS_AGENT_COLUMNS: dict[str, str] = {
+    "source": "TEXT NOT NULL DEFAULT 'server'",
+}
+
+# Local-only bookkeeping for `thirdeye sync`: which locally-downloaded
+# documents have already been pushed to the cloud portal. Meaningless (just
+# an unused column) on the cloud DB itself, since init_db() is identical on
+# both sides.
+DOCUMENTS_AGENT_SYNC_COLUMNS: dict[str, str] = {
+    "agent_synced_at": "TEXT",
+    "agent_sync_error": "TEXT",
 }
 
 
@@ -222,6 +240,9 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_NETWORK_TESTS_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "network_connectivity_tests", ROOT_CAUSE_COLUMNS)
     _ensure_columns(conn, "network_connectivity_tests", NETWORK_TEST_COMPARISON_COLUMNS)
+    conn.executescript(SCHEMA_AGENT_PATH.read_text(encoding="utf-8"))
+    _ensure_columns(conn, "ocr_runs", OCR_RUNS_AGENT_COLUMNS)
+    _ensure_columns(conn, "documents", DOCUMENTS_AGENT_SYNC_COLUMNS)
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

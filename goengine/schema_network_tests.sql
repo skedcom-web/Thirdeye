@@ -19,3 +19,18 @@ CREATE TABLE IF NOT EXISTS network_connectivity_tests (
     response_headers   TEXT,  -- JSON string
     response_html      TEXT   -- Snippet of HTML response
 );
+
+-- Tracks one execution of "run all connectivity diagnostics" as a background
+-- job, so the UI can show live progress instead of blocking the request for
+-- however long it takes to probe every control target + registered source.
+CREATE TABLE IF NOT EXISTS network_diagnostic_runs (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    status             TEXT NOT NULL DEFAULT 'QUEUED',
+    targets_total      INTEGER NOT NULL DEFAULT 0,
+    targets_completed  INTEGER NOT NULL DEFAULT 0,
+    created_by         TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    started_at         TEXT,
+    finished_at        TEXT,
+    error              TEXT
+);

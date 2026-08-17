@@ -120,6 +120,19 @@
     <div class="wf-card-arrow" aria-hidden="true">→</div>
   </a>
 
+  <a class="workflow-card" href="/ops/agents" id="hub-agents-btn">
+    <div class="wf-card-icon" aria-hidden="true">💻</div>
+    <div class="wf-card-body">
+      <h3>Local Extraction Agents</h3>
+      <p>Issue sync keys for local machines and monitor synced documents.</p>
+      <div class="wf-card-links">
+        <span>🔑 Keys</span>
+        <span>📥 Sync log</span>
+      </div>
+    </div>
+    <div class="wf-card-arrow" aria-hidden="true">→</div>
+  </a>
+
   {% if current_user and current_user.role == 'platform_admin' %}
   <div class="workflow-card-section-label">Advanced Administration</div>
   <a class="workflow-card workflow-card-muted" href="/ops/health" id="hub-health-btn">

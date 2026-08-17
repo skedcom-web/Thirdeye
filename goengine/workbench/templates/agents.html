@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Local Extraction Agents &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h2>Local Extraction Agents</h2>
+  <a href="/ops" class="btn btn-secondary">Back to Admin Hub</a>
+</div>
+<p class="muted" style="margin-top:4px;">
+  Phase 3.4: run discovery/download/OCR from a machine with unblocked access to government sites,
+  then sync the results here. See <code>thirdeye run</code> + <code>thirdeye sync</code> in the CLI.
+</p>
+
+{% if new_token %}
+<div class="panel" style="margin-top:16px; border: 2px solid var(--ok);">
+  <h3>New agent key generated</h3>
+  <p><strong>Copy this now &mdash; it will not be shown again.</strong></p>
+  <code class="mono" style="display:block; padding:12px; background:rgba(0,0,0,0.04); border-radius:6px; word-break:break-all; font-size:14px;">{{ new_token }}</code>
+  <p class="muted" style="margin-top:8px; font-size:13px;">
+    Set it as <code>THIRDEYE_AGENT_KEY</code> on the local machine, e.g.:<br>
+    <code class="mono">thirdeye sync --server-url {{ request.url.scheme }}://{{ request.url.netloc }} </code>
+    (with <code>THIRDEYE_AGENT_KEY</code> set in the environment)
+  </p>
+</div>
+{% endif %}
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Agent Keys</h3>
+  <table style="margin-top:12px;">
+    <tr><th>Label</th><th>Key prefix</th><th>Created by</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr>
+    {% for k in keys %}
+    <tr>
+      <td>{{ k.label }}</td>
+      <td class="mono">{{ k.key_prefix }}&hellip;</td>
+      <td>{{ k.created_by }}</td>
+      <td class="mono" style="font-size:12px;">{{ k.created_at }}</td>
+      <td class="mono" style="font-size:12px;">{{ k.last_used_at or '—' }}</td>
+      <td><span class="pill {{ 'ok' if k.active else 'bad' }}">{{ 'Active' if k.active else 'Revoked' }}</span></td>
+      <td>
+        {% if can_manage and k.active %}
+        <form class="inline" method="post" action="/ops/agents/{{ k.id }}/revoke">
+          <button class="ghost" type="submit">Revoke</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">No agent keys yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if can_manage %}
+<div class="panel" style="margin-top:16px;">
+  <h3>Generate key</h3>
+  <form class="inline" method="post" action="/ops/agents/add">
+    <input type="text" name="label" placeholder="Label, e.g. Ramesh's laptop" required>
+    <button type="submit">Generate key</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Sync History</h3>
+  <table style="margin-top:12px;">
+    <thead>
+      <tr><th>Time</th><th>Source</th><th>File</th><th>Status</th><th>Record</th><th>Error</th></tr>
+    </thead>
+    <tbody>
+      {% for l in sync_log %}
+      <tr>
+        <td class="mono" style="font-size:12px;">{{ l.synced_at }}</td>
+        <td>{{ l.source_name or '—' }}</td>
+        <td>{{ l.file_name or '—' }}</td>
+        <td><span class="pill {{ 'ok' if l.ok else 'bad' }}">{{ 'OK' if l.ok else 'FAILED' }}</span></td>
+        <td>{% if l.record_id %}<a href="/records/{{ l.record_id }}">#{{ l.record_id }}</a>{% else %}—{% endif %}</td>
+        <td style="font-size:12px; max-width:300px; word-break:break-all;">{{ l.error or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No sync attempts yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
