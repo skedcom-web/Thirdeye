@@ -108,7 +108,7 @@ class HttpFetcher:
                 timeout=self._timeout,
                 headers=headers,
                 verify=current_verify,
-                proxies=proxies,
+                proxy=proxy if proxy else None,
             ) as client:
                 req_start = time.perf_counter()
                 with client.stream("GET", url) as response:
@@ -156,43 +156,6 @@ class HttpFetcher:
 
         try:
             return make_request(current_verify=verify)
-        except httpx.SSLError as exc:
-            if verify and allow_fallback:
-                # SSL Fallback event is triggered and verified as False
-                try:
-                    res = make_request(current_verify=False)
-                    res.ssl_verified = False  # explicitly record that SSL verification was bypassed
-                    return res
-                except Exception as fallback_exc:
-                    duration = (time.perf_counter() - start_time) * 1000.0
-                    dummy = Response(
-                        url=url,
-                        status_code=0,
-                        content=b"",
-                        duration_ms=duration,
-                        user_agent=user_agent,
-                        proxy_used=proxy,
-                        ssl_verified=False,
-                        failure_category="network_failure",
-                        failure_subtype="ssl_error",
-                        error_message=f"SSL Fallback failed: {fallback_exc}",
-                    )
-                    raise FetchError(f"SSL Fallback failed: {fallback_exc}", dummy) from fallback_exc
-            else:
-                duration = (time.perf_counter() - start_time) * 1000.0
-                dummy = Response(
-                    url=url,
-                    status_code=0,
-                    content=b"",
-                    duration_ms=duration,
-                    user_agent=user_agent,
-                    proxy_used=proxy,
-                    ssl_verified=True,
-                    failure_category="network_failure",
-                    failure_subtype="ssl_error",
-                    error_message=str(exc),
-                )
-                raise FetchError(f"SSL verification failed: {exc}", dummy) from exc
         except httpx.ConnectTimeout as exc:
             duration = (time.perf_counter() - start_time) * 1000.0
             dummy = Response(
@@ -222,20 +185,68 @@ class HttpFetcher:
             )
             raise FetchError(f"Read timeout: {exc}", dummy) from exc
         except httpx.ConnectError as exc:
-            duration = (time.perf_counter() - start_time) * 1000.0
-            subtype = "dns" if "getaddrinfo" in str(exc) else "connection_refused"
-            dummy = Response(
-                url=url,
-                status_code=0,
-                content=b"",
-                duration_ms=duration,
-                user_agent=user_agent,
-                proxy_used=proxy,
-                failure_category="network_failure",
-                failure_subtype=subtype,
-                error_message=str(exc),
-            )
-            raise FetchError(f"Connection error: {exc}", dummy) from exc
+            import ssl
+            is_ssl = False
+            cause = exc
+            while cause:
+                if isinstance(cause, ssl.SSLError):
+                    is_ssl = True
+                    break
+                cause = cause.__cause__ or (cause.args[0] if cause.args and isinstance(cause.args[0], Exception) else None)
+            if not is_ssl and any(word in str(exc).lower() for word in ("ssl", "cert", "handshake")):
+                is_ssl = True
+
+            if is_ssl and verify and allow_fallback:
+                # SSL Fallback retry
+                try:
+                    res = make_request(current_verify=False)
+                    res.ssl_verified = False  # explicitly record that SSL verification was bypassed
+                    return res
+                except Exception as fallback_exc:
+                    duration = (time.perf_counter() - start_time) * 1000.0
+                    dummy = Response(
+                        url=url,
+                        status_code=0,
+                        content=b"",
+                        duration_ms=duration,
+                        user_agent=user_agent,
+                        proxy_used=proxy,
+                        ssl_verified=False,
+                        failure_category="network_failure",
+                        failure_subtype="ssl_error",
+                        error_message=f"SSL Fallback failed: {fallback_exc}",
+                    )
+                    raise FetchError(f"SSL Fallback failed: {fallback_exc}", dummy) from fallback_exc
+            elif is_ssl:
+                duration = (time.perf_counter() - start_time) * 1000.0
+                dummy = Response(
+                    url=url,
+                    status_code=0,
+                    content=b"",
+                    duration_ms=duration,
+                    user_agent=user_agent,
+                    proxy_used=proxy,
+                    ssl_verified=verify,
+                    failure_category="network_failure",
+                    failure_subtype="ssl_error",
+                    error_message=str(exc),
+                )
+                raise FetchError(f"SSL verification failed: {exc}", dummy) from exc
+            else:
+                duration = (time.perf_counter() - start_time) * 1000.0
+                subtype = "dns" if "getaddrinfo" in str(exc) else "connection_refused"
+                dummy = Response(
+                    url=url,
+                    status_code=0,
+                    content=b"",
+                    duration_ms=duration,
+                    user_agent=user_agent,
+                    proxy_used=proxy,
+                    failure_category="network_failure",
+                    failure_subtype=subtype,
+                    error_message=str(exc),
+                )
+                raise FetchError(f"Connection error: {exc}", dummy) from exc
         except httpx.HTTPStatusError as exc:
             duration = (time.perf_counter() - start_time) * 1000.0
             code = exc.response.status_code
