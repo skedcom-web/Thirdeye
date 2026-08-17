@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Diagnostic Report #{{ report.id }} &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h2>Diagnostic Report #{{ report.id }}</h2>
+  <div style="display:flex; gap:12px;">
+    <a href="/ops/reports/{{ report.id }}/download" class="btn btn-primary">Download Report</a>
+    <a href="/ops/diagnostics" class="btn btn-secondary">Back to Diagnostics</a>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Summary Metrics</h3>
+  <table style="margin-top:12px;">
+    <tr><th style="width:200px;">Source</th><td><a href="/ops/sources/{{ report.source_id }}">{{ report.source_name }}</a></td></tr>
+    <tr><th>Run At</th><td class="mono">{{ report.run_at }}</td></tr>
+    <tr><th>Average Response Time</th><td>{{ '%.2f'|format(report.avg_response_time) }}s</td></tr>
+    <tr><th>Crawl Pages Visited</th><td>{{ report.pages_visited }}</td></tr>
+    <tr><th>Total Links Seen</th><td>{{ report.links_found }}</td></tr>
+    <tr><th>Department Pages Found</th><td>{{ report.dept_pages_found }}</td></tr>
+    <tr><th>GO Listing Pages Found</th><td>{{ report.go_listings_found }}</td></tr>
+    <tr><th>PDF Links Found</th><td>{{ report.pdf_links_found }}</td></tr>
+    <tr><th>Documents Downloaded</th><td>{{ report.downloaded_count }}</td></tr>
+    <tr><th>Documents Parsed</th><td>{{ report.parsed_count }}</td></tr>
+    <tr><th>Needs OCR</th><td>{{ report.ocr_count }}</td></tr>
+    <tr><th>Failed Documents</th><td>{{ report.failures_count }}</td></tr>
+  </table>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Detailed Raw Report Log</h3>
+  <pre class="evidence" style="white-space:pre-wrap; font-family:monospace; margin-top:8px; font-size:12px; background:#f9f9f9; border:1px solid #ddd; padding:16px; border-radius:6px; max-height:600px; overflow-y:auto;">{{ report.report_text }}</pre>
+</div>
+
+{% endblock %}

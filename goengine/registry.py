@@ -50,6 +50,8 @@ class Source:
     notes: str | None
     priority: str
     source_category: str | None
+    ssl_verification_enabled: bool = True
+    allow_ssl_fallback: bool = False
 
 
 def host_of(url: str) -> str:
@@ -104,6 +106,8 @@ def add_source(
     notes: str | None = None,
     priority: str = "Medium",
     source_category: str | None = None,
+    ssl_verification_enabled: bool = True,
+    allow_ssl_fallback: bool = False,
     actor: str = audit.SYSTEM_ACTOR,
 ) -> int:
     if source_type not in VALID_SOURCE_TYPES:
@@ -120,8 +124,9 @@ def add_source(
         """
         INSERT INTO sources
             (name, department, url, host, source_type, adapter, active,
-             crawl_frequency, notes, priority, source_category, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             crawl_frequency, notes, priority, source_category,
+             ssl_verification_enabled, allow_ssl_fallback, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             name,
@@ -135,6 +140,8 @@ def add_source(
             notes,
             priority,
             source_category,
+            1 if ssl_verification_enabled else 0,
+            1 if allow_ssl_fallback else 0,
             utcnow(),
         ),
     )
@@ -187,6 +194,39 @@ def set_priority(
     )
 
 
+def set_ssl_config(
+    conn: sqlite3.Connection,
+    source_id: int,
+    ssl_verification_enabled: bool,
+    allow_ssl_fallback: bool,
+    *,
+    actor: str = audit.SYSTEM_ACTOR,
+) -> None:
+    row = conn.execute(
+        "SELECT ssl_verification_enabled, allow_ssl_fallback FROM sources WHERE id = ?",
+        (source_id,)
+    ).fetchone()
+    if row is None:
+        raise LookupError(f"no source with id {source_id}")
+    before_verify = bool(row["ssl_verification_enabled"])
+    before_fallback = bool(row["allow_ssl_fallback"])
+    conn.execute(
+        "UPDATE sources SET ssl_verification_enabled = ?, allow_ssl_fallback = ? WHERE id = ?",
+        (1 if ssl_verification_enabled else 0, 1 if allow_ssl_fallback else 0, source_id)
+    )
+    audit.record(
+        conn,
+        action="source.ssl_config_changed",
+        entity_type="source",
+        entity_id=source_id,
+        actor=actor,
+        detail={
+            "before": {"verify": before_verify, "fallback": before_fallback},
+            "after": {"verify": ssl_verification_enabled, "fallback": allow_ssl_fallback}
+        }
+    )
+
+
 def mark_crawled(
     conn: sqlite3.Connection, source_id: int, status: str, *, when: str | None = None
 ) -> None:
@@ -230,6 +270,8 @@ def _row_to_source(row: sqlite3.Row) -> Source:
         notes=row["notes"],
         priority=row["priority"],
         source_category=row["source_category"],
+        ssl_verification_enabled=bool(row["ssl_verification_enabled"]),
+        allow_ssl_fallback=bool(row["allow_ssl_fallback"]),
     )
 
 

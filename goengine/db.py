@@ -14,6 +14,7 @@ from .config import PACKAGE_DIR, Settings
 SCHEMA_PATH = PACKAGE_DIR / "schema.sql"
 SCHEMA_PHASE2_PATH = PACKAGE_DIR / "schema_phase2.sql"
 SCHEMA_PHASE3_PATH = PACKAGE_DIR / "schema_phase3.sql"
+SCHEMA_DIAGNOSTICS_PATH = PACKAGE_DIR / "schema_diagnostics.sql"
 
 # Columns added to the pre-existing `sources` table for Phase 1 certification.
 # SQLite's ALTER TABLE has no "ADD COLUMN IF NOT EXISTS", so this is applied
@@ -58,6 +59,30 @@ SOURCES_PHASE3_COLUMNS: dict[str, str] = {
 SOURCES_PHASE33_COLUMNS: dict[str, str] = {
     "priority": "TEXT NOT NULL DEFAULT 'Medium'",
     "source_category": "TEXT",
+}
+
+CRAWL_RUNS_DIAGNOSTICS_COLUMNS: dict[str, str] = {
+    "pages_visited": "INTEGER NOT NULL DEFAULT 0",
+    "dept_pages_found": "INTEGER NOT NULL DEFAULT 0",
+    "go_listings_found": "INTEGER NOT NULL DEFAULT 0",
+    "doc_pages_found": "INTEGER NOT NULL DEFAULT 0",
+    "doc_links_found": "INTEGER NOT NULL DEFAULT 0",
+    "pdf_links_found": "INTEGER NOT NULL DEFAULT 0",
+    "downloaded_count": "INTEGER NOT NULL DEFAULT 0",
+    "parsed_count": "INTEGER NOT NULL DEFAULT 0",
+    "ocr_count": "INTEGER NOT NULL DEFAULT 0",
+    "parser_failures": "INTEGER NOT NULL DEFAULT 0",
+    "download_failures": "INTEGER NOT NULL DEFAULT 0",
+    "rejected_links": "INTEGER NOT NULL DEFAULT 0",
+    "skipped_links": "INTEGER NOT NULL DEFAULT 0",
+    "proxy_used": "TEXT",
+    "ssl_fallback_used": "INTEGER NOT NULL DEFAULT 0",
+    "user_agent": "TEXT",
+}
+
+SOURCES_DIAGNOSTICS_COLUMNS: dict[str, str] = {
+    "ssl_verification_enabled": "INTEGER NOT NULL DEFAULT 1",
+    "allow_ssl_fallback": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -157,6 +182,9 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_PHASE3_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "sources", SOURCES_PHASE3_COLUMNS)
     _ensure_columns(conn, "sources", SOURCES_PHASE33_COLUMNS)
+    conn.executescript(SCHEMA_DIAGNOSTICS_PATH.read_text(encoding="utf-8"))
+    _ensure_columns(conn, "crawl_runs", CRAWL_RUNS_DIAGNOSTICS_COLUMNS)
+    _ensure_columns(conn, "sources", SOURCES_DIAGNOSTICS_COLUMNS)
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

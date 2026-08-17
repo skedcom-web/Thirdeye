@@ -91,10 +91,31 @@ def crawl_source(
         detail={"run_id": run_id, "url": source.url, "adapter": source.adapter},
     )
 
+    # Initialize dynamic telemetry counters
+    pages_visited = 0
+    dept_pages_found = 0
+    go_listings_found = 0
+    doc_pages_found = 0
+    doc_links_found = 0
+    pdf_links_found = 0
+    downloaded_count = 0
+    parsed_count = 0
+    ocr_count = 0
+    parser_failures = 0
+    download_failures = 0
+    rejected_links = 0
+    skipped_links = 0
+    proxy_used = ""
+    ssl_fallback_used = 0
+    user_agent = ""
+
     try:
         adapter = get_adapter(source.adapter)
         queue: list[str] = [source.url]
         visited: set[str] = set()
+
+        ssl_verify = bool(source.ssl_verification_enabled)
+        ssl_fallback = bool(source.allow_ssl_fallback)
 
         while queue and result.pages_fetched < max_pages:
             page_url = queue.pop(0)
@@ -102,8 +123,63 @@ def crawl_source(
                 continue
             visited.add(page_url)
 
-            response = fetcher.get(page_url)
+            response = None
+            fetch_error_msg = None
+            try:
+                response = fetcher.get(page_url, verify=ssl_verify, allow_fallback=ssl_fallback)
+                proxy_used = response.proxy_used or ""
+                user_agent = response.user_agent or ""
+                if not response.ssl_verified and ssl_fallback:
+                    ssl_fallback_used = 1
+            except FetchError as exc:
+                fetch_error_msg = str(exc)
+                response = exc.response
+                if response:
+                    proxy_used = response.proxy_used or ""
+                    user_agent = response.user_agent or ""
+                    if not response.ssl_verified and ssl_fallback:
+                        ssl_fallback_used = 1
+
+            # Log request-level evidence
+            status_code = response.status_code if response else 0
+            response_size = len(response.content) if (response and response.content) else 0
+            content_type = response.content_type if response else "unknown"
+            response_time_ms = response.response_time_ms if response else 0.0
+            duration_ms = response.duration_ms if response else 0.0
+            redirect_count = response.redirect_count if response else 0
+            ssl_verified_num = 1 if (response and response.ssl_verified) else 0
+            failure_category = response.failure_category if (response and response.failure_category) else ""
+            failure_subtype = response.failure_subtype if (response and response.failure_subtype) else ""
+            err_msg = response.error_message if (response and response.error_message) else (fetch_error_msg or "")
+
+            if fetch_error_msg and not failure_category:
+                failure_category = "network_failure"
+                failure_subtype = "unknown_network"
+
+            conn.execute(
+                """
+                INSERT INTO crawl_evidences
+                    (crawl_run_id, url, status_code, response_size, content_type,
+                     response_time_ms, duration_ms, redirect_count, timestamp,
+                     user_agent, proxy_used, ssl_verified, error_message,
+                     failure_category, failure_subtype)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id, page_url, status_code, response_size, content_type,
+                    response_time_ms, duration_ms, redirect_count, utcnow(),
+                    user_agent, proxy_used, ssl_verified_num, err_msg,
+                    failure_category, failure_subtype
+                )
+            )
+
+            if fetch_error_msg:
+                # Re-raise the fetch error to register crawl.failed and update state
+                raise FetchError(fetch_error_msg, response)
+
             result.pages_fetched += 1
+            pages_visited += 1
+
             if response.status_code != 200:
                 audit.record(
                     conn,
@@ -117,6 +193,15 @@ def crawl_source(
 
             page = adapter.parse(response.text, response.url)
             result.links_seen += len(page.documents)
+
+            # Accumulate adapter metrics
+            dept_pages_found += page.dept_pages_found
+            go_listings_found += page.go_listings_found
+            doc_pages_found += page.doc_pages_found
+            doc_links_found += page.doc_links_found
+            pdf_links_found += page.pdf_links_found
+            rejected_links += page.rejected_links
+            skipped_links += page.skipped_links
 
             for link in page.documents:
                 created = _register_link(
@@ -134,6 +219,7 @@ def crawl_source(
                     result.new_urls.append(link.url)
                 else:
                     result.duplicate_documents += 1
+                    skipped_links += 1
 
             for follow_url in page.follow:
                 if follow_url not in visited:
@@ -155,7 +241,13 @@ def crawl_source(
         """
         UPDATE crawl_runs
            SET finished_at = ?, status = ?, pages_fetched = ?, links_seen = ?,
-               new_documents = ?, duplicate_documents = ?, error = ?
+               new_documents = ?, duplicate_documents = ?, error = ?,
+               pages_visited = ?, dept_pages_found = ?, go_listings_found = ?,
+               doc_pages_found = ?, doc_links_found = ?, pdf_links_found = ?,
+               downloaded_count = ?, parsed_count = ?, ocr_count = ?,
+               parser_failures = ?, download_failures = ?, rejected_links = ?,
+               skipped_links = ?, proxy_used = ?, ssl_fallback_used = ?,
+               user_agent = ?
          WHERE id = ?
         """,
         (
@@ -166,6 +258,22 @@ def crawl_source(
             result.new_documents,
             result.duplicate_documents,
             result.error,
+            pages_visited,
+            dept_pages_found,
+            go_listings_found,
+            doc_pages_found,
+            doc_links_found,
+            pdf_links_found,
+            downloaded_count,
+            parsed_count,
+            ocr_count,
+            parser_failures,
+            download_failures,
+            rejected_links,
+            skipped_links,
+            proxy_used,
+            ssl_fallback_used,
+            user_agent,
             run_id,
         ),
     )

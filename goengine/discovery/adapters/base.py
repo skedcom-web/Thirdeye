@@ -28,6 +28,14 @@ class PageResult:
     documents: list[DiscoveredLink] = field(default_factory=list)
     # Further listing pages to fetch within the same crawl (pagination).
     follow: list[str] = field(default_factory=list)
+    # Granular discovery telemetry properties
+    dept_pages_found: int = 0
+    go_listings_found: int = 0
+    doc_pages_found: int = 0
+    doc_links_found: int = 0
+    pdf_links_found: int = 0
+    rejected_links: int = 0
+    skipped_links: int = 0
 
 
 class Adapter(Protocol):

@@ -22,7 +22,9 @@ from .registry import SourceRejected, assert_approved
 
 
 class FetchError(RuntimeError):
-    pass
+    def __init__(self, message: str, response: Response | None = None) -> None:
+        super().__init__(message)
+        self.response = response
 
 
 @dataclass
@@ -31,6 +33,15 @@ class Response:
     status_code: int
     content: bytes
     headers: dict[str, str] = field(default_factory=dict)
+    response_time_ms: float = 0.0
+    duration_ms: float = 0.0
+    redirect_count: int = 0
+    user_agent: str = ""
+    proxy_used: str = ""
+    ssl_verified: bool = True
+    failure_category: str = ""
+    failure_subtype: str = ""
+    error_message: str = ""
 
     @property
     def text(self) -> str:
@@ -46,11 +57,11 @@ class Response:
 
 
 class Fetcher(Protocol):
-    def get(self, url: str) -> Response: ...
+    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False) -> Response: ...
 
 
 class HttpFetcher:
-    """Polite, allowlist-enforcing HTTP client."""
+    """Polite, allowlist-enforcing HTTP client with rich diagnostics."""
 
     def __init__(
         self,
@@ -59,67 +70,204 @@ class HttpFetcher:
         timeout: float = REQUEST_TIMEOUT_SECONDS,
         max_bytes: int = MAX_DOCUMENT_BYTES,
     ) -> None:
-        import httpx  # imported lazily so offline runs need no network stack
-
-        self._client = httpx.Client(
-            follow_redirects=True,
-            timeout=timeout,
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9,ta;q=0.8",
-            },
-        )
         self._delay = delay_seconds
+        self._timeout = timeout
         self._max_bytes = max_bytes
         self._last_request_at: dict[str, float] = {}
-        # A same-site Referer on every request, not just the first: mimics a
-        # visitor who arrived by clicking a link rather than typing a URL,
-        # which some government portals treat differently.
         self._last_url_by_host: dict[str, str] = {}
 
-    def get(self, url: str) -> Response:
+    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False) -> Response:
         assert_approved(url)
         self._respect_delay(url)
 
         import httpx
+        import os
 
         host = urlparse(url).hostname or ""
         scheme = urlparse(url).scheme
         referer = self._last_url_by_host.get(host, f"{scheme}://{host}/")
 
-        try:
-            with self._client.stream("GET", url, headers={"Referer": referer}) as response:
-                # Redirects can leave the approved domain; the final URL is
-                # what we would actually be archiving, so re-check it.
-                final_url = str(response.url)
-                try:
-                    assert_approved(final_url)
-                except SourceRejected as exc:
-                    raise FetchError(f"redirect left approved sources: {exc}") from exc
+        proxy = os.environ.get("THIRDEYE_PROXY") or ""
+        proxies = {"http://": proxy, "https://": proxy} if proxy else None
 
-                chunks: list[bytes] = []
-                total = 0
-                for chunk in response.iter_bytes():
-                    total += len(chunk)
-                    if total > self._max_bytes:
-                        raise FetchError(
-                            f"response exceeded {self._max_bytes} bytes: {final_url}"
+        user_agent = USER_AGENT
+        headers = {
+            "User-Agent": user_agent,
+            "Referer": referer,
+            "Accept": "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,ta;q=0.8",
+        }
+
+        start_time = time.perf_counter()
+
+        def make_request(current_verify: bool) -> Response:
+            # We instantiate a fresh client per request to safely support dynamic proxies,
+            # connection scopes, and verify options in concurrent jobs.
+            with httpx.Client(
+                follow_redirects=True,
+                timeout=self._timeout,
+                headers=headers,
+                verify=current_verify,
+                proxies=proxies,
+            ) as client:
+                req_start = time.perf_counter()
+                with client.stream("GET", url) as response:
+                    final_url = str(response.url)
+                    try:
+                        assert_approved(final_url)
+                    except SourceRejected as exc:
+                        raise FetchError(f"redirect left approved sources: {exc}") from exc
+
+                    chunks: list[bytes] = []
+                    total = 0
+                    for chunk in response.iter_bytes():
+                        total += len(chunk)
+                        if total > self._max_bytes:
+                            raise FetchError(
+                                f"response exceeded {self._max_bytes} bytes: {final_url}"
+                            )
+                        chunks.append(chunk)
+
+                    duration = (time.perf_counter() - req_start) * 1000.0
+                    total_duration = (time.perf_counter() - start_time) * 1000.0
+
+                    self._last_url_by_host[host] = final_url
+
+                    # Check for HTTP errors
+                    if response.status_code >= 400:
+                        raise httpx.HTTPStatusError(
+                            f"HTTP {response.status_code}",
+                            request=response.request,
+                            response=response
                         )
-                    chunks.append(chunk)
 
-                self._last_url_by_host[host] = final_url
-                return Response(
-                    url=final_url,
-                    status_code=response.status_code,
-                    content=b"".join(chunks),
-                    headers={k.lower(): v for k, v in response.headers.items()},
+                    return Response(
+                        url=final_url,
+                        status_code=response.status_code,
+                        content=b"".join(chunks),
+                        headers={k.lower(): v for k, v in response.headers.items()},
+                        response_time_ms=duration,
+                        duration_ms=total_duration,
+                        redirect_count=len(response.history),
+                        user_agent=user_agent,
+                        proxy_used=proxy,
+                        ssl_verified=current_verify,
+                    )
+
+        try:
+            return make_request(current_verify=verify)
+        except httpx.SSLError as exc:
+            if verify and allow_fallback:
+                # SSL Fallback event is triggered and verified as False
+                try:
+                    res = make_request(current_verify=False)
+                    res.ssl_verified = False  # explicitly record that SSL verification was bypassed
+                    return res
+                except Exception as fallback_exc:
+                    duration = (time.perf_counter() - start_time) * 1000.0
+                    dummy = Response(
+                        url=url,
+                        status_code=0,
+                        content=b"",
+                        duration_ms=duration,
+                        user_agent=user_agent,
+                        proxy_used=proxy,
+                        ssl_verified=False,
+                        failure_category="network_failure",
+                        failure_subtype="ssl_error",
+                        error_message=f"SSL Fallback failed: {fallback_exc}",
+                    )
+                    raise FetchError(f"SSL Fallback failed: {fallback_exc}", dummy) from fallback_exc
+            else:
+                duration = (time.perf_counter() - start_time) * 1000.0
+                dummy = Response(
+                    url=url,
+                    status_code=0,
+                    content=b"",
+                    duration_ms=duration,
+                    user_agent=user_agent,
+                    proxy_used=proxy,
+                    ssl_verified=True,
+                    failure_category="network_failure",
+                    failure_subtype="ssl_error",
+                    error_message=str(exc),
                 )
-        except httpx.HTTPError as exc:
-            raise FetchError(f"fetch failed for {url}: {exc}") from exc
+                raise FetchError(f"SSL verification failed: {exc}", dummy) from exc
+        except httpx.ConnectTimeout as exc:
+            duration = (time.perf_counter() - start_time) * 1000.0
+            dummy = Response(
+                url=url,
+                status_code=0,
+                content=b"",
+                duration_ms=duration,
+                user_agent=user_agent,
+                proxy_used=proxy,
+                failure_category="network_failure",
+                failure_subtype="timeout",
+                error_message=str(exc),
+            )
+            raise FetchError(f"Connection timeout: {exc}", dummy) from exc
+        except httpx.ReadTimeout as exc:
+            duration = (time.perf_counter() - start_time) * 1000.0
+            dummy = Response(
+                url=url,
+                status_code=0,
+                content=b"",
+                duration_ms=duration,
+                user_agent=user_agent,
+                proxy_used=proxy,
+                failure_category="network_failure",
+                failure_subtype="timeout",
+                error_message=str(exc),
+            )
+            raise FetchError(f"Read timeout: {exc}", dummy) from exc
+        except httpx.ConnectError as exc:
+            duration = (time.perf_counter() - start_time) * 1000.0
+            subtype = "dns" if "getaddrinfo" in str(exc) else "connection_refused"
+            dummy = Response(
+                url=url,
+                status_code=0,
+                content=b"",
+                duration_ms=duration,
+                user_agent=user_agent,
+                proxy_used=proxy,
+                failure_category="network_failure",
+                failure_subtype=subtype,
+                error_message=str(exc),
+            )
+            raise FetchError(f"Connection error: {exc}", dummy) from exc
+        except httpx.HTTPStatusError as exc:
+            duration = (time.perf_counter() - start_time) * 1000.0
+            code = exc.response.status_code
+            dummy = Response(
+                url=url,
+                status_code=code,
+                content=b"",
+                duration_ms=duration,
+                user_agent=user_agent,
+                proxy_used=proxy,
+                failure_category="network_failure",
+                failure_subtype=f"http_{code}",
+                error_message=str(exc),
+            )
+            raise FetchError(f"HTTP {code} status error: {exc}", dummy) from exc
+        except Exception as exc:
+            duration = (time.perf_counter() - start_time) * 1000.0
+            dummy = Response(
+                url=url,
+                status_code=0,
+                content=b"",
+                duration_ms=duration,
+                user_agent=user_agent,
+                proxy_used=proxy,
+                failure_category="network_failure",
+                failure_subtype="unknown_network",
+                error_message=str(exc),
+            )
+            raise FetchError(f"Egress failed: {exc}", dummy) from exc
 
     def close(self) -> None:
-        self._client.close()
+        pass
 
     def _respect_delay(self, url: str) -> None:
         host = urlparse(url).hostname or ""
@@ -145,6 +293,7 @@ class OfflineFetcher:
             status_code=status,
             content=html.encode("utf-8"),
             headers={"content-type": "text/html; charset=utf-8"},
+            user_agent=USER_AGENT,
         )
 
     def add_bytes(
@@ -155,17 +304,27 @@ class OfflineFetcher:
             status_code=status,
             content=payload,
             headers={"content-type": content_type},
+            user_agent=USER_AGENT,
         )
 
-    def get(self, url: str) -> Response:
+    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False) -> Response:
         assert_approved(url)
         self.requested.append(url)
         try:
-            return self.responses[url]
+            res = self.responses[url]
+            res.ssl_verified = verify
+            return res
         except KeyError:
-            raise FetchError(f"no offline response registered for {url}") from None
+            dummy = Response(
+                url=url,
+                status_code=0,
+                content=b"",
+                user_agent=USER_AGENT,
+                failure_category="network_failure",
+                failure_subtype="http_404",
+                error_message=f"no offline response registered for {url}",
+            )
+            raise FetchError(f"no offline response registered for {url}", dummy) from None
 
     def close(self) -> None:
-        """No-op: nothing to release. Present so callers can treat every
-        Fetcher uniformly (e.g. `finally: fetcher.close()`) without a
-        HttpFetcher-specific isinstance check."""
+        pass

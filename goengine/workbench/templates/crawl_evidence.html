@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Crawl Evidence &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h2>Crawl Evidence</h2>
+  <a href="/ops/diagnostics" class="btn btn-secondary">Back to Diagnostics</a>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Crawl Run Details</h3>
+  <table>
+    <tr><th style="width:200px;">Source Name</th><td>{{ source_name }}</td></tr>
+    <tr><th>Crawl Run ID</th><td class="mono">#{{ run.id }}</td></tr>
+    <tr><th>Started At</th><td class="mono">{{ run.started_at }}</td></tr>
+    <tr><th>Finished At</th><td class="mono">{{ run.finished_at or '—' }}</td></tr>
+    <tr><th>Crawl Run Status</th><td><span class="pill {{ 'ok' if run.status == 'ok' else 'bad' }}">{{ run.status|upper }}</span></td></tr>
+  </table>
+</div>
+
+<h3 style="margin-top:24px;">Request Egress Evidence Trail</h3>
+<div style="display:flex; flex-direction:column; gap:16px; margin-top:12px;">
+  {% for ev in evidences %}
+  <div class="panel" style="border-left: 5px solid {% if ev.status_code == 200 %}var(--ok){% else %}var(--bad){% endif %};">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h4 class="mono" style="margin:0; word-break:break-all; font-size:14px;">{{ ev.url }}</h4>
+      <span class="pill {{ 'ok' if ev.status_code == 200 else 'bad' }}">HTTP {{ ev.status_code or 'Failed' }}</span>
+    </div>
+    
+    <table style="margin-top:12px; font-size:13px;">
+      <tr>
+        <th style="width:150px;">Timestamp</th><td class="mono">{{ ev.timestamp }}</td>
+        <th style="width:150px;">Response Size</th><td>{{ ev.response_size }} bytes</td>
+      </tr>
+      <tr>
+        <th>Response Time</th><td>{{ '%.1f'|format(ev.response_time_ms) }}ms</td>
+        <th>Duration</th><td>{{ '%.1f'|format(ev.duration_ms) }}ms</td>
+      </tr>
+      <tr>
+        <th>Redirects</th><td>{{ ev.redirect_count }}</td>
+        <th>SSL Verified</th><td>{{ 'Yes' if ev.ssl_verified else 'No (Bypassed)' }}</td>
+      </tr>
+      <tr>
+        <th>User Agent</th><td colspan="3" class="mono" style="font-size:11px;">{{ ev.user_agent or '—' }}</td>
+      </tr>
+      {% if ev.proxy_used %}
+      <tr>
+        <th>Proxy Used</th><td colspan="3" class="mono" style="font-size:11px;">{{ ev.proxy_used }}</td>
+      </tr>
+      {% endif %}
+      {% if ev.failure_category %}
+      <tr>
+        <th>Failure Category</th>
+        <td colspan="3">
+          <span class="pill bad">{{ ev.failure_category|upper }}</span>
+          {% if ev.failure_subtype %} / <span class="pill neutral">{{ ev.failure_subtype }}</span>{% endif %}
+        </td>
+      </tr>
+      {% endif %}
+    </table>
+
+    {% if ev.error_message %}
+    <div class="evidence" style="margin-top:12px; font-size:12px; color:var(--bad); border: 1px solid rgba(255, 0, 0, 0.1); background: rgba(255, 0, 0, 0.03);">
+      <strong>Error:</strong> {{ ev.error_message }}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No request evidence recorded for this crawl run.</p>
+  {% endfor %}
+</div>
+
+{% endblock %}

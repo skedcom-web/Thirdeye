@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Source Diagnostics &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h2>Source Diagnostics &amp; Telemetry</h2>
+  <div style="display:flex; gap:12px;">
+    <a href="/ops/diagnostics/root-cause" class="btn btn-secondary">Root Cause Dashboard</a>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Diagnostics Retention Policy</h3>
+  <form method="post" action="/ops/settings/retention" style="display:flex; gap:16px; align-items:flex-end; margin-top:8px;">
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label class="muted" style="font-size:12px;" for="retention-days">Diagnostics Retention Period (Days)</label>
+      <input type="number" name="retention_days" id="retention-days" value="{{ retention_days }}" min="1" max="365" required style="width:120px;">
+    </div>
+    <button type="submit" class="btn btn-primary">Save Settings</button>
+  </form>
+  <p class="muted" style="font-size:12px; margin-top:8px;">
+    Detailed request-level HTTP evidence will be retained for the configured number of days. Summarized metrics, reports, and statistics are stored permanently.
+  </p>
+</div>
+
+<h3 style="margin-top:24px;">Active Sources Diagnostics</h3>
+<div style="display:flex; flex-direction:column; gap:16px; margin-top:12px;">
+  {% for s in sources %}
+  <div class="panel" style="border-left: 5px solid {% if s.status == 'Healthy' %}var(--ok){% elif s.status == 'Warning' %}var(--warn){% else %}var(--bad){% endif %};">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <div>
+        <h4 style="margin:0;"><a href="/ops/sources/{{ s.id }}">{{ s.name }}</a></h4>
+        <div style="display:flex; gap:12px; margin-top:4px; font-size:12px;" class="muted">
+          <span>Priority: <strong class="{{ 'bad' if s.priority == 'Critical' else ('warn' if s.priority == 'High' else 'neutral') }}">{{ s.priority }}</strong></span>
+          <span>Health Score: <strong>{{ s.health_score }}</strong></span>
+          <span>Status: <strong class="{{ 'ok' if s.status == 'Healthy' else ('warn' if s.status == 'Warning' else 'bad') }}">{{ s.status }}</strong></span>
+          <span>Last Run: <strong>{{ s.last_run or 'never' }}</strong></span>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <form method="post" action="/ops/sources/{{ s.id }}/diagnose" style="margin:0;">
+          <button type="submit" class="btn btn-sm btn-primary">Run Diagnostic</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="grid cols-6" style="margin-top:16px; background:rgba(0,0,0,0.02); padding:12px; border-radius:6px; text-align:center;">
+      <div class="stat"><div class="n" style="font-size:16px;">{{ s.pages_visited }}</div><div class="l" style="font-size:10px;">Pages Visited</div></div>
+      <div class="stat"><div class="n" style="font-size:16px;">{{ s.dept_pages_found }}</div><div class="l" style="font-size:10px;">Dept Pages</div></div>
+      <div class="stat"><div class="n" style="font-size:16px;">{{ s.go_listings_found }}</div><div class="l" style="font-size:10px;">GO Listings</div></div>
+      <div class="stat"><div class="n" style="font-size:16px;">{{ s.pdf_links_found }}</div><div class="l" style="font-size:10px;">PDF Links</div></div>
+      <div class="stat"><div class="n" style="font-size:16px;">{{ s.downloaded_count }}</div><div class="l" style="font-size:10px;">Downloaded</div></div>
+      <div class="stat"><div class="n" style="font-size:16px; color:{% if s.failed_documents > 0 %}var(--bad){% else %}inherit{% endif %};">{{ s.failed_documents }}</div><div class="l" style="font-size:10px;">Failed</div></div>
+    </div>
+
+    {% if s.last_error %}
+    <div class="evidence" style="margin-top:12px; background:rgba(255,0,0,0.05); color:var(--bad); font-size:12px; border:1px solid rgba(255,0,0,0.1);">
+      <strong>Last Error:</strong> {{ s.last_error }}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No active sources configured.</p>
+  {% endfor %}
+</div>
+
+{% endblock %}

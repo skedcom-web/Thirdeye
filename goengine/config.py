@@ -31,8 +31,8 @@ BLOCKED_HOSTS: frozenset[str] = frozenset(
 )
 
 USER_AGENT = (
-    "Thirdeye-GO-Intelligence/0.1 (public-interest transparency archive; "
-    "contact: admin@thirdeye.local)"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
 # Deployment mode. "development" (default) is what every local/demo run uses.

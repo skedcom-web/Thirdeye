@@ -64,6 +64,8 @@ def create_source(
     crawl_frequency: str = "daily",
     priority: str = "Medium",
     source_category: str | None = None,
+    ssl_verification_enabled: bool = True,
+    allow_ssl_fallback: bool = False,
     actor: str,
 ) -> int:
     if discovery_method is not None and discovery_method not in DISCOVERY_METHODS:
@@ -71,7 +73,8 @@ def create_source(
 
     source_id = registry.add_source(
         conn, name=name, department=department, url=url, source_type=source_type,
-        crawl_frequency=crawl_frequency, priority=priority, source_category=source_category, actor=actor,
+        crawl_frequency=crawl_frequency, priority=priority, source_category=source_category,
+        ssl_verification_enabled=ssl_verification_enabled, allow_ssl_fallback=allow_ssl_fallback, actor=actor,
     )
     conn.execute(
         "UPDATE sources SET state_id = ?, district_id = ?, discovery_method = ? WHERE id = ?",
@@ -90,6 +93,10 @@ def edit_source(
     url: str | None = None,
     discovery_method: str | None = None,
     crawl_frequency: str | None = None,
+    priority: str | None = None,
+    source_category: str | None = None,
+    ssl_verification_enabled: bool | None = None,
+    allow_ssl_fallback: bool | None = None,
     actor: str,
     reason: str,
 ) -> int:
@@ -110,19 +117,25 @@ def edit_source(
     if discovery_method is not None and discovery_method not in DISCOVERY_METHODS:
         raise SourceOperationsError(f"discovery_method must be one of {DISCOVERY_METHODS}")
 
+    new_verify = row["ssl_verification_enabled"] if ssl_verification_enabled is None else (1 if ssl_verification_enabled else 0)
+    new_fallback = row["allow_ssl_fallback"] if allow_ssl_fallback is None else (1 if allow_ssl_fallback else 0)
+
     before = dict(row)
     new_version = int(row["current_version"]) + 1
     conn.execute(
         """
         UPDATE sources
            SET name = ?, department = ?, url = ?, host = ?, discovery_method = ?,
-               crawl_frequency = ?, current_version = ?
+               crawl_frequency = ?, priority = ?, source_category = ?,
+               ssl_verification_enabled = ?, allow_ssl_fallback = ?, current_version = ?
          WHERE id = ?
         """,
         (
             name or row["name"], department or row["department"], new_url,
             registry.host_of(new_url), discovery_method or row["discovery_method"],
-            crawl_frequency or row["crawl_frequency"], new_version, source_id,
+            crawl_frequency or row["crawl_frequency"], priority or row["priority"],
+            source_category if source_category is not None else row["source_category"],
+            new_verify, new_fallback, new_version, source_id,
         ),
     )
     _write_version(conn, source_id, actor=actor, reason=reason)

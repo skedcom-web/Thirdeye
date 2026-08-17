@@ -15,6 +15,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import audit, registry, repository
+from ..db import utcnow
 from ..certification.categorize import ALL_BUCKETS
 from ..certification.sources import certification_history
 from ..operations import auth
@@ -57,6 +58,7 @@ def register(app: FastAPI) -> None:
     _register_dashboard(app)
     _register_health(app)
     _register_users(app)
+    _register_diagnostics(app)
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +258,7 @@ def _register_sources(app: FastAPI) -> None:
         source_type: Annotated[str, Form()], discovery_method: Annotated[str | None, Form()] = None,
         state_id: Annotated[int | None, Form()] = None, district_id: Annotated[int | None, Form()] = None,
         priority: Annotated[str, Form()] = "Medium", source_category: Annotated[str | None, Form()] = None,
+        ssl_verification_enabled: Annotated[int, Form()] = 1, ssl_fallback: Annotated[int, Form()] = 0,
     ):
         if state_id is not None and not current_user.can_act_on_state(state_id):
             raise HTTPException(status_code=403, detail="not authorized for this state")
@@ -264,6 +267,8 @@ def _register_sources(app: FastAPI) -> None:
                 conn, name=name, department=department, url=url, source_type=source_type,
                 discovery_method=discovery_method or None, state_id=state_id, district_id=district_id,
                 priority=priority, source_category=source_category or None,
+                ssl_verification_enabled=bool(ssl_verification_enabled),
+                allow_ssl_fallback=bool(ssl_fallback),
                 actor=current_user.username,
             )
         except (registry.SourceRejected, ops_sources.SourceOperationsError) as exc:
@@ -388,7 +393,29 @@ def _register_jobs(app: FastAPI) -> None:
         job = ops_jobs.get_job(conn, job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        return templates.TemplateResponse(request, "job_detail.html", {"job": job, "current_user": current_user})
+        
+        runs = []
+        if job["started_at"]:
+            end_time = job["finished_at"] or utcnow()
+            runs = conn.execute(
+                """
+                SELECT c.*, s.name AS source_name
+                  FROM crawl_runs c
+                  JOIN sources s ON s.id = c.source_id
+                 WHERE c.started_at >= ? AND c.started_at <= ?
+                 ORDER BY c.id
+                """,
+                (job["started_at"], end_time)
+            ).fetchall()
+
+        return templates.TemplateResponse(
+            request, "job_detail.html",
+            {
+                "job": job,
+                "runs": runs,
+                "current_user": current_user,
+            }
+        )
 
     @app.get("/api/jobs/{job_id}")
     def job_status_api(job_id: int, conn: Conn, current_user: LoggedIn):
@@ -611,3 +638,319 @@ def _register_users(app: FastAPI) -> None:
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return RedirectResponse("/ops/users", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics & Observability endpoints
+# ---------------------------------------------------------------------------
+def _register_diagnostics(app: FastAPI) -> None:
+    @app.post("/ops/sources/{source_id}/ssl")
+    def sources_set_ssl(
+        source_id: int,
+        conn: Conn,
+        current_user: RequireSources,
+        ssl_verification_enabled: Annotated[str | None, Form()] = None,
+        allow_ssl_fallback: Annotated[str | None, Form()] = None,
+    ):
+        try:
+            registry.set_ssl_config(
+                conn,
+                source_id,
+                ssl_verification_enabled=bool(ssl_verification_enabled),
+                allow_ssl_fallback=bool(allow_ssl_fallback),
+                actor=current_user.username,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return RedirectResponse(f"/ops/sources/{source_id}", status_code=303)
+
+    @app.post("/ops/settings/retention")
+    def update_retention(
+        conn: Conn,
+        current_user: LoggedIn,
+        retention_days: Annotated[int, Form()],
+    ):
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        conn.execute(
+            "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('diagnostics_retention_days', ?)",
+            (str(retention_days),)
+        )
+        return RedirectResponse("/ops/diagnostics", status_code=303)
+
+    @app.get("/ops/diagnostics", response_class=HTMLResponse)
+    def diagnostics_hub(request: Request, conn: Conn, current_user: LoggedIn):
+        row = conn.execute("SELECT value FROM system_settings WHERE key = 'diagnostics_retention_days'").fetchone()
+        retention_days = int(row["value"]) if row else 30
+
+        sources_data = conn.execute(
+            """
+            SELECT s.id, s.name, s.priority, s.last_crawl_at, s.last_crawl_status,
+                   c.status AS run_status,
+                   c.pages_visited, c.links_seen AS links_found,
+                   c.dept_pages_found, c.go_listings_found, c.pdf_links_found,
+                   c.downloaded_count, c.parsed_count, c.ocr_count,
+                   c.download_failures + c.parser_failures AS failed_documents,
+                   c.error AS last_error
+              FROM sources s
+              LEFT JOIN crawl_runs c ON c.source_id = s.id AND c.id = (
+                  SELECT MAX(cr.id) FROM crawl_runs cr WHERE cr.source_id = s.id
+              )
+             WHERE s.active = 1
+             ORDER BY s.priority = 'Critical' DESC, s.priority = 'High' DESC, s.name
+            """
+        ).fetchall()
+
+        sources_list = []
+        for s in sources_data:
+            last_run = s["last_crawl_at"]
+            last_status = s["last_crawl_status"]
+            downloaded = s["downloaded_count"] or 0
+            found = s["pdf_links_found"] or 0
+            failed = s["failed_documents"] or 0
+            reject_rate = (failed / found) if found else 0.0
+
+            score = 0
+            score += 50 if last_status in (None, "ok") else 0
+            score += 30 if downloaded > 0 else 0
+            score += 20 if reject_rate < 0.20 else 0
+
+            if last_run is None:
+                status = "Offline"
+            elif score >= 80:
+                status = "Healthy"
+            elif score >= 50:
+                status = "Warning"
+            elif score >= 20:
+                status = "Critical"
+            else:
+                status = "Offline"
+
+            sources_list.append({
+                "id": s["id"],
+                "name": s["name"],
+                "priority": s["priority"],
+                "last_run": last_run,
+                "run_status": s["run_status"] or "never",
+                "pages_visited": s["pages_visited"] or 0,
+                "links_found": s["links_found"] or 0,
+                "dept_pages_found": s["dept_pages_found"] or 0,
+                "go_listings_found": s["go_listings_found"] or 0,
+                "pdf_links_found": s["pdf_links_found"] or 0,
+                "downloaded_count": downloaded,
+                "parsed_count": s["parsed_count"] or 0,
+                "ocr_count": s["ocr_count"] or 0,
+                "failed_documents": failed,
+                "last_error": s["last_error"],
+                "health_score": score,
+                "status": status,
+            })
+
+        return templates.TemplateResponse(
+            request, "diagnostics_hub.html",
+            {
+                "sources": sources_list,
+                "retention_days": retention_days,
+                "current_user": current_user,
+                "can_manage": current_user.has_permission("manage_sources"),
+            }
+        )
+
+    @app.post("/ops/sources/{source_id}/diagnose")
+    def run_source_diagnostic(source_id: int, conn: Conn, current_user: LoggedIn, fetcher_factory: FetcherFactory):
+        source = registry.get_source(conn, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="source not found")
+
+        fetcher = fetcher_factory()
+        try:
+            crawl_result = crawler.crawl_source(conn, fetcher, source, actor="diagnostic", max_pages=3)
+            
+            run_id = crawl_result.run_id
+            run_data = conn.execute("SELECT * FROM crawl_runs WHERE id = ?", (run_id,)).fetchone()
+            evidences = conn.execute("SELECT * FROM crawl_evidences WHERE crawl_run_id = ?", (run_id,)).fetchall()
+            response_times = [r["response_time_ms"] for r in evidences if r["response_time_ms"] is not None]
+            avg_resp = (sum(response_times) / (1000.0 * len(response_times))) if response_times else 0.0
+            
+            report_lines = []
+            report_lines.append(f"DIAGNOSTIC REPORT FOR SOURCE: {source.name}")
+            report_lines.append(f"Run At: {run_data['started_at']}")
+            report_lines.append(f"Run Status: {run_data['status']}")
+            report_lines.append(f"Pages Visited: {run_data['pages_visited']}")
+            report_lines.append(f"Links Found: {run_data['links_seen']}")
+            report_lines.append(f"Department Pages Found: {run_data['dept_pages_found']}")
+            report_lines.append(f"GO Listings Found: {run_data['go_listings_found']}")
+            report_lines.append(f"PDF Links Found: {run_data['pdf_links_found']}")
+            report_lines.append(f"Downloaded: {run_data['downloaded_count']}")
+            report_lines.append(f"Parsed: {run_data['parsed_count']}")
+            report_lines.append(f"Needs OCR: {run_data['ocr_count']}")
+            report_lines.append(f"Failed: {run_data['parser_failures'] + run_data['download_failures']}")
+            report_lines.append(f"Average Response Time: {avg_resp:.2f}s")
+            report_lines.append(f"Last Error: {run_data['error'] or 'None'}")
+            report_lines.append("\n=== Visited URL Evidences ===")
+            for ev in evidences:
+                report_lines.append(
+                    f"URL: {ev['url']}\n"
+                    f"  Status: {ev['status_code']}\n"
+                    f"  Size: {ev['response_size']} bytes\n"
+                    f"  Duration: {ev['duration_ms']:.1f}ms\n"
+                    f"  Redirects: {ev['redirect_count']}\n"
+                    f"  SSL Verified: {ev['ssl_verified']}\n"
+                    f"  Category: {ev['failure_category'] or 'None'}\n"
+                    f"  Subtype: {ev['failure_subtype'] or 'None'}\n"
+                    f"  Error: {ev['error_message'] or 'None'}\n"
+                )
+            
+            report_text = "\n".join(report_lines)
+            
+            cur = conn.execute(
+                """
+                INSERT INTO diagnostic_reports
+                    (source_id, run_at, pages_visited, links_found, dept_pages_found,
+                     go_listings_found, pdf_links_found, downloaded_count, parsed_count,
+                     ocr_count, failures_count, error_message, avg_response_time,
+                     report_text, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source.id, run_data["started_at"], run_data["pages_visited"],
+                    run_data["links_seen"], run_data["dept_pages_found"],
+                    run_data["go_listings_found"], run_data["pdf_links_found"],
+                    run_data["downloaded_count"], run_data["parsed_count"],
+                    run_data["ocr_count"], run_data["parser_failures"] + run_data["download_failures"],
+                    run_data["error"], avg_resp, report_text, utcnow()
+                )
+            )
+            report_id = cur.lastrowid
+            return RedirectResponse(f"/ops/reports/{report_id}", status_code=303)
+        finally:
+            fetcher.close()
+
+    @app.get("/ops/reports/{report_id}", response_class=HTMLResponse)
+    def report_detail(request: Request, report_id: int, conn: Conn, current_user: LoggedIn):
+        report = conn.execute(
+            """
+            SELECT r.*, s.name AS source_name
+              FROM diagnostic_reports r
+              JOIN sources s ON s.id = r.source_id
+             WHERE r.id = ?
+            """,
+            (report_id,),
+        ).fetchone()
+        if report is None:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return templates.TemplateResponse(
+            request, "report_detail.html",
+            {
+                "report": report,
+                "current_user": current_user,
+            }
+        )
+
+    @app.get("/ops/reports/{report_id}/download")
+    def report_download(report_id: int, conn: Conn, current_user: LoggedIn):
+        report = conn.execute("SELECT report_text, source_id FROM diagnostic_reports WHERE id = ?", (report_id,)).fetchone()
+        if report is None:
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        source_name = conn.execute("SELECT name FROM sources WHERE id = ?", (report["source_id"],)).fetchone()["name"]
+        filename = f"diagnostic_report_{source_name.lower().replace(' ', '_')}_{report_id}.txt"
+        
+        from fastapi.responses import Response as FastApiResponse
+        return FastApiResponse(
+            content=report["report_text"],
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    @app.get("/ops/crawl-runs/{run_id}/evidence", response_class=HTMLResponse)
+    def run_evidence(request: Request, run_id: int, conn: Conn, current_user: LoggedIn):
+        run = conn.execute("SELECT * FROM crawl_runs WHERE id = ?", (run_id,)).fetchone()
+        if run is None:
+            raise HTTPException(status_code=404, detail="Crawl run not found")
+        source_name = conn.execute("SELECT name FROM sources WHERE id = ?", (run["source_id"],)).fetchone()["name"]
+        evidences = conn.execute("SELECT * FROM crawl_evidences WHERE crawl_run_id = ? ORDER BY id", (run_id,)).fetchall()
+        return templates.TemplateResponse(
+            request, "crawl_evidence.html",
+            {
+                "run": run,
+                "source_name": source_name,
+                "evidences": evidences,
+                "current_user": current_user,
+            }
+        )
+
+    @app.get("/ops/diagnostics/root-cause", response_class=HTMLResponse)
+    def root_cause_dashboard(request: Request, conn: Conn, current_user: LoggedIn):
+        stats_today = _get_failure_stats(conn, 0)
+        stats_7days = _get_failure_stats(conn, 7)
+        stats_30days = _get_failure_stats(conn, 30)
+
+        subtype_breakdown = conn.execute(
+            """
+            SELECT failure_subtype, COUNT(*) AS n
+              FROM crawl_evidences
+             WHERE failure_category = 'network_failure'
+             GROUP BY failure_subtype
+             ORDER BY n DESC
+            """
+        ).fetchall()
+
+        return templates.TemplateResponse(
+            request, "root_cause.html",
+            {
+                "today": stats_today,
+                "last_7_days": stats_7days,
+                "last_30_days": stats_30days,
+                "subtypes": subtype_breakdown,
+                "current_user": current_user,
+            }
+        )
+
+
+def _get_failure_stats(conn: sqlite3.Connection, days_ago: int) -> dict:
+    from datetime import datetime, timezone, timedelta
+    if days_ago == 0:
+        start_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0).isoformat(timespec="seconds")
+    else:
+        start_date = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+
+    net_failures = conn.execute(
+        "SELECT COUNT(*) FROM crawl_evidences WHERE failure_category = 'network_failure' AND timestamp >= ?",
+        (start_date,)
+    ).fetchone()[0]
+
+    disc_failures = conn.execute(
+        "SELECT COUNT(*) FROM crawl_runs WHERE status = 'error' AND started_at >= ?",
+        (start_date,)
+    ).fetchone()[0]
+
+    down_failures = conn.execute(
+        "SELECT SUM(download_failures) FROM crawl_runs WHERE started_at >= ?",
+        (start_date,)
+    ).fetchone()[0] or 0
+
+    parse_failures = conn.execute(
+        "SELECT SUM(parser_failures) FROM crawl_runs WHERE started_at >= ?",
+        (start_date,)
+    ).fetchone()[0] or 0
+
+    ocr_failures = conn.execute(
+        "SELECT COUNT(*) FROM extraction_failures WHERE failure_type = 'ocr_failure' AND created_at >= ?",
+        (start_date,)
+    ).fetchone()[0]
+
+    pub_failures = conn.execute(
+        "SELECT COUNT(*) FROM audit_log WHERE action = 'publication.failed' AND ts >= ?",
+        (start_date,)
+    ).fetchone()[0]
+
+    return {
+        "network": net_failures,
+        "discovery": disc_failures,
+        "download": down_failures,
+        "parser": parse_failures,
+        "ocr": ocr_failures,
+        "publication": pub_failures,
+    }
+

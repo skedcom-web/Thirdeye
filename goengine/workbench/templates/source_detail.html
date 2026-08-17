@@ -18,15 +18,33 @@
     <tr><th>State / District</th><td>{{ source.state_name or 'state-wide' }} / {{ source.district_name or '—' }}</td></tr>
     <tr><th>Certification status</th>
         <td><span class="pill {{ 'ok' if source.certification_status == 'CERTIFIED' else ('bad' if source.certification_status == 'FAILED' else 'neutral') }}">{{ source.certification_status }}</span></td></tr>
+    <tr><th>SSL Verification</th><td>{{ 'Enabled' if source.ssl_verification_enabled else 'Disabled' }}</td></tr>
+    <tr><th>Allow SSL Fallback</th><td>{{ 'Yes' if source.allow_ssl_fallback else 'No' }}</td></tr>
   </table>
   {% if can_manage %}
-  <form method="post" action="/ops/sources/{{ source.id }}/priority" class="inline" style="margin-top:12px;">
-    <label class="muted" style="font-size:12px;">Change priority</label>
-    <select name="priority">
-      {% for p in priorities %}<option value="{{ p }}" {% if p == source.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}
-    </select>
-    <button type="submit" class="ghost">Update</button>
-  </form>
+  <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:12px;">
+    <form method="post" action="/ops/sources/{{ source.id }}/priority" class="inline">
+      <label class="muted" style="font-size:12px;">Change priority</label>
+      <select name="priority">
+        {% for p in priorities %}<option value="{{ p }}" {% if p == source.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}
+      </select>
+      <button type="submit" class="ghost">Update</button>
+    </form>
+
+    <form method="post" action="/ops/sources/{{ source.id }}/ssl" class="inline">
+      <label class="muted" style="font-size:12px;">SSL Verification</label>
+      <select name="ssl_verification_enabled">
+        <option value="1" {% if source.ssl_verification_enabled %}selected{% endif %}>Enabled</option>
+        <option value="0" {% if not source.ssl_verification_enabled %}selected{% endif %}>Disabled</option>
+      </select>
+      <label class="muted" style="font-size:12px; margin-left:8px;">SSL Fallback</label>
+      <select name="allow_ssl_fallback">
+        <option value="1" {% if source.allow_ssl_fallback %}selected{% endif %}>Allow</option>
+        <option value="0" {% if not source.allow_ssl_fallback %}selected{% endif %}>Disallow</option>
+      </select>
+      <button type="submit" class="ghost">Update SSL</button>
+    </form>
+  </div>
   {% endif %}
 </div>
 

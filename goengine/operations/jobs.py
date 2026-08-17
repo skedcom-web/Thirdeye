@@ -169,6 +169,13 @@ def _run_job(
         if district_id is not None:
             geography.refresh_district_certification(conn, district_id, actor=created_by)
 
+        # Run diagnostics retention cleanup
+        try:
+            cleanup_expired_evidence(conn)
+        except Exception as cleanup_exc:
+            # Bypassed silently on failure so it doesn't block job completion
+            pass
+
         conn.execute(
             "UPDATE certification_jobs SET status = ?, finished_at = ? WHERE id = ?",
             (STATUS_COMPLETED, utcnow(), job_id),
@@ -190,8 +197,30 @@ def _run_job(
         conn.close()
 
 
+def cleanup_expired_evidence(conn: sqlite3.Connection) -> int:
+    """Removes request-level crawl evidence older than configured retention days."""
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'diagnostics_retention_days'").fetchone()
+    days = int(row["value"]) if row else 30
+    
+    from datetime import datetime, timezone, timedelta
+    threshold = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    
+    cur = conn.execute("DELETE FROM crawl_evidences WHERE timestamp < ?", (threshold,))
+    deleted = cur.rowcount
+    if deleted > 0:
+        audit.record(
+            conn,
+            action="diagnostics.cleanup",
+            entity_type="system",
+            entity_id=0,
+            actor="system",
+            detail={"deleted_records": deleted, "threshold": threshold}
+        )
+    return deleted
+
+
 def _run_one_source(
-    conn: sqlite3.Connection, settings: Settings, fetcher: HttpFetcher, job_id: int, source_id: int
+    conn: sqlite3.Connection, settings: Settings, fetcher: Fetcher, job_id: int, source_id: int
 ) -> None:
     from .. import registry
 
@@ -210,17 +239,25 @@ def _run_one_source(
         (crawl_result.new_documents, job_id),
     )
 
+    downloaded = 0
+    download_failed = 0
+    parsed = 0
+    parser_failed = 0
+    ocr = 0
+
     pending = [
         r for r in crawler.pending_downloads(conn, limit=1000) if int(r["source_id"]) == source_id
     ]
     for row in pending:
         result = acquisition.acquire_one(conn, settings, fetcher, int(row["id"]), actor="job")
         if result.ok:
+            downloaded += 1
             conn.execute(
                 "UPDATE certification_jobs SET documents_downloaded = documents_downloaded + 1 WHERE id = ?",
                 (job_id,),
             )
         else:
+            download_failed += 1
             conn.execute(
                 "UPDATE certification_jobs SET documents_failed = documents_failed + 1 WHERE id = ?", (job_id,)
             )
@@ -239,6 +276,7 @@ def _run_one_source(
     for row in unparsed:
         try:
             parse_document(conn, settings, int(row["id"]))
+            parsed += 1
             conn.execute(
                 "UPDATE certification_jobs SET documents_parsed = documents_parsed + 1 WHERE id = ?", (job_id,)
             )
@@ -249,14 +287,30 @@ def _run_one_source(
                 (row["id"],),
             ).fetchone()
             if needs_ocr and needs_ocr["needs_ocr"]:
+                ocr += 1
                 conn.execute(
                     "UPDATE certification_jobs SET documents_needs_ocr = documents_needs_ocr + 1 WHERE id = ?",
                     (job_id,),
                 )
         except Exception:
+            parser_failed += 1
             conn.execute(
                 "UPDATE certification_jobs SET documents_failed = documents_failed + 1 WHERE id = ?", (job_id,)
             )
+
+    # Finally update crawl_runs counters for this source run
+    conn.execute(
+        """
+        UPDATE crawl_runs
+           SET downloaded_count = ?,
+               download_failures = ?,
+               parsed_count = ?,
+               parser_failures = ?,
+               ocr_count = ?
+         WHERE id = ?
+        """,
+        (downloaded, download_failed, parsed, parser_failed, ocr, crawl_result.run_id)
+    )
 
 
 # ---------------------------------------------------------------------------

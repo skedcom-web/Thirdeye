@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Root Cause Analysis &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h2>Root Cause Analysis</h2>
+  <a href="/ops/diagnostics" class="btn btn-secondary">Back to Diagnostics</a>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Failure Metrics Trends</h3>
+  <p class="muted" style="font-size:12px;">Aggregated counts of failures at each stage of the extraction pipeline.</p>
+  
+  <table style="margin-top:12px;">
+    <thead>
+      <tr>
+        <th>Failure Category</th>
+        <th>Today</th>
+        <th>Last 7 Days</th>
+        <th>Last 30 Days</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Network Failures</strong> (Timeouts, DNS, SSL, HTTP 4xx/5xx)</td>
+        <td class="mono {% if today.network > 0 %}bad-text{% endif %}">{{ today.network }}</td>
+        <td class="mono">{{ last_7_days.network }}</td>
+        <td class="mono">{{ last_30_days.network }}</td>
+      </tr>
+      <tr>
+        <td><strong>Discovery Failures</strong> (Crawl Run Aborted/Errors)</td>
+        <td class="mono {% if today.discovery > 0 %}bad-text{% endif %}">{{ today.discovery }}</td>
+        <td class="mono">{{ last_7_days.discovery }}</td>
+        <td class="mono">{{ last_30_days.discovery }}</td>
+      </tr>
+      <tr>
+        <td><strong>Download Failures</strong> (PDF Egress/Storage Errors)</td>
+        <td class="mono {% if today.download > 0 %}bad-text{% endif %}">{{ today.download }}</td>
+        <td class="mono">{{ last_7_days.download }}</td>
+        <td class="mono">{{ last_30_days.download }}</td>
+      </tr>
+      <tr>
+        <td><strong>Parser Failures</strong> (Document parsing / Metadata failure)</td>
+        <td class="mono {% if today.parser > 0 %}bad-text{% endif %}">{{ today.parser }}</td>
+        <td class="mono">{{ last_7_days.parser }}</td>
+        <td class="mono">{{ last_30_days.parser }}</td>
+      </tr>
+      <tr>
+        <td><strong>OCR Failures</strong> (Scanned PDF OCR Errors)</td>
+        <td class="mono {% if today.ocr > 0 %}bad-text{% endif %}">{{ today.ocr }}</td>
+        <td class="mono">{{ last_7_days.ocr }}</td>
+        <td class="mono">{{ last_30_days.ocr }}</td>
+      </tr>
+      <tr>
+        <td><strong>Publication Failures</strong> (Validation / Feed Errors)</td>
+        <td class="mono {% if today.publication > 0 %}bad-text{% endif %}">{{ today.publication }}</td>
+        <td class="mono">{{ last_7_days.publication }}</td>
+        <td class="mono">{{ last_30_days.publication }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h3>Network Egress Error Breakdown</h3>
+  <p class="muted" style="font-size:12px;">Detailed count of network-level connection and SSL errors across all runs.</p>
+  
+  <table style="margin-top:12px;">
+    <thead>
+      <tr>
+        <th>Error Type</th>
+        <th>Failure Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sub in subtypes %}
+      <tr>
+        <td class="mono"><strong>{{ sub.failure_subtype|upper or 'UNKNOWN' }}</strong></td>
+        <td class="mono">{{ sub.n }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="2" class="muted">No network failures logged.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .bad-text {
+    color: var(--bad);
+    font-weight: bold;
+  }
+</style>
+
+{% endblock %}

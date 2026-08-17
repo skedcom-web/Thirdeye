@@ -52,27 +52,59 @@ class GenericLinksAdapter:
 
         base_host = urlparse(page_url).hostname or ""
 
+        dept_pages_found = 0
+        go_listings_found = 0
+        doc_pages_found = 0
+        doc_links_found = 0
+        pdf_links_found = 0
+        rejected_links = 0
+        skipped_links = 0
+
         for anchor in soup.find_all("a", href=True):
             href = str(anchor["href"]).strip()
             if not href or href.lower().startswith(("javascript:", "mailto:", "tel:")):
                 continue
             resolved = normalize(urljoin(page_url, href))
             if resolved in seen:
+                skipped_links += 1
                 continue
             seen.add(resolved)
 
             text = " ".join(anchor.get_text(" ", strip=True).split())
 
             if not is_approved(resolved):
+                rejected_links += 1
                 continue
 
-            if looks_like_document(resolved, text):
+            is_doc = looks_like_document(resolved, text)
+            if is_doc:
+                doc_links_found += 1
+                if resolved.lower().endswith(".pdf") or ".pdf?" in resolved.lower():
+                    pdf_links_found += 1
                 documents.append(
                     DiscoveredLink(url=resolved, link_text=text, found_on_url=page_url)
                 )
-            elif PAGINATION_RE.search(resolved) or (
-                NEXT_TEXT_RE.match(text) and (urlparse(resolved).hostname or "") == base_host
-            ):
-                follow.append(resolved)
+            else:
+                if "dep_id=" in resolved or "godept_list.php" in resolved or "department" in resolved.lower():
+                    dept_pages_found += 1
+                elif "go.php" in resolved or "go-search" in resolved or "gazette" in resolved.lower():
+                    go_listings_found += 1
+                elif resolved.lower().endswith((".html", ".htm", ".php")) or "/document/" in resolved.lower() or "/documents" in resolved.lower():
+                    doc_pages_found += 1
 
-        return PageResult(documents=documents, follow=follow)
+                if PAGINATION_RE.search(resolved) or (
+                    NEXT_TEXT_RE.match(text) and (urlparse(resolved).hostname or "") == base_host
+                ):
+                    follow.append(resolved)
+
+        return PageResult(
+            documents=documents,
+            follow=follow,
+            dept_pages_found=dept_pages_found,
+            go_listings_found=go_listings_found,
+            doc_pages_found=doc_pages_found,
+            doc_links_found=doc_links_found,
+            pdf_links_found=pdf_links_found,
+            rejected_links=rejected_links,
+            skipped_links=skipped_links,
+        )
