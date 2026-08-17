@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Network Test Detail #{{ test.id }} &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h2>Network Test Detail #{{ test.id }}</h2>
+  <div style="display:flex; gap:12px;">
+    {% if test.response_html %}
+    <a href="/ops/diagnostics/network/{{ test.id }}/download" class="btn btn-primary">Download HTML Response</a>
+    {% endif %}
+    <a href="/ops/diagnostics/network" class="btn btn-secondary">Back to Connectivity Diagnostics</a>
+  </div>
+</div>
+
+<!-- Summary Metrics Panel -->
+<div class="panel" style="margin-top:16px;">
+  <h3>Target Metadata &amp; Connection Status</h3>
+  <table style="margin-top:12px;">
+    <tr><th style="width:200px;">Target Name</th><td><strong>{{ test.target_name }}</strong></td></tr>
+    <tr><th>URL</th><td><code class="mono" style="word-break:break-all;">{{ test.url }}</code></td></tr>
+    <tr><th>Tested At</th><td class="mono">{{ test.timestamp }}</td></tr>
+    <tr><th>Status</th><td><span class="pill {% if test.status == 'SUCCESS' %}ok{% else %}bad{% endif %}">{{ test.status }}</span></td></tr>
+    <tr><th>HTTP Status Code</th><td class="mono">{{ test.status_code or '—' }}</td></tr>
+    <tr><th>Response Time (Fetch)</th><td>{% if test.response_time_ms is not none %}{{ '%.1f'|format(test.response_time_ms) }}ms{% else %}—{% endif %}</td></tr>
+    <tr><th>Total Duration</th><td>{% if test.duration_ms is not none %}{{ '%.1f'|format(test.duration_ms) }}ms{% else %}—{% endif %}</td></tr>
+    <tr><th>Response Size</th><td>{{ test.response_size }} bytes</td></tr>
+    <tr><th>Content Type</th><td>{{ test.content_type or '—' }}</td></tr>
+    <tr><th>Redirects Followed</th><td>{{ test.redirect_count }}</td></tr>
+    <tr><th>SSL Verification Mode</th><td>{{ 'Enabled' if test.ssl_verified else 'Bypassed (Fallback)' }}</td></tr>
+    <tr><th>Egress User Agent</th><td class="mono" style="font-size:11px;">{{ test.user_agent or '—' }}</td></tr>
+    {% if test.failure_category %}
+    <tr><th>Failure Classification</th><td><span class="pill bad">{{ test.failure_category }}</span> / <span class="pill neutral">{{ test.failure_subtype }}</span></td></tr>
+    {% endif %}
+    {% if test.error_message %}
+    <tr><th>Error Message</th><td style="color:var(--bad); font-weight:bold;">{{ test.error_message }}</td></tr>
+    {% endif %}
+  </table>
+</div>
+
+<!-- Response Headers -->
+<div class="panel" style="margin-top:16px;">
+  <h3>Response Headers</h3>
+  <div class="evidence" style="background:#f9f9f9; border:1px solid #ddd; max-height:300px; overflow-y:auto; padding:16px; border-radius:6px;">
+    {% if headers %}
+    <table style="font-size:13px; margin:0;">
+      {% for k, v in headers.items() %}
+      <tr><th style="width:250px; text-align:left; border-bottom:1px solid #eee; padding:6px 0;">{{ k }}</th><td class="mono" style="border-bottom:1px solid #eee; padding:6px 0; word-break:break-all;">{{ v }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted" style="margin:0;">No response headers captured.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Response Body HTML Preview -->
+<div class="panel" style="margin-top:16px;">
+  <h3>Response Content Preview (First 2000 chars)</h3>
+  {% if test.response_html %}
+  <pre class="evidence" style="white-space:pre-wrap; font-family:monospace; margin-top:8px; font-size:12px; background:#f9f9f9; border:1px solid #ddd; padding:16px; border-radius:6px; max-height:450px; overflow-y:auto;">{{ test.response_html }}</pre>
+  {% else %}
+  <p class="muted" style="margin-top:8px;">No HTML response body available (possibly connection failure or empty content).</p>
+  {% endif %}
+</div>
+
+{% endblock %}

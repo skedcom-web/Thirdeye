@@ -15,6 +15,7 @@ SCHEMA_PATH = PACKAGE_DIR / "schema.sql"
 SCHEMA_PHASE2_PATH = PACKAGE_DIR / "schema_phase2.sql"
 SCHEMA_PHASE3_PATH = PACKAGE_DIR / "schema_phase3.sql"
 SCHEMA_DIAGNOSTICS_PATH = PACKAGE_DIR / "schema_diagnostics.sql"
+SCHEMA_NETWORK_TESTS_PATH = PACKAGE_DIR / "schema_network_tests.sql"
 
 # Columns added to the pre-existing `sources` table for Phase 1 certification.
 # SQLite's ALTER TABLE has no "ADD COLUMN IF NOT EXISTS", so this is applied
@@ -195,6 +196,7 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_DIAGNOSTICS_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "crawl_runs", CRAWL_RUNS_DIAGNOSTICS_COLUMNS)
     _ensure_columns(conn, "sources", SOURCES_DIAGNOSTICS_COLUMNS)
+    conn.executescript(SCHEMA_NETWORK_TESTS_PATH.read_text(encoding="utf-8"))
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

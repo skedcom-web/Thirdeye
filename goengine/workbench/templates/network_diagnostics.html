@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Network Connectivity Diagnostics &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <h2>Network Connectivity Diagnostics</h2>
+  <div style="display:flex; gap:12px;">
+    <form method="post" action="/ops/diagnostics/network/run" style="margin:0;">
+      <button type="submit" class="btn btn-primary" id="run-net-test-btn">Execute Connectivity Test</button>
+    </form>
+    <a href="/ops/diagnostics" class="btn btn-secondary">Source Diagnostics</a>
+  </div>
+</div>
+
+<!-- Executive Summary -->
+<div class="panel" style="margin-top:20px;">
+  <h3>Executive Summary</h3>
+  <div class="grid cols-5" style="margin-top:12px; text-align:center; background:rgba(0,0,0,0.02); padding:16px; border-radius:6px;">
+    <div class="stat">
+      <div class="n" style="font-size:24px; font-weight:bold;">{{ stats.total or 0 }}</div>
+      <div class="l" style="font-size:12px;" class="muted">Total Tests</div>
+    </div>
+    <div class="stat">
+      <div class="n" style="font-size:24px; font-weight:bold; color:var(--ok);">{{ stats.successful or 0 }}</div>
+      <div class="l" style="font-size:12px;" class="muted">Successful</div>
+    </div>
+    <div class="stat">
+      <div class="n" style="font-size:24px; font-weight:bold; color:var(--bad);">{{ stats.failed or 0 }}</div>
+      <div class="l" style="font-size:12px;" class="muted">Failed</div>
+    </div>
+    <div class="stat">
+      <div class="n" style="font-size:24px; font-weight:bold;">
+        {% if stats.avg_time %}{{ '%.1f'|format(stats.avg_time) }}ms{% else %}0ms{% endif %}
+      </div>
+      <div class="l" style="font-size:12px;" class="muted">Avg Response Time</div>
+    </div>
+    <div class="stat">
+      <div class="n" style="font-size:18px; font-weight:bold; color:{% if most_common_failure != 'None' %}var(--bad){% else %}inherit{% endif %}; word-break:break-all;">
+        {{ most_common_failure }}
+      </div>
+      <div class="l" style="font-size:12px;" class="muted">Most Common Failure</div>
+    </div>
+  </div>
+</div>
+
+<!-- Latest Targets Status Comparison -->
+<h3 style="margin-top:24px;">Latest Egress Target Connectivity</h3>
+<div style="display:flex; flex-direction:column; gap:16px; margin-top:12px;">
+  {% for t in latest_targets %}
+  <div class="panel" style="border-left: 5px solid {% if t.status == 'SUCCESS' %}var(--ok){% else %}var(--bad){% endif %};">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <div>
+        <h4 style="margin:0;">{{ t.target_name }}</h4>
+        <div style="font-size:12px; margin-top:4px;" class="muted">
+          URL: <code class="mono" style="word-break:break-all;">{{ t.url }}</code>
+        </div>
+        <div style="display:flex; gap:16px; margin-top:8px; font-size:12px;" class="muted">
+          <span>Status: <strong class="{% if t.status == 'SUCCESS' %}ok{% else %}bad{% endif %}">{{ t.status }}</strong></span>
+          <span>HTTP Code: <strong>{{ t.status_code or '—' }}</strong></span>
+          <span>Response Time: <strong>{% if t.response_time_ms is not none %}{{ '%.1f'|format(t.response_time_ms) }}ms{% else %}—{% endif %}</strong></span>
+          <span>Duration: <strong>{% if t.duration_ms is not none %}{{ '%.1f'|format(t.duration_ms) }}ms{% else %}—{% endif %}</strong></span>
+          <span>Response Size: <strong>{{ t.response_size }} bytes</strong></span>
+          <span>SSL Verified: <strong>{{ 'Yes' if t.ssl_verified else 'No (Bypassed)' }}</strong></span>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+        <span class="muted" style="font-size:11px;">Tested: {{ t.timestamp }}</span>
+        <a href="/ops/diagnostics/network/{{ t.id }}" class="btn btn-sm btn-secondary">Inspect Response</a>
+      </div>
+    </div>
+
+    {% if t.error_message %}
+    <div class="evidence" style="margin-top:12px; background:rgba(255,0,0,0.04); border:1px solid rgba(255,0,0,0.1); color:var(--bad); font-size:12px;">
+      <strong>Error:</strong> {{ t.error_message }}
+      {% if t.failure_category %} (Category: {{ t.failure_category }} / {{ t.failure_subtype }}){% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No network connectivity tests run yet.</p>
+  {% endfor %}
+</div>
+
+<!-- Test History Table -->
+<div class="panel" style="margin-top:24px;">
+  <h3>Execution History</h3>
+  <table style="margin-top:12px;">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Target</th>
+        <th>Timestamp</th>
+        <th>Status</th>
+        <th>HTTP</th>
+        <th>Duration</th>
+        <th>Size</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in history %}
+      <tr>
+        <td class="mono">#{{ h.id }}</td>
+        <td><strong>{{ h.target_name }}</strong></td>
+        <td class="mono" style="font-size:12px;">{{ h.timestamp }}</td>
+        <td>
+          <span class="pill {% if h.status == 'SUCCESS' %}ok{% else %}bad{% endif %}">{{ h.status }}</span>
+        </td>
+        <td class="mono">{{ h.status_code or '—' }}</td>
+        <td class="mono">{% if h.duration_ms is not none %}{{ '%.1f'|format(h.duration_ms) }}ms{% else %}—{% endif %}</td>
+        <td class="mono">{{ h.response_size }} bytes</td>
+        <td>
+          <a href="/ops/diagnostics/network/{{ h.id }}" class="btn btn-sm btn-secondary">Inspect</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

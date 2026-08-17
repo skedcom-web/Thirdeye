@@ -907,6 +907,108 @@ def _register_diagnostics(app: FastAPI) -> None:
             }
         )
 
+    @app.get("/ops/diagnostics/network", response_class=HTMLResponse)
+    def network_diagnostics_hub(request: Request, conn: Conn, current_user: LoggedIn):
+        stats = conn.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS successful,
+                   SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed,
+                   AVG(response_time_ms) AS avg_time
+              FROM network_connectivity_tests
+            """
+        ).fetchone()
+
+        common_failure = conn.execute(
+            """
+            SELECT failure_category, COUNT(*) AS n
+              FROM network_connectivity_tests
+             WHERE status = 'FAILED'
+             GROUP BY failure_category
+             ORDER BY n DESC LIMIT 1
+            """
+        ).fetchone()
+        most_common_failure = common_failure["failure_category"] if common_failure else "None"
+
+        latest_targets = conn.execute(
+            """
+            SELECT n1.*
+              FROM network_connectivity_tests n1
+              JOIN (
+                  SELECT target_name, MAX(id) AS max_id
+                    FROM network_connectivity_tests
+                   GROUP BY target_name
+              ) n2 ON n1.id = n2.max_id
+             ORDER BY n1.target_name
+            """
+        ).fetchall()
+
+        history = conn.execute(
+            """
+            SELECT * FROM network_connectivity_tests ORDER BY id DESC LIMIT 50
+            """
+        ).fetchall()
+
+        return templates.TemplateResponse(
+            request, "network_diagnostics.html",
+            {
+                "stats": stats,
+                "most_common_failure": most_common_failure,
+                "latest_targets": latest_targets,
+                "history": history,
+                "current_user": current_user,
+            }
+        )
+
+    @app.post("/ops/diagnostics/network/run")
+    def run_network_diagnostics(conn: Conn, current_user: LoggedIn, fetcher_factory: FetcherFactory):
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        from ..operations import network_diagnostics as ops_net_diag
+        fetcher = fetcher_factory()
+        try:
+            ops_net_diag.run_all_diagnostics(conn, fetcher)
+        finally:
+            fetcher.close()
+        return RedirectResponse("/ops/diagnostics/network", status_code=303)
+
+    @app.get("/ops/diagnostics/network/{test_id}", response_class=HTMLResponse)
+    def network_test_detail(request: Request, test_id: int, conn: Conn, current_user: LoggedIn):
+        import json
+        test = conn.execute("SELECT * FROM network_connectivity_tests WHERE id = ?", (test_id,)).fetchone()
+        if not test:
+            raise HTTPException(status_code=404, detail="Test result not found")
+        
+        headers = {}
+        if test["response_headers"]:
+            try:
+                headers = json.loads(test["response_headers"])
+            except Exception:
+                pass
+
+        return templates.TemplateResponse(
+            request, "network_test_detail.html",
+            {
+                "test": test,
+                "headers": headers,
+                "current_user": current_user,
+            }
+        )
+
+    @app.get("/ops/diagnostics/network/{test_id}/download")
+    def network_test_download(test_id: int, conn: Conn, current_user: LoggedIn):
+        test = conn.execute("SELECT response_html, target_name FROM network_connectivity_tests WHERE id = ?", (test_id,)).fetchone()
+        if not test or not test["response_html"]:
+            raise HTTPException(status_code=404, detail="Content not available")
+        
+        filename = f"network_test_{test['target_name'].lower().replace(' ', '_')}_{test_id}.html"
+        from fastapi.responses import Response as FastApiResponse
+        return FastApiResponse(
+            content=test["response_html"],
+            media_type="text/html",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
 
 def _get_failure_stats(conn: sqlite3.Connection, days_ago: int) -> dict:
     from datetime import datetime, timezone, timedelta

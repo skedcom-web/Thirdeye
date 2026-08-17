@@ -57,7 +57,7 @@ class Response:
 
 
 class Fetcher(Protocol):
-    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False) -> Response: ...
+    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False, enforce_policy: bool = True) -> Response: ...
 
 
 class HttpFetcher:
@@ -76,8 +76,9 @@ class HttpFetcher:
         self._last_request_at: dict[str, float] = {}
         self._last_url_by_host: dict[str, str] = {}
 
-    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False) -> Response:
-        assert_approved(url)
+    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False, enforce_policy: bool = True) -> Response:
+        if enforce_policy:
+            assert_approved(url)
         self._respect_delay(url)
 
         import httpx
@@ -318,8 +319,9 @@ class OfflineFetcher:
             user_agent=USER_AGENT,
         )
 
-    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False) -> Response:
-        assert_approved(url)
+    def get(self, url: str, *, verify: bool = True, allow_fallback: bool = False, enforce_policy: bool = True) -> Response:
+        if enforce_policy:
+            assert_approved(url)
         self.requested.append(url)
         try:
             res = self.responses[url]
