@@ -140,12 +140,22 @@ def _seed_tamil_nadu(conn: sqlite3.Connection) -> None:
 
     # Insert Official Sources from registry
     from . import registry
+    year = registry._year_param()
     for spec in registry.SEED_SOURCES:
         name = spec["name"]
         department = spec["department"]
-        url = spec["url"]
-        src_type = spec["source_type"]
-        adapter = spec["adapter"]
+        if "dep_id" in spec:
+            url = f"https://www.tn.gov.in/go.php?dep_id={spec['dep_id']}&year={year}"
+            src_type = "department_site"
+            src_category = "Department Portal"
+            priority = "High"
+        else:
+            url = spec["url"].format(year=year)
+            src_type = spec["source_type"]
+            src_category = spec["source_category"]
+            priority = spec["priority"]
+        
+        adapter = "tn_go_portal"
         
         existing = conn.execute("SELECT id FROM sources WHERE name = ?", (name,)).fetchone()
         if existing is None:
@@ -154,10 +164,10 @@ def _seed_tamil_nadu(conn: sqlite3.Connection) -> None:
                 """
                 INSERT INTO sources
                     (name, department, url, host, source_type, adapter, active,
-                     crawl_frequency, state_id, discovery_method, lifecycle_status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, 'daily', ?, 'listing_page', 'ACTIVE', ?)
+                     crawl_frequency, priority, source_category, state_id, discovery_method, lifecycle_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 'daily', ?, ?, ?, 'listing_page', 'ACTIVE', ?)
                 """,
-                (name, department, url, host, src_type, adapter, state_id, now_ts)
+                (name, department, url, host, src_type, adapter, priority, src_category, state_id, now_ts)
             )
             source_id = cur.lastrowid
             conn.execute(

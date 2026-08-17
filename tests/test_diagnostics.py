@@ -164,3 +164,35 @@ def test_failure_classification_aggregation(conn):
     # Get failure statistics
     stats = _get_failure_stats(conn, 30)
     assert stats["network"] == 2
+
+
+def test_db_seeding_tamil_nadu(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        db_path=tmp_path / "test_seed.db",
+        repository_dir=tmp_path / "repo_seed",
+    )
+    
+    # Temporarily remove PYTEST_CURRENT_TEST to trigger seeding
+    old_env = os.environ.get("PYTEST_CURRENT_TEST")
+    if old_env:
+        del os.environ["PYTEST_CURRENT_TEST"]
+    
+    try:
+        db_conn = init_db(settings)
+        # Check that Tamil Nadu state was created
+        state = db_conn.execute("SELECT * FROM states WHERE code = 'TN'").fetchone()
+        assert state is not None
+        assert state["name"] == "Tamil Nadu"
+        
+        # Check that districts were seeded (should be 38)
+        districts_count = db_conn.execute("SELECT COUNT(*) AS n FROM districts WHERE state_id = ?", (state["id"],)).fetchone()["n"]
+        assert districts_count == 38
+        
+        # Check that sources were seeded
+        sources_count = db_conn.execute("SELECT COUNT(*) AS n FROM sources").fetchone()["n"]
+        assert sources_count > 0
+        db_conn.close()
+    finally:
+        if old_env:
+            os.environ["PYTEST_CURRENT_TEST"] = old_env
