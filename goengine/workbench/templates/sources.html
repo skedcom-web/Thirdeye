@@ -33,6 +33,8 @@
       <tr>
         <th>Source Name</th>
         <th>Department</th>
+        <th>Type</th>
+        <th>Priority</th>
         <th>State</th>
         <th>Website URL</th>
         <th>Certification</th>
@@ -51,6 +53,12 @@
           {% endif %}
         </td>
         <td>{{ s.department }}</td>
+        <td>{{ s.source_category or '—' }}</td>
+        <td>
+          <span class="pill {{ 'bad' if s.priority == 'Critical' else ('warn' if s.priority == 'High' else 'neutral') }}">
+            {{ s.priority }}
+          </span>
+        </td>
         <td>{{ s.state_name or '—' }}</td>
         <td>
           <a href="{{ s.url }}" class="mono" style="font-size:12px;" target="_blank" rel="noopener">
@@ -125,9 +133,24 @@
       </div>
 
       <div class="extract-form-group">
-        <label class="field-label" for="src-type">Discovery Method <span style="color:var(--bad)">*</span></label>
+        <label class="field-label" for="src-type">Portal Type <span style="color:var(--bad)">*</span></label>
         <select name="source_type" id="src-type" required>
           {% for t in source_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+
+      <div class="extract-form-group">
+        <label class="field-label" for="src-category">Source Type</label>
+        <select name="source_category" id="src-category">
+          <option value="">Unset</option>
+          {% for c in source_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+
+      <div class="extract-form-group">
+        <label class="field-label" for="src-priority">Priority</label>
+        <select name="priority" id="src-priority">
+          {% for p in priorities %}<option value="{{ p }}" {% if p == 'Medium' %}selected{% endif %}>{{ p }}</option>{% endfor %}
         </select>
       </div>
 
@@ -144,6 +167,14 @@
         <select name="state_id" id="src-state">
           <option value="">State-wide / Unset</option>
           {% for st in states %}<option value="{{ st.id }}">{{ st.name }}</option>{% endfor %}
+        </select>
+      </div>
+
+      <div class="extract-form-group">
+        <label class="field-label" for="src-district">District (optional)</label>
+        <select name="district_id" id="src-district">
+          <option value="">State-wide / Unset</option>
+          {% for d in districts %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}
         </select>
       </div>
 

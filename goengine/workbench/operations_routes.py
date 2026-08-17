@@ -239,9 +239,12 @@ def _register_sources(app: FastAPI) -> None:
             {
                 "sources": ops_sources.list_sources_with_geography(conn),
                 "states": geography.list_states(conn),
+                "districts": geography.list_districts(conn),
                 "current_user": current_user,
                 "can_manage": current_user.has_permission("manage_sources"),
                 "source_types": registry.VALID_SOURCE_TYPES,
+                "source_categories": registry.VALID_SOURCE_CATEGORIES,
+                "priorities": registry.VALID_PRIORITIES,
                 "discovery_methods": ops_sources.DISCOVERY_METHODS,
             },
         )
@@ -252,6 +255,7 @@ def _register_sources(app: FastAPI) -> None:
         name: Annotated[str, Form()], department: Annotated[str, Form()], url: Annotated[str, Form()],
         source_type: Annotated[str, Form()], discovery_method: Annotated[str | None, Form()] = None,
         state_id: Annotated[int | None, Form()] = None, district_id: Annotated[int | None, Form()] = None,
+        priority: Annotated[str, Form()] = "Medium", source_category: Annotated[str | None, Form()] = None,
     ):
         if state_id is not None and not current_user.can_act_on_state(state_id):
             raise HTTPException(status_code=403, detail="not authorized for this state")
@@ -259,9 +263,20 @@ def _register_sources(app: FastAPI) -> None:
             source_id = ops_sources.create_source(
                 conn, name=name, department=department, url=url, source_type=source_type,
                 discovery_method=discovery_method or None, state_id=state_id, district_id=district_id,
+                priority=priority, source_category=source_category or None,
                 actor=current_user.username,
             )
         except (registry.SourceRejected, ops_sources.SourceOperationsError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(f"/ops/sources/{source_id}", status_code=303)
+
+    @app.post("/ops/sources/{source_id}/priority")
+    def sources_set_priority(
+        source_id: int, conn: Conn, current_user: RequireSources, priority: Annotated[str, Form()],
+    ):
+        try:
+            registry.set_priority(conn, source_id, priority, actor=current_user.username)
+        except (registry.SourceRejected, LookupError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return RedirectResponse(f"/ops/sources/{source_id}", status_code=303)
 
@@ -287,6 +302,7 @@ def _register_sources(app: FastAPI) -> None:
                 "can_manage": current_user.has_permission("manage_sources"),
                 "can_certify": current_user.has_permission("run_certification"),
                 "discovery_methods": ops_sources.DISCOVERY_METHODS,
+                "priorities": registry.VALID_PRIORITIES,
             },
         )
 
@@ -391,15 +407,27 @@ def _register_documents(app: FastAPI) -> None:
     @app.get("/ops/documents", response_class=HTMLResponse)
     def documents_list(
         request: Request, conn: Conn, current_user: LoggedIn,
-        source_id: int | None = None, q: str | None = None,
+        source_id: int | None = None, q: str | None = None, department: str | None = None,
+        year: int | None = None, language: str | None = None, status: str | None = None,
     ):
         return templates.TemplateResponse(
             request, "documents.html",
             {
-                "documents": repository.list_documents(conn, source_id=source_id, search=q),
+                "documents": repository.list_documents(
+                    conn, source_id=source_id, search=q, department=department,
+                    year=year, language=language, status=status,
+                ),
                 "sources": registry.list_sources(conn),
+                "departments": repository.list_document_departments(conn),
+                "years": repository.list_document_years(conn),
+                "languages": ("english", "tamil", "mixed", "unknown"),
+                "statuses": ("approved", "rejected", "pending", "new", "downloaded", "parsed", "verified"),
                 "selected_source_id": source_id,
                 "search": q or "",
+                "selected_department": department or "",
+                "selected_year": year,
+                "selected_language": language or "",
+                "selected_status": status or "",
                 "current_user": current_user,
             },
         )
@@ -528,7 +556,11 @@ def _register_health(app: FastAPI) -> None:
     def health_page(request: Request, conn: Conn, config: Config, current_user: LoggedIn):
         return templates.TemplateResponse(
             request, "system_health.html",
-            {"health": ops_health.system_health(conn, config), "current_user": current_user},
+            {
+                "health": ops_health.system_health(conn, config),
+                "source_health": ops_health.source_health_table(conn),
+                "current_user": current_user,
+            },
         )
 
     @app.get("/api/health")

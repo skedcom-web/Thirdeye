@@ -23,12 +23,48 @@
         {% endfor %}
       </select>
     </div>
+    <div>
+      <label class="field-label" for="doc-dept">Department</label>
+      <select name="department" id="doc-dept" onchange="this.form.submit()">
+        <option value="">All departments</option>
+        {% for dep in departments %}
+        <option value="{{ dep }}" {% if selected_department == dep %}selected{% endif %}>{{ dep }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="field-label" for="doc-year">Year</label>
+      <select name="year" id="doc-year" onchange="this.form.submit()">
+        <option value="">All years</option>
+        {% for y in years %}
+        <option value="{{ y }}" {% if selected_year == y %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="field-label" for="doc-lang">Language</label>
+      <select name="language" id="doc-lang" onchange="this.form.submit()">
+        <option value="">All languages</option>
+        {% for l in languages %}
+        <option value="{{ l }}" {% if selected_language == l %}selected{% endif %}>{{ l|title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="field-label" for="doc-status">Status</label>
+      <select name="status" id="doc-status" onchange="this.form.submit()">
+        <option value="">All statuses</option>
+        {% for st in statuses %}
+        <option value="{{ st }}" {% if selected_status == st %}selected{% endif %}>{{ st|title }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div style="flex:1; min-width:200px;">
       <label class="field-label" for="doc-search">Search filename or GO number</label>
       <input type="text" name="q" id="doc-search" value="{{ search }}" placeholder="e.g. GO-123-2026 or G.O.(Ms) No.221">
     </div>
     <button type="submit" class="ghost">Filter</button>
-    {% if selected_source_id or search %}
+    {% if selected_source_id or search or selected_department or selected_year or selected_language or selected_status %}
     <a href="/ops/documents" class="muted" style="font-size:13px;">Clear filters</a>
     {% endif %}
   </form>
@@ -47,6 +83,7 @@
         <th>File</th>
         <th>Source / Department</th>
         <th>GO Number</th>
+        <th>Language</th>
         <th>Status</th>
         <th>Size</th>
         <th>Downloaded</th>
@@ -62,6 +99,7 @@
           {% if d.source_department %}<br><span class="muted" style="font-size:12px;">{{ d.source_department }}</span>{% endif %}
         </td>
         <td class="mono">{{ d.go_number or '—' }}</td>
+        <td>{{ d.language|title if d.language else '—' }}</td>
         <td>
           {% if d.review_status == 'approved' %}<span class="pill ok">Approved</span>
           {% elif d.review_status == 'rejected' %}<span class="pill bad">Rejected</span>
@@ -88,7 +126,7 @@
   {% else %}
   <div class="occ-empty-state">
     <div class="occ-empty-icon" aria-hidden="true">📁</div>
-    <p>No documents downloaded yet{% if selected_source_id or search %} matching this filter{% endif %}.</p>
+    <p>No documents downloaded yet{% if selected_source_id or search or selected_department or selected_year or selected_language or selected_status %} matching this filter{% endif %}.</p>
     <a href="/ops/jobs" class="btn-lg btn-primary" style="margin-top:8px;">Run Extraction →</a>
   </div>
   {% endif %}

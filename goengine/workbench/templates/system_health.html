@@ -58,6 +58,42 @@
 </div>
 
 <div class="panel">
+  <h2>Source Health &mdash; Module 4</h2>
+  <p class="muted">
+    Health score: 50 pts if the last crawl succeeded (or none run yet) + 30 pts if any document has
+    ever downloaded + 20 pts if under 20% of discovered links were rejected. Plain arithmetic, not a
+    black box &mdash; every point is reconstructable from the columns to its left.
+  </p>
+  {% if source_health %}
+  <table>
+    <tr>
+      <th>Source</th><th>Priority</th><th>Last Crawl</th><th>Found</th><th>Downloaded</th>
+      <th>Failed</th><th>OCR %</th><th>Score</th><th>Status</th>
+    </tr>
+    {% for s in source_health %}
+    <tr>
+      <td><a href="/ops/sources/{{ s.id }}">{{ s.name }}</a></td>
+      <td><span class="pill {{ 'bad' if s.priority == 'Critical' else ('warn' if s.priority == 'High' else 'neutral') }}">{{ s.priority }}</span></td>
+      <td class="mono" style="font-size:12px;">{{ s.last_crawl_at[:16] if s.last_crawl_at else 'never' }}</td>
+      <td>{{ s.documents_found }}</td>
+      <td>{{ s.documents_downloaded }}</td>
+      <td {% if s.failed_downloads %}style="color:var(--bad); font-weight:700;"{% endif %}>{{ s.failed_downloads }}</td>
+      <td>{{ (s.ocr_percent ~ '%') if s.ocr_percent is not none else '—' }}</td>
+      <td class="mono">{{ s.health_score }}</td>
+      <td>
+        <span class="pill {{ 'ok' if s.status == 'Healthy' else ('warn' if s.status == 'Warning' else 'bad') }}">
+          {{ s.status }}
+        </span>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No active sources yet.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
   <h2>Recent certification failures</h2>
   {% if health.certification_failures %}
   <table>

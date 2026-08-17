@@ -133,11 +133,22 @@ def list_documents(
     *,
     source_id: int | None = None,
     search: str | None = None,
+    department: str | None = None,
+    year: int | None = None,
+    language: str | None = None,
+    status: str | None = None,
     limit: int = 500,
 ) -> list[sqlite3.Row]:
     """Every downloaded file, newest first, with enough context (source,
     department, parse/review status, GO number if extracted) for an admin
-    to find and download a specific document without a command line."""
+    to find and download a specific document without a command line.
+
+    `year` filters on the download date, not a parsed GO date -- GO dates
+    live as free-text evidence in `go_fields` in whatever format the source
+    document used, not a queryable column, so downloaded-year is the
+    reliable one. `status` matches either the review outcome (approved/
+    rejected/pending) or, for anything not yet reviewed, the discovery
+    lifecycle stage (downloaded/parsed/etc) -- whichever the record has."""
     clauses: list[str] = []
     params: list[object] = []
     if source_id is not None:
@@ -147,6 +158,18 @@ def list_documents(
         clauses.append("(d.file_name LIKE ? OR go_number.value LIKE ?)")
         needle = f"%{search}%"
         params.extend([needle, needle])
+    if department:
+        clauses.append("s.department = ?")
+        params.append(department)
+    if year is not None:
+        clauses.append("CAST(strftime('%Y', d.downloaded_at) AS INTEGER) = ?")
+        params.append(year)
+    if language:
+        clauses.append("dc.language = ?")
+        params.append(language)
+    if status:
+        clauses.append("COALESCE(r.status, dd.status) = ?")
+        params.append(status)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
     return conn.execute(
@@ -164,7 +187,8 @@ def list_documents(
             dd.status AS discovery_status,
             r.id AS record_id,
             r.status AS review_status,
-            go_number.value AS go_number
+            go_number.value AS go_number,
+            dc.language AS language
           FROM documents d
           JOIN sources s ON s.id = d.source_id
           LEFT JOIN discovered_documents dd ON dd.id = d.discovered_id
@@ -174,12 +198,33 @@ def list_documents(
                  ON go_number.record_id = r.id
                 AND go_number.field_name = 'go_number'
                 AND go_number.superseded_by IS NULL
+          LEFT JOIN document_categories dc ON dc.document_id = d.id
          {where}
          ORDER BY d.downloaded_at DESC
          LIMIT ?
         """,
         params,
     ).fetchall()
+
+
+def list_document_departments(conn: sqlite3.Connection) -> list[str]:
+    """Distinct departments that actually have a downloaded document, for
+    the Document Library's Department filter dropdown."""
+    return [
+        r["department"] for r in conn.execute(
+            "SELECT DISTINCT s.department FROM documents d JOIN sources s ON s.id = d.source_id ORDER BY 1"
+        ).fetchall()
+    ]
+
+
+def list_document_years(conn: sqlite3.Connection) -> list[int]:
+    """Distinct years documents were downloaded in, newest first."""
+    return [
+        int(r["y"]) for r in conn.execute(
+            "SELECT DISTINCT CAST(strftime('%Y', downloaded_at) AS INTEGER) AS y "
+            "FROM documents ORDER BY y DESC"
+        ).fetchall()
+    ]
 
 
 def stats(settings: Settings, conn: sqlite3.Connection) -> dict[str, int]:

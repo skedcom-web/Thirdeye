@@ -62,6 +62,8 @@ def create_source(
     state_id: int | None = None,
     district_id: int | None = None,
     crawl_frequency: str = "daily",
+    priority: str = "Medium",
+    source_category: str | None = None,
     actor: str,
 ) -> int:
     if discovery_method is not None and discovery_method not in DISCOVERY_METHODS:
@@ -69,7 +71,7 @@ def create_source(
 
     source_id = registry.add_source(
         conn, name=name, department=department, url=url, source_type=source_type,
-        crawl_frequency=crawl_frequency, actor=actor,
+        crawl_frequency=crawl_frequency, priority=priority, source_category=source_category, actor=actor,
     )
     conn.execute(
         "UPDATE sources SET state_id = ?, district_id = ?, discovery_method = ? WHERE id = ?",

@@ -350,6 +350,31 @@ would contradict the project's own zero-hallucination principle applied to
 its own marketing page. The fourth metric shows **Official Sources
 Tracked** (a real `certified_sources` count) instead.
 
+### Phase 3.3 — Source Registry & Extraction Intelligence (`registry.py`, `operations/health.py`)
+
+The blueprint asked for 13 modules. Before building anything, every module
+was checked against what Phase 3 already shipped — several of them already
+exist under different names (Certification Center, Extraction Center,
+Parser Quality/Failure Analytics inside `certification.html`, Publication
+Control), and duplicating them under new names would be exactly the kind of
+redundant dashboard the blueprint's own "DO NOT BUILD" section warns
+against. What was genuinely missing got built:
+
+| Module | What changed |
+|---|---|
+| 1: Source Registry fields | Added `priority` (Critical/High/Medium/Low) and a `source_category` matching the blueprint's 7-type taxonomy (GO Portal, Department Portal, District Portal, Gazette, Tender Portal, Scheme Portal, Notification Portal). Both are validated in Python (`registry.VALID_PRIORITIES`/`VALID_SOURCE_CATEGORIES`), not a database `CHECK` constraint — the existing `source_type` column already has one baked into the original table, and every migration in this codebase has only ever *added* columns, never rebuilt a table to change a constraint |
+| 2: Verified sources | Seed registry grew from 6 to 20 sources. Every `dep_id` was read directly off the live `tn.gov.in` department directory (`godept_list.php`), not guessed — decode-verified against the captured data before use (this caught and fixed one transcription typo, Transport Department, before it shipped). Two blueprint-listed departments were deliberately **not** seeded: "Adi Dravidar Welfare" has no department of that exact name on the live site, and "Fisheries" isn't a separate department there — it's combined with Animal Husbandry, seeded as that one entry. Tier 3 (district portals) is not seeded at all — no URLs for them were verified, and this repository does not fabricate government URLs |
+| 4: Source Health Center | `/ops/health` gained a per-source table (previously it only showed an aggregate up/down count). Health score is plain, disclosed arithmetic — see the page itself — not an opaque number |
+| 7: Document Library | Added Department, Year (by download date — GO dates are free-text evidence, not a queryable column), Language, and Status filters to the page built in the previous session |
+
+**What this does not claim:** the blueprint's exit criteria include "10+
+sources certified" and "real Tamil Nadu GOs successfully acquired" — those
+are claims about the world, not the code, and can only be produced by
+actually running certification and extraction against these sources from a
+real deployment. Nothing in this session ran that; it built the registry
+and tooling that makes running it possible. See [Phase 2's own version of
+this caveat](#phase-2) for why that distinction matters here specifically.
+
 ---
 
 ## First Operational Scenario (Phase 3)

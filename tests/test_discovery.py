@@ -161,6 +161,7 @@ def test_is_due_respects_frequency():
             id=1, name="s", department="d", url="https://tn.gov.in", host="tn.gov.in",
             source_type="go_portal", adapter="generic_links", active=active,
             crawl_frequency=frequency, last_crawl_at=last, last_crawl_status=None, notes=None,
+            priority="Medium", source_category=None,
         )
 
     assert crawler.is_due(make("daily", None)) is True

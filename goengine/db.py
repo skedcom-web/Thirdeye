@@ -46,6 +46,20 @@ SOURCES_PHASE3_COLUMNS: dict[str, str] = {
     "current_version": "INTEGER NOT NULL DEFAULT 1",
 }
 
+# Phase 3.3: the Source Registry blueprint's Priority and Source Type fields.
+# `source_type` already exists (go_portal | gazette | department_site) with a
+# CHECK constraint baked into the original CREATE TABLE and drives no other
+# logic beyond that validation, so widening it to the blueprint's full
+# taxonomy (GO Portal, Department Portal, District Portal, Gazette, Tender
+# Portal, Scheme Portal, Notification Portal) as a *new* column -- validated
+# in Python, same as `discovery_method` already is -- avoids an ALTER-TABLE
+# rebuild of a table every other Phase 1-3 migration has only ever added
+# columns to.
+SOURCES_PHASE33_COLUMNS: dict[str, str] = {
+    "priority": "TEXT NOT NULL DEFAULT 'Medium'",
+    "source_category": "TEXT",
+}
+
 
 def utcnow() -> str:
     """Timestamps are ISO-8601 UTC everywhere; audit trails need one clock."""
@@ -142,6 +156,7 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     _ensure_columns(conn, "extraction_pages", EXTRACTION_PAGES_PHASE2_COLUMNS)
     conn.executescript(SCHEMA_PHASE3_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "sources", SOURCES_PHASE3_COLUMNS)
+    _ensure_columns(conn, "sources", SOURCES_PHASE33_COLUMNS)
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

@@ -11,11 +11,23 @@
   <table style="margin-top:12px;">
     <tr><th style="width:150px;">URL</th><td class="mono">{{ source.url }}</td></tr>
     <tr><th>Department</th><td>{{ source.department }}</td></tr>
+    <tr><th>Source type</th><td>{{ source.source_category or '—' }}</td></tr>
+    <tr><th>Priority</th>
+        <td><span class="pill {{ 'bad' if source.priority == 'Critical' else ('warn' if source.priority == 'High' else 'neutral') }}">{{ source.priority }}</span></td></tr>
     <tr><th>Discovery method</th><td>{{ source.discovery_method or '—' }}</td></tr>
     <tr><th>State / District</th><td>{{ source.state_name or 'state-wide' }} / {{ source.district_name or '—' }}</td></tr>
     <tr><th>Certification status</th>
         <td><span class="pill {{ 'ok' if source.certification_status == 'CERTIFIED' else ('bad' if source.certification_status == 'FAILED' else 'neutral') }}">{{ source.certification_status }}</span></td></tr>
   </table>
+  {% if can_manage %}
+  <form method="post" action="/ops/sources/{{ source.id }}/priority" class="inline" style="margin-top:12px;">
+    <label class="muted" style="font-size:12px;">Change priority</label>
+    <select name="priority">
+      {% for p in priorities %}<option value="{{ p }}" {% if p == source.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="ghost">Update</button>
+  </form>
+  {% endif %}
 </div>
 
 {% if can_manage or can_certify %}
