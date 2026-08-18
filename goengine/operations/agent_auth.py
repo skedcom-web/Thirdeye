@@ -106,6 +106,31 @@ def revoke_key(conn: sqlite3.Connection, agent_key_id: int, *, actor: str) -> No
     )
 
 
+def ensure_key(conn: sqlite3.Connection, token: str, *, label: str, created_by: str) -> None:
+    """Idempotently guarantees a specific, already-known token (as opposed
+    to generate_key's freshly-random one) is a valid active key. For
+    THIRDEYE_BOOTSTRAP_AGENT_KEY: Render environment variables survive a
+    redeploy even though the database doesn't, so calling this on every
+    startup means a local agent's saved key never goes stale after a reset.
+
+    No-ops if a row for this token already exists -- even if revoked, so a
+    deliberate revocation within the same database's lifetime is never
+    silently undone. It only matters right after a fresh reset, when no row
+    exists at all.
+    """
+    existing = conn.execute("SELECT id FROM agent_keys WHERE key_hash = ?", (hash_key(token),)).fetchone()
+    if existing is not None:
+        return
+    cur = conn.execute(
+        "INSERT INTO agent_keys (label, key_hash, key_prefix, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+        (label, hash_key(token), token[:12], created_by, utcnow()),
+    )
+    audit.record(
+        conn, action="agent_key.bootstrapped", entity_type="agent_key", entity_id=int(cur.lastrowid),
+        actor=created_by, detail={"label": label},
+    )
+
+
 def list_keys(conn: sqlite3.Connection) -> list[AgentKey]:
     rows = conn.execute("SELECT * FROM agent_keys ORDER BY id DESC").fetchall()
     return [_row_to_agent_key(r) for r in rows]
