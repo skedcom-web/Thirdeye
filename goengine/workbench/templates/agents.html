@@ -61,6 +61,44 @@
 {% endif %}
 
 <div class="panel" style="margin-top:16px;">
+  <h3>Run Extraction Locally</h3>
+  <p class="muted" style="font-size:13px;">
+    A browser can't run anything on your own computer -- that's a hard security boundary, not a
+    missing feature. Pick a department below to get the exact commands to run in a terminal
+    <strong>on the machine with unblocked access to government sites</strong>. That machine downloads
+    and OCRs the documents, then <code>sync</code> pushes the results back here automatically.
+  </p>
+
+  <details style="margin-top:8px;">
+    <summary style="cursor:pointer; font-weight:600;">One-time local setup (do this once per machine)</summary>
+    <ol style="margin-top:8px; font-size:13px; line-height:1.6;">
+      <li>Clone this repository and install dependencies: <code class="mono">pip install -r requirements.txt</code></li>
+      <li>Install Tesseract OCR (with English + Tamil language packs) on that machine.</li>
+      <li>Generate an agent key above, then set it as an environment variable <strong>on that local machine</strong> (not on Render):
+        <code class="mono">THIRDEYE_AGENT_KEY=&lt;the key you copied&gt;</code></li>
+    </ol>
+  </details>
+
+  <form method="get" action="/ops/agents" style="margin-top:16px; display:flex; gap:12px; align-items:center;">
+    <label for="department-select" style="font-size:13px;">Department:</label>
+    <select id="department-select" name="department" style="width:auto;">
+      <option value="" {{ 'selected' if not selected_department }}>All departments</option>
+      {% for d in departments %}
+      <option value="{{ d }}" {{ 'selected' if d == selected_department }}>{{ d.replace('_', ' ')|title }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Get commands</button>
+  </form>
+
+  <div style="margin-top:16px;">
+    <p style="font-size:13px; margin-bottom:4px;"><strong>1. Run locally</strong> (discover, download, OCR):</p>
+    <code class="mono" style="display:block; padding:12px; background:rgba(0,0,0,0.04); border-radius:6px; font-size:13px;">{{ run_command }}</code>
+    <p style="font-size:13px; margin:12px 0 4px;"><strong>2. Sync to this portal:</strong></p>
+    <code class="mono" style="display:block; padding:12px; background:rgba(0,0,0,0.04); border-radius:6px; font-size:13px;">{{ sync_command }}</code>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:16px;">
   <h3>Sync History</h3>
   <table style="margin-top:12px;">
     <thead>

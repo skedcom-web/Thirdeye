@@ -158,23 +158,61 @@ def cmd_parse(args: argparse.Namespace) -> int:
     return 0 if report.failed == 0 else 1
 
 
+def _department_source_ids(conn, departments: list[str]) -> list[int]:
+    """Active source ids whose department falls into one of the given
+    buckets (Health/Education/Public Works/Rural Development) -- same
+    bucketing logic operations/jobs.py's web Certification Job Center
+    already uses for its own department filter."""
+    rows = conn.execute("SELECT id, department FROM sources WHERE active = 1").fetchall()
+    return [
+        int(r["id"]) for r in rows
+        if categorize.department_bucket_for(r["department"]) in departments
+    ]
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     settings = _settings(args)
     fetcher = HttpFetcher()
     try:
         with session(settings) as conn:
-            report = pipeline.run_all(
-                conn, settings, fetcher,
-                only_due=not args.force, source_id=args.source_id,
-                max_pages=args.max_pages, limit=args.limit,
-            )
+            if args.department:
+                source_ids = _department_source_ids(conn, args.department)
+                if not source_ids:
+                    print(f"No active sources match department(s): {', '.join(args.department)}", file=sys.stderr)
+                    return 2
+                reports = [
+                    pipeline.run_all(
+                        conn, settings, fetcher,
+                        only_due=not args.force, source_id=sid,
+                        max_pages=args.max_pages, limit=args.limit,
+                    )
+                    for sid in source_ids
+                ]
+                new_documents = sum(r.new_documents for r in reports)
+                crawl_count = sum(len(r.crawl) for r in reports)
+                download_succeeded = sum(r.download.succeeded for r in reports)
+                download_processed = sum(r.download.processed for r in reports)
+                parse_succeeded = sum(r.parse.succeeded for r in reports)
+                parse_processed = sum(r.parse.processed for r in reports)
+                errors = [e for r in reports for e in (r.download.errors + r.parse.errors)]
+            else:
+                report = pipeline.run_all(
+                    conn, settings, fetcher,
+                    only_due=not args.force, source_id=args.source_id,
+                    max_pages=args.max_pages, limit=args.limit,
+                )
+                new_documents = report.new_documents
+                crawl_count = len(report.crawl)
+                download_succeeded, download_processed = report.download.succeeded, report.download.processed
+                parse_succeeded, parse_processed = report.parse.succeeded, report.parse.processed
+                errors = report.download.errors + report.parse.errors
     finally:
         fetcher.close()
 
-    print(f"Discovery : {report.new_documents} new document(s) across {len(report.crawl)} source(s)")
-    print(f"Download  : {report.download.succeeded}/{report.download.processed} ok")
-    print(f"Parse     : {report.parse.succeeded}/{report.parse.processed} ok")
-    for error in (report.download.errors + report.parse.errors)[:20]:
+    print(f"Discovery : {new_documents} new document(s) across {crawl_count} source(s)")
+    print(f"Download  : {download_succeeded}/{download_processed} ok")
+    print(f"Parse     : {parse_succeeded}/{parse_processed} ok")
+    for error in errors[:20]:
         print(f"  ! {error}")
     return 0
 
@@ -225,6 +263,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if args.source_id is not None:
             sql += " AND source_id = ?"
             params.append(args.source_id)
+        if args.department:
+            dept_ids = _department_source_ids(conn, args.department)
+            if not dept_ids:
+                print(f"No active sources match department(s): {', '.join(args.department)}", file=sys.stderr)
+                return 2
+            sql += f" AND source_id IN ({','.join('?' * len(dept_ids))})"
+            params.extend(dept_ids)
         sql += " ORDER BY id LIMIT ?"
         params.append(args.limit)
         rows = conn.execute(sql, params).fetchall()
@@ -878,6 +923,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("run", help="crawl, download and parse in one pass")
     p.add_argument("--source-id", type=int)
+    p.add_argument("--department", action="append", choices=list(categorize.ALL_BUCKETS),
+                   help="restrict to sources in this department bucket; repeat for more than one")
     p.add_argument("--force", action="store_true")
     p.add_argument("--max-pages", type=int, default=5)
     p.add_argument("--limit", type=int, default=50)
@@ -893,6 +940,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--server-url", required=True, help="e.g. https://thirdeye-xyz.onrender.com")
     p.add_argument("--api-key", help="or set THIRDEYE_AGENT_KEY (preferred -- avoids shell history/saved task args)")
     p.add_argument("--source-id", type=int, help="sync only this source's documents; default: all")
+    p.add_argument("--department", action="append", choices=list(categorize.ALL_BUCKETS),
+                   help="restrict to sources in this department bucket; repeat for more than one")
     p.add_argument("--limit", type=int, default=50)
     p.add_argument("--retry-failed", action="store_true", help="also re-attempt documents whose last sync failed")
     p.set_defaults(func=cmd_sync)

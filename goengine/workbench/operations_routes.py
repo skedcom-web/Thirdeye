@@ -647,6 +647,7 @@ def _register_users(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 def _register_agents(app: FastAPI) -> None:
     from ..operations import agent_auth
+    from ..certification.categorize import ALL_BUCKETS
 
     def _agents_context(request: Request, conn, current_user, *, new_token: str | None = None):
         sync_log = conn.execute(
@@ -659,12 +660,20 @@ def _register_agents(app: FastAPI) -> None:
              ORDER BY l.id DESC LIMIT 200
             """
         ).fetchall()
+        selected_department = request.query_params.get("department") or ""
+        server_url = f"{request.url.scheme}://{request.url.netloc}"
+        dept_flag = f" --department {selected_department}" if selected_department else ""
         return {
             "keys": agent_auth.list_keys(conn),
             "sync_log": sync_log,
             "current_user": current_user,
             "can_manage": current_user.has_permission(auth.PERM_MANAGE_USERS),
             "new_token": new_token,
+            "departments": ALL_BUCKETS,
+            "selected_department": selected_department,
+            "server_url": server_url,
+            "run_command": f"thirdeye run --data-dir thirdeye-local{dept_flag}",
+            "sync_command": f"thirdeye sync --data-dir thirdeye-local --server-url {server_url}{dept_flag}",
         }
 
     @app.get("/ops/agents", response_class=HTMLResponse)
