@@ -428,17 +428,22 @@ def set_status(
     )
 
 
-def pending_downloads(conn: sqlite3.Connection, limit: int = 100) -> list[sqlite3.Row]:
+def pending_downloads(
+    conn: sqlite3.Connection, limit: int = 100, *, source_id: int | None = None
+) -> list[sqlite3.Row]:
+    source_filter = "AND d.source_id = ?" if source_id is not None else ""
+    params: list = [source_id] if source_id is not None else []
+    params.append(limit)
     return conn.execute(
-        """
+        f"""
         SELECT d.*, s.name AS source_name, s.department AS source_department
           FROM discovered_documents d
           JOIN sources s ON s.id = d.source_id
-         WHERE d.status = 'new'
+         WHERE d.status = 'new' {source_filter}
          ORDER BY d.id
          LIMIT ?
         """,
-        (limit,),
+        params,
     ).fetchall()
 
 

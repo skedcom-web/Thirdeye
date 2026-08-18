@@ -61,10 +61,11 @@ def run_discovery(
 
 
 def run_downloads(
-    conn: sqlite3.Connection, settings: Settings, fetcher: Fetcher, *, limit: int = 50
+    conn: sqlite3.Connection, settings: Settings, fetcher: Fetcher, *,
+    limit: int = 50, source_id: int | None = None,
 ) -> StageReport:
     report = StageReport()
-    for result in acquisition.acquire_pending(conn, settings, fetcher, limit=limit):
+    for result in acquisition.acquire_pending(conn, settings, fetcher, limit=limit, source_id=source_id):
         report.processed += 1
         if result.ok:
             report.succeeded += 1
@@ -149,21 +150,28 @@ def run_parsing(
     limit: int = 50,
     preferred_backend: str | None = None,
     reparse: bool = False,
+    source_id: int | None = None,
 ) -> StageReport:
     """Parse archived documents that have no GO record yet."""
-    sql = """
+    source_filter = "AND d.source_id = ?" if source_id is not None else ""
+    sql = f"""
         SELECT d.id FROM documents d
          WHERE NOT EXISTS (
                 SELECT 1 FROM go_records r
                  WHERE r.document_id = d.id AND r.extractor_version = ?
              )
+             {source_filter}
          ORDER BY d.id
          LIMIT ?
     """
-    params: tuple = (meta.EXTRACTOR_VERSION, limit)
+    params: list = [meta.EXTRACTOR_VERSION]
+    if source_id is not None:
+        params.append(source_id)
+    params.append(limit)
     if reparse:
-        sql = "SELECT id FROM documents ORDER BY id LIMIT ?"
-        params = (limit,)
+        source_filter2 = "WHERE source_id = ?" if source_id is not None else ""
+        sql = f"SELECT id FROM documents {source_filter2} ORDER BY id LIMIT ?"
+        params = [source_id, limit] if source_id is not None else [limit]
 
     report = StageReport()
     for row in conn.execute(sql, params).fetchall():
@@ -196,12 +204,18 @@ def run_all(
     max_pages: int = 5,
     limit: int = 50,
 ) -> PipelineReport:
+    # source_id now scopes every stage, not just discovery -- a caller
+    # asking to run one specific source must never have its download/parse
+    # phases silently pick up another source's backlog instead. That bug
+    # was confirmed live: a Local Agent request scoped to "Public Works"
+    # kept downloading "Health" department leftovers because only crawling
+    # was ever source-scoped here.
     report = PipelineReport()
     report.crawl = run_discovery(
         conn, fetcher, only_due=only_due, source_id=source_id, max_pages=max_pages
     )
-    report.download = run_downloads(conn, settings, fetcher, limit=limit)
-    report.parse = run_parsing(conn, settings, limit=limit)
+    report.download = run_downloads(conn, settings, fetcher, limit=limit, source_id=source_id)
+    report.parse = run_parsing(conn, settings, limit=limit, source_id=source_id)
     return report
 
 

@@ -165,8 +165,9 @@ def acquire_pending(
     *,
     limit: int = 50,
     actor: str = audit.SYSTEM_ACTOR,
+    source_id: int | None = None,
 ) -> list[AcquisitionResult]:
-    rows = crawler.pending_downloads(conn, limit=limit)
+    rows = crawler.pending_downloads(conn, limit=limit, source_id=source_id)
     return [acquire_one(conn, settings, fetcher, int(r["id"]), actor=actor) for r in rows]
 
 
