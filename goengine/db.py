@@ -133,6 +133,20 @@ def utcnow() -> str:
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
+    """Local SQLite by default (dev/tests -- unchanged). If
+    TURSO_DATABASE_URL/TURSO_AUTH_TOKEN are set, connects to a remote Turso
+    database instead: the free-tier Render disk this local file would
+    otherwise live on doesn't survive a redeploy, so production points here
+    instead. See goengine/turso_db.py for why it's a remote-only connection
+    (no local replica, no sync() durability gap) and exactly what subset of
+    the sqlite3 API it mirrors."""
+    turso_url = os.environ.get("TURSO_DATABASE_URL")
+    turso_token = os.environ.get("TURSO_AUTH_TOKEN")
+    if turso_url and turso_token:
+        from .turso_db import TursoConnection
+
+        return TursoConnection(turso_url, turso_token)  # type: ignore[return-value]
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, isolation_level=None)
     conn.row_factory = sqlite3.Row

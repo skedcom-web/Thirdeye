@@ -1,5 +1,11 @@
 httpx>=0.28
 beautifulsoup4>=4.13
+
+# Phase 3.4/3.5: remote database (Turso/libSQL) -- goengine/db.py connects
+# here instead of a local SQLite file when TURSO_DATABASE_URL/
+# TURSO_AUTH_TOKEN are set, since Render's free-tier disk doesn't survive a
+# redeploy. See goengine/turso_db.py for the compatibility shim.
+libsql-client>=0.3
 fastapi>=0.115
 uvicorn[standard]>=0.32
 jinja2>=3.1
