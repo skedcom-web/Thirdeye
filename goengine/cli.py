@@ -401,6 +401,7 @@ def _run_claimed_request(
         raise RuntimeError("no local sources match this request's scope (state/district/department)")
 
     sources_completed = documents_found = documents_downloaded = documents_parsed = documents_failed = 0
+    synced_total = sync_failed_total = 0
     http_client.post(
         f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
         json={"sources_total": len(source_ids), "sources_completed": 0},
@@ -412,6 +413,25 @@ def _run_claimed_request(
         documents_downloaded += report.download.succeeded
         documents_parsed += report.parse.succeeded
         documents_failed += report.download.failed + report.parse.failed
+
+        # Sync after EVERY source, not once at the end of the whole batch:
+        # a request scoped to many sources can take a long time for real
+        # (real crawl delays + real downloads across each site), and with a
+        # batch-at-the-end design the admin sees nothing land in the portal
+        # until the entire run finishes -- and a killed/crashed run loses
+        # all of it. Syncing incrementally means every source's results are
+        # visible and safely delivered as soon as that source is done.
+        sync_results = _sync_documents(
+            conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
+        )
+        synced_total += len(sync_results)
+        sync_failed_total += sum(1 for r in sync_results if r[1] == "failed")
+
+        print(
+            f"  source {sources_completed}/{len(source_ids)}: "
+            f"{report.download.succeeded} downloaded, {report.parse.succeeded} parsed, "
+            f"{len(sync_results) - sum(1 for r in sync_results if r[1] == 'failed')}/{len(sync_results)} synced"
+        )
         http_client.post(
             f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
             json={
@@ -421,14 +441,10 @@ def _run_claimed_request(
             },
         )
 
-    sync_results = _sync_documents(
-        conn, settings, http_client, server_url, auth_headers, source_ids=source_ids, limit=1000,
-    )
-    sync_failed = sum(1 for r in sync_results if r[1] == "failed")
     print(
-        f"  sources {sources_completed}/{len(source_ids)}, "
+        f"  done: sources {sources_completed}/{len(source_ids)}, "
         f"{documents_downloaded} downloaded, {documents_parsed} parsed, "
-        f"{len(sync_results) - sync_failed}/{len(sync_results)} synced"
+        f"{synced_total - sync_failed_total}/{synced_total} synced"
     )
 
     http_client.post(
