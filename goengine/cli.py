@@ -26,6 +26,7 @@ from .discovery import crawler
 from .discovery.adapters import available as available_adapters
 from .extraction.metadata import ALL_FIELDS
 from .fetching import HttpFetcher, OfflineFetcher
+from .operations import extraction_queue
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -235,16 +236,103 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sync_documents(
+    conn, settings: Settings, http_client, server_url: str, auth_headers: dict,
+    *, source_ids: list[int] | None = None, retry_failed: bool = False, limit: int = 50,
+) -> list[list]:
+    """Pushes locally-downloaded, not-yet-synced documents to a Third Eye
+    server. Shared by `cmd_sync` (a one-shot CLI invocation) and
+    `cmd_agent_daemon` (called automatically after a claimed queue request
+    finishes downloading). One bad document never aborts the batch, same
+    principle as run/download/parse -- it's recorded on that document's
+    `agent_sync_error` and the caller moves on. Returns rows of
+    [file_name, status, go_record_id, error] for display."""
+    sql = "SELECT id, source_id, source_url, file_name, stored_path FROM documents WHERE agent_synced_at IS NULL"
+    params: list = []
+    if not retry_failed:
+        sql += " AND agent_sync_error IS NULL"
+    if source_ids is not None:
+        if not source_ids:
+            return []
+        sql += f" AND source_id IN ({','.join('?' * len(source_ids))})"
+        params.extend(source_ids)
+    sql += " ORDER BY id LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
+
+    results: list[list] = []
+    for row in rows:
+        document_id = int(row["id"])
+        extraction = conn.execute(
+            "SELECT id FROM extractions WHERE document_id = ? ORDER BY id DESC LIMIT 1",
+            (document_id,),
+        ).fetchone()
+        ocr_pages_payload: list[dict] = []
+        if extraction is not None:
+            ocr_rows = conn.execute(
+                """
+                SELECT op.page_number, op.text, op.mean_word_confidence
+                  FROM ocr_pages op
+                  JOIN ocr_runs orun ON orun.id = op.ocr_run_id
+                 WHERE orun.extraction_id = ? AND orun.source = 'server'
+                 ORDER BY orun.id DESC, op.page_number
+                """,
+                (extraction["id"],),
+            ).fetchall()
+            seen_pages: set[int] = set()
+            for r in ocr_rows:
+                if r["page_number"] in seen_pages:
+                    continue
+                seen_pages.add(r["page_number"])
+                ocr_pages_payload.append(
+                    {
+                        "page_number": r["page_number"],
+                        "text": r["text"],
+                        "mean_confidence": r["mean_word_confidence"] or 0.0,
+                    }
+                )
+
+        payload = {
+            "source_id": int(row["source_id"]),
+            "source_url": row["source_url"],
+            "file_name": row["file_name"],
+            "ocr_pages": ocr_pages_payload,
+        }
+        file_path = repository.absolute_path(settings, row["stored_path"])
+        try:
+            with open(file_path, "rb") as fh:
+                resp = http_client.post(
+                    f"{server_url}/api/agent/sync/document",
+                    headers=auth_headers,
+                    files={"file": (row["file_name"], fh, "application/pdf")},
+                    data={"payload": json.dumps(payload)},
+                )
+            if resp.status_code == 200:
+                conn.execute(
+                    "UPDATE documents SET agent_synced_at = ?, agent_sync_error = NULL WHERE id = ?",
+                    (utcnow(), document_id),
+                )
+                body = resp.json()
+                status = "already-synced" if body.get("already_synced") else "synced"
+                results.append([row["file_name"], status, body.get("go_record_id"), ""])
+            else:
+                error = f"HTTP {resp.status_code}: {resp.text[:150]}"
+                conn.execute("UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id))
+                results.append([row["file_name"], "failed", "", error])
+        except Exception as exc:  # httpx.HTTPError or a filesystem error -- never abort the batch
+            error = str(exc)
+            conn.execute("UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id))
+            results.append([row["file_name"], "failed", "", error])
+
+    return results
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
     """Phase 3.4 -- push locally-downloaded (and locally-OCR'd) documents to
     a Third Eye server. Pairs with `thirdeye run --data-dir <local>`, which
     does the discovery/download/parse/OCR that this command then syncs:
 
         thirdeye run --data-dir localdata && thirdeye sync --server-url https://...
-
-    One bad document never aborts the batch, same principle as run/download/
-    parse -- it's recorded on that document's `agent_sync_error` and the
-    command moves on, so a Task Scheduler/cron job can retry it next time.
     """
     settings = _settings(args)
     server_url = args.server_url.rstrip("/")
@@ -255,101 +343,170 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
     import httpx
 
+    source_ids = None
     with session(settings) as conn:
-        sql = "SELECT id, source_id, source_url, file_name, stored_path FROM documents WHERE agent_synced_at IS NULL"
-        params: list = []
-        if not args.retry_failed:
-            sql += " AND agent_sync_error IS NULL"
         if args.source_id is not None:
-            sql += " AND source_id = ?"
-            params.append(args.source_id)
-        if args.department:
-            dept_ids = _department_source_ids(conn, args.department)
-            if not dept_ids:
+            source_ids = [args.source_id]
+        elif args.department:
+            source_ids = _department_source_ids(conn, args.department)
+            if not source_ids:
                 print(f"No active sources match department(s): {', '.join(args.department)}", file=sys.stderr)
                 return 2
-            sql += f" AND source_id IN ({','.join('?' * len(dept_ids))})"
-            params.extend(dept_ids)
-        sql += " ORDER BY id LIMIT ?"
-        params.append(args.limit)
-        rows = conn.execute(sql, params).fetchall()
 
-        results: list[list] = []
-        failed = 0
         auth_headers = {"Authorization": f"Bearer {api_key}"}
         with httpx.Client(timeout=60.0) as client:
-            for row in rows:
-                document_id = int(row["id"])
-                extraction = conn.execute(
-                    "SELECT id FROM extractions WHERE document_id = ? ORDER BY id DESC LIMIT 1",
-                    (document_id,),
-                ).fetchone()
-                ocr_pages_payload: list[dict] = []
-                if extraction is not None:
-                    ocr_rows = conn.execute(
-                        """
-                        SELECT op.page_number, op.text, op.mean_word_confidence
-                          FROM ocr_pages op
-                          JOIN ocr_runs orun ON orun.id = op.ocr_run_id
-                         WHERE orun.extraction_id = ? AND orun.source = 'server'
-                         ORDER BY orun.id DESC, op.page_number
-                        """,
-                        (extraction["id"],),
-                    ).fetchall()
-                    seen_pages: set[int] = set()
-                    for r in ocr_rows:
-                        if r["page_number"] in seen_pages:
-                            continue
-                        seen_pages.add(r["page_number"])
-                        ocr_pages_payload.append(
-                            {
-                                "page_number": r["page_number"],
-                                "text": r["text"],
-                                "mean_confidence": r["mean_word_confidence"] or 0.0,
-                            }
-                        )
+            results = _sync_documents(
+                conn, settings, client, server_url, auth_headers,
+                source_ids=source_ids, retry_failed=args.retry_failed, limit=args.limit,
+            )
 
-                payload = {
-                    "source_id": int(row["source_id"]),
-                    "source_url": row["source_url"],
-                    "file_name": row["file_name"],
-                    "ocr_pages": ocr_pages_payload,
-                }
-                file_path = repository.absolute_path(settings, row["stored_path"])
-                try:
-                    with open(file_path, "rb") as fh:
-                        resp = client.post(
-                            f"{server_url}/api/agent/sync/document",
-                            headers=auth_headers,
-                            files={"file": (row["file_name"], fh, "application/pdf")},
-                            data={"payload": json.dumps(payload)},
-                        )
-                    if resp.status_code == 200:
-                        conn.execute(
-                            "UPDATE documents SET agent_synced_at = ?, agent_sync_error = NULL WHERE id = ?",
-                            (utcnow(), document_id),
-                        )
-                        body = resp.json()
-                        status = "already-synced" if body.get("already_synced") else "synced"
-                        results.append([row["file_name"], status, body.get("go_record_id"), ""])
-                    else:
-                        error = f"HTTP {resp.status_code}: {resp.text[:150]}"
-                        conn.execute(
-                            "UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id)
-                        )
-                        results.append([row["file_name"], "failed", "", error])
-                        failed += 1
-                except httpx.HTTPError as exc:
-                    error = str(exc)
-                    conn.execute(
-                        "UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id)
-                    )
-                    results.append([row["file_name"], "failed", "", error])
-                    failed += 1
-
+    failed = sum(1 for r in results if r[1] == "failed")
     _print_table(["DOCUMENT", "STATUS", "SERVER RECORD ID", "ERROR"], results)
     print(f"\n{len(results) - failed}/{len(results)} synced")
     return 1 if failed else 0
+
+
+def _mirror_sources_from_server(conn, http_client, server_url: str, auth_headers: dict) -> None:
+    """Pulls the server's active Source Registry and upserts by name into
+    the local database. The server stays the single source of truth for
+    where sources come from (added/edited in the web UI) -- this just gives
+    a local run something to point pipeline.run_all(source_id=...) at."""
+    resp = http_client.get(f"{server_url}/api/agent/sources", headers=auth_headers)
+    resp.raise_for_status()
+    for spec in resp.json():
+        existing = registry.get_by_name(conn, spec["name"])
+        if existing is not None:
+            continue
+        try:
+            registry.add_source(
+                conn, name=spec["name"], department=spec["department"], url=spec["url"],
+                source_type=spec["source_type"], adapter=spec.get("adapter") or "generic_links",
+                crawl_frequency=spec.get("crawl_frequency") or "daily",
+                priority=spec.get("priority") or "Medium", source_category=spec.get("source_category"),
+                actor="agent-daemon",
+            )
+        except registry.SourceRejected as exc:
+            print(f"  ! could not mirror source {spec['name']!r}: {exc}")
+
+
+def _run_claimed_request(
+    conn, settings: Settings, fetcher, http_client, server_url: str, auth_headers: dict, req: dict,
+) -> None:
+    request_id = req["id"]
+    source_ids = extraction_queue.resolve_local_source_ids(
+        conn, state_name=req.get("state_name"), district_name=req.get("district_name"),
+        department_filter=req.get("department_filter"),
+    )
+    if not source_ids:
+        raise RuntimeError("no local sources match this request's scope (state/district/department)")
+
+    sources_completed = documents_found = documents_downloaded = documents_parsed = documents_failed = 0
+    http_client.post(
+        f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+        json={"sources_total": len(source_ids), "sources_completed": 0},
+    )
+    for sid in source_ids:
+        report = pipeline.run_all(conn, settings, fetcher, only_due=False, source_id=sid, max_pages=5, limit=50)
+        sources_completed += 1
+        documents_found += report.new_documents
+        documents_downloaded += report.download.succeeded
+        documents_parsed += report.parse.succeeded
+        documents_failed += report.download.failed + report.parse.failed
+        http_client.post(
+            f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+            json={
+                "sources_completed": sources_completed, "documents_found": documents_found,
+                "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
+                "documents_failed": documents_failed,
+            },
+        )
+
+    sync_results = _sync_documents(
+        conn, settings, http_client, server_url, auth_headers, source_ids=source_ids, limit=1000,
+    )
+    sync_failed = sum(1 for r in sync_results if r[1] == "failed")
+    print(
+        f"  sources {sources_completed}/{len(source_ids)}, "
+        f"{documents_downloaded} downloaded, {documents_parsed} parsed, "
+        f"{len(sync_results) - sync_failed}/{len(sync_results)} synced"
+    )
+
+    http_client.post(
+        f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
+        json={"ok": True},
+    )
+
+
+def cmd_agent_daemon(args: argparse.Namespace) -> int:
+    """Phase 3.4 -- polls a Third Eye server for queued Local extraction
+    requests (created from the Extraction Center's "Local Agent" mode),
+    executes them against this machine's own unblocked network, and syncs
+    results back automatically. Leave this running on a machine that can
+    reach the government sites; Ctrl+C stops it after the current cycle."""
+    settings = _settings(args)
+    server_url = args.server_url.rstrip("/")
+    api_key = args.api_key or os.environ.get("THIRDEYE_AGENT_KEY")
+    if not api_key:
+        print("No API key: pass --api-key or set THIRDEYE_AGENT_KEY", file=sys.stderr)
+        return 2
+
+    import signal
+    import time
+
+    import httpx
+
+    stop = {"flag": False}
+
+    def _handle_sigint(signum, frame):
+        stop["flag"] = True
+        print("\nStopping after the current cycle...")
+
+    signal.signal(signal.SIGINT, _handle_sigint)
+
+    auth_headers = {"Authorization": f"Bearer {api_key}"}
+    fetcher = HttpFetcher()
+    if args.once:
+        print(f"Agent daemon: checking {server_url} once (--once).")
+    else:
+        print(f"Agent daemon started. Polling {server_url} every {args.poll_interval}s. Ctrl+C to stop.")
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            while not stop["flag"]:
+                try:
+                    resp = client.post(f"{server_url}/api/agent/queue/claim", headers=auth_headers)
+                    resp.raise_for_status()
+                    req = resp.json().get("request")
+                except httpx.HTTPError as exc:
+                    print(f"! poll failed: {exc}")
+                    req = None
+
+                if req is None:
+                    if args.once:
+                        break
+                    time.sleep(args.poll_interval)
+                    continue
+
+                print(f"Claimed request #{req['id']}: department_filter={req.get('department_filter')}")
+                with session(settings) as conn:
+                    try:
+                        _mirror_sources_from_server(conn, client, server_url, auth_headers)
+                        _run_claimed_request(conn, settings, fetcher, client, server_url, auth_headers, req)
+                    except Exception as exc:
+                        print(f"! request #{req['id']} failed: {exc}")
+                        try:
+                            client.post(
+                                f"{server_url}/api/agent/queue/{req['id']}/complete",
+                                headers=auth_headers, json={"ok": False, "error": str(exc)},
+                            )
+                        except httpx.HTTPError:
+                            pass
+                if args.once:
+                    break
+    finally:
+        fetcher.close()
+
+    print("Agent daemon stopped.")
+    return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -945,6 +1102,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=50)
     p.add_argument("--retry-failed", action="store_true", help="also re-attempt documents whose last sync failed")
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser(
+        "agent-daemon",
+        help="Phase 3.4: poll a Third Eye server for queued Local extraction requests and execute them here",
+    )
+    p.add_argument("--server-url", required=True, help="e.g. https://thirdeye-xyz.onrender.com")
+    p.add_argument("--api-key", help="or set THIRDEYE_AGENT_KEY (preferred -- avoids shell history/saved task args)")
+    p.add_argument("--poll-interval", type=int, default=30, help="seconds between checks when the queue is empty")
+    p.add_argument("--once", action="store_true",
+                   help="process at most one queued request then exit -- for OS-level scheduling "
+                        "(Task Scheduler/cron), the blueprint's 'Local Scheduled' mode, instead of "
+                        "leaving this running continuously")
+    p.set_defaults(func=cmd_agent_daemon)
 
     # review
     p = sub.add_parser("status", help="pipeline counts")

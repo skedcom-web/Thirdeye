@@ -360,6 +360,35 @@ def _register_sources(app: FastAPI) -> None:
 # Module 6: Certification Job Center
 # ---------------------------------------------------------------------------
 def _register_jobs(app: FastAPI) -> None:
+    from datetime import datetime, timedelta, timezone
+    from ..operations import agent_auth, extraction_queue
+
+    # An agent whose key was used within this window counts as "online" --
+    # matches the daemon's own default poll interval (see cli.py
+    # cmd_agent_daemon), so a normally-polling agent never flickers offline
+    # between requests.
+    AGENT_ONLINE_WINDOW_SECONDS = 90
+
+    def _agent_status(conn: sqlite3.Connection) -> dict:
+        keys = agent_auth.list_keys(conn)
+        now = datetime.now(timezone.utc)
+        online = False
+        for k in keys:
+            if k.active and k.last_used_at:
+                try:
+                    seen = datetime.fromisoformat(k.last_used_at)
+                except ValueError:
+                    continue
+                if now - seen <= timedelta(seconds=AGENT_ONLINE_WINDOW_SECONDS):
+                    online = True
+                    break
+        return {
+            "agent_online": online,
+            "agent_key_count": len([k for k in keys if k.active]),
+            "queue_size": extraction_queue.queue_size(conn),
+            "local_requests": extraction_queue.list_requests(conn, limit=10),
+        }
+
     @app.get("/ops/jobs", response_class=HTMLResponse)
     def jobs_list(request: Request, conn: Conn, current_user: LoggedIn):
         return templates.TemplateResponse(
@@ -370,6 +399,7 @@ def _register_jobs(app: FastAPI) -> None:
                 "current_user": current_user,
                 "can_run": current_user.has_permission("run_certification"),
                 "buckets": ALL_BUCKETS,
+                **_agent_status(conn),
             },
         )
 
@@ -377,12 +407,21 @@ def _register_jobs(app: FastAPI) -> None:
     def jobs_start(
         request: Request, conn: Conn, config: Config, current_user: RequireCertify,
         fetcher_factory: FetcherFactory,
+        mode: Annotated[str, Form()] = "cloud",
         state_id: Annotated[int | None, Form()] = None,
         district_id: Annotated[int | None, Form()] = None,
         departments: Annotated[list[str] | None, Form()] = None,
     ):
         if state_id is not None and not current_user.can_act_on_state(state_id):
             raise HTTPException(status_code=403, detail="not authorized for this state")
+
+        if mode == "local":
+            extraction_queue.enqueue_local_request(
+                conn, state_id=state_id, district_id=district_id,
+                department_filter=departments or None, created_by=current_user.username,
+            )
+            return RedirectResponse("/ops/jobs", status_code=303)
+
         job_id = ops_jobs.start_job(
             config, state_id=state_id, district_id=district_id,
             department_filter=departments or None, created_by=current_user.username,

@@ -40,7 +40,7 @@ STATUS_COMPLETED = "COMPLETED"
 STATUS_FAILED = "FAILED"
 
 
-def _sources_in_scope(
+def sources_in_scope(
     conn: sqlite3.Connection, *, state_id: int | None, district_id: int | None,
     department_filter: list[str] | None,
 ) -> list[sqlite3.Row]:
@@ -149,7 +149,7 @@ def _run_job(
             (STATUS_RUNNING, utcnow(), job_id),
         )
 
-        sources = _sources_in_scope(conn, state_id=state_id, district_id=district_id, department_filter=department_filter)
+        sources = sources_in_scope(conn, state_id=state_id, district_id=district_id, department_filter=department_filter)
         conn.execute("UPDATE certification_jobs SET sources_total = ? WHERE id = ?", (len(sources), job_id))
 
         for source_row in sources:

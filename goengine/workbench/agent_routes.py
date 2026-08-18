@@ -15,14 +15,19 @@ import json
 import sqlite3
 from typing import Annotated
 
-from fastapi import FastAPI, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from .. import acquisition, pipeline, registry
 from ..db import utcnow
 from ..extraction import ocr as ocrengine
-from ..operations import agent_auth
+from ..operations import agent_auth, extraction_queue
 from .deps import Config, Conn, RequireAgentKey
+
+_PROGRESS_FIELDS = (
+    "sources_total", "sources_completed",
+    "documents_found", "documents_downloaded", "documents_parsed", "documents_failed",
+)
 
 
 def register(app: FastAPI) -> None:
@@ -120,3 +125,64 @@ def register(app: FastAPI) -> None:
                 "already_synced": already_synced,
             }
         )
+
+    @app.get("/api/agent/sources")
+    def agent_sources(conn: Conn, agent_key: RequireAgentKey):
+        """The current active Source Registry, for a local agent to mirror
+        into its own database before executing a claimed request -- the
+        cloud portal's registry stays the single source of truth (sources
+        are added/edited there), the agent just needs a local copy to run
+        pipeline.run_all(source_id=...) against."""
+        sources = registry.list_sources(conn, active_only=True)
+        return JSONResponse(
+            [
+                {
+                    "name": s.name, "department": s.department, "url": s.url,
+                    "source_type": s.source_type, "adapter": s.adapter,
+                    "crawl_frequency": s.crawl_frequency, "priority": s.priority,
+                    "source_category": s.source_category,
+                }
+                for s in sources
+            ]
+        )
+
+    @app.post("/api/agent/queue/claim")
+    def agent_queue_claim(conn: Conn, agent_key: RequireAgentKey):
+        row = extraction_queue.claim_next(conn, agent_key_id=agent_key.id)
+        if row is None:
+            return JSONResponse({"request": None})
+        return JSONResponse({"request": extraction_queue.claim_payload(conn, row)})
+
+    def _require_claiming_agent(conn: sqlite3.Connection, request_id: int, agent_key: agent_auth.AgentKey):
+        row = extraction_queue.get_request(conn, request_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="no such extraction request")
+        if row["claimed_by_agent_key_id"] != agent_key.id:
+            raise HTTPException(status_code=403, detail="this request was not claimed by your agent key")
+        return row
+
+    @app.post("/api/agent/queue/{request_id}/progress")
+    def agent_queue_progress(
+        request_id: int, conn: Conn, agent_key: RequireAgentKey, body: Annotated[dict, Body()] = {},
+    ):
+        _require_claiming_agent(conn, request_id, agent_key)
+        try:
+            extraction_queue.report_progress(
+                conn, request_id, **{k: body[k] for k in _PROGRESS_FIELDS if k in body}
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/agent/queue/{request_id}/complete")
+    def agent_queue_complete(
+        request_id: int, conn: Conn, agent_key: RequireAgentKey, body: Annotated[dict, Body()] = {},
+    ):
+        _require_claiming_agent(conn, request_id, agent_key)
+        progress_fields = {k: body[k] for k in _PROGRESS_FIELDS if k in body}
+        if progress_fields:
+            extraction_queue.report_progress(conn, request_id, **progress_fields)
+        extraction_queue.complete_request(
+            conn, request_id, ok=bool(body.get("ok", True)), error=body.get("error"),
+        )
+        return JSONResponse({"ok": True})
