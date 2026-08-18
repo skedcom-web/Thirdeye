@@ -389,9 +389,22 @@ def _mirror_sources_from_server(conn, http_client, server_url: str, auth_headers
             print(f"  ! could not mirror source {spec['name']!r}: {exc}")
 
 
+_BATCH_SIZE = 10  # small on purpose -- see _run_claimed_request docstring
+
+
 def _run_claimed_request(
     conn, settings: Settings, fetcher, http_client, server_url: str, auth_headers: dict, req: dict,
 ) -> None:
+    """A source can legitimately have hundreds of real documents (a real TN
+    department listing has produced 500+ in practice) -- downloading and
+    parsing all of them for real, at a polite per-host crawl delay, can take
+    a long time. Processing a source in one giant pipeline.run_all() call
+    means the admin sees nothing land in the portal and no progress update
+    for the entire duration. Instead this repeatedly calls pipeline.run_all
+    with a small `limit`, syncing and reporting progress after every small
+    batch, until a batch does no new work -- so results appear within
+    seconds/minutes rather than only once an entire large source finishes,
+    and a killed/interrupted run keeps whatever batches already landed."""
     request_id = req["id"]
     source_ids = extraction_queue.resolve_local_source_ids(
         conn, state_name=req.get("state_name"), district_name=req.get("district_name"),
@@ -407,31 +420,43 @@ def _run_claimed_request(
         json={"sources_total": len(source_ids), "sources_completed": 0},
     )
     for sid in source_ids:
-        report = pipeline.run_all(conn, settings, fetcher, only_due=False, source_id=sid, max_pages=5, limit=50)
+        while True:
+            report = pipeline.run_all(
+                conn, settings, fetcher, only_due=False, source_id=sid, max_pages=5, limit=_BATCH_SIZE,
+            )
+            documents_found += report.new_documents
+            documents_downloaded += report.download.succeeded
+            documents_parsed += report.parse.succeeded
+            documents_failed += report.download.failed + report.parse.failed
+
+            sync_results = _sync_documents(
+                conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
+            )
+            batch_synced = len(sync_results)
+            batch_sync_failed = sum(1 for r in sync_results if r[1] == "failed")
+            synced_total += batch_synced
+            sync_failed_total += batch_sync_failed
+
+            print(
+                f"  source {sid}, batch: {report.download.succeeded} downloaded, "
+                f"{report.parse.succeeded} parsed, {batch_synced - batch_sync_failed}/{batch_synced} synced "
+                f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
+            )
+            http_client.post(
+                f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+                json={
+                    "sources_completed": sources_completed, "documents_found": documents_found,
+                    "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
+                    "documents_failed": documents_failed,
+                },
+            )
+
+            # Nothing new discovered, downloaded, or parsed this batch --
+            # this source is exhausted, move to the next one.
+            if report.new_documents == 0 and report.download.succeeded == 0 and report.parse.succeeded == 0:
+                break
+
         sources_completed += 1
-        documents_found += report.new_documents
-        documents_downloaded += report.download.succeeded
-        documents_parsed += report.parse.succeeded
-        documents_failed += report.download.failed + report.parse.failed
-
-        # Sync after EVERY source, not once at the end of the whole batch:
-        # a request scoped to many sources can take a long time for real
-        # (real crawl delays + real downloads across each site), and with a
-        # batch-at-the-end design the admin sees nothing land in the portal
-        # until the entire run finishes -- and a killed/crashed run loses
-        # all of it. Syncing incrementally means every source's results are
-        # visible and safely delivered as soon as that source is done.
-        sync_results = _sync_documents(
-            conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
-        )
-        synced_total += len(sync_results)
-        sync_failed_total += sum(1 for r in sync_results if r[1] == "failed")
-
-        print(
-            f"  source {sources_completed}/{len(source_ids)}: "
-            f"{report.download.succeeded} downloaded, {report.parse.succeeded} parsed, "
-            f"{len(sync_results) - sum(1 for r in sync_results if r[1] == 'failed')}/{len(sync_results)} synced"
-        )
         http_client.post(
             f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
             json={
