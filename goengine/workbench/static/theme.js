@@ -4,7 +4,7 @@
   "use strict";
 
   var STORAGE_KEY = "thirdeye-theme";
-  var THEMES = ["light", "dark", "glass", "aurora", "emerald", "midnight"];
+  var THEMES = ["light", "dark", "glass"];
 
   function applyTheme(name) {
     if (THEMES.indexOf(name) === -1) name = "light";
@@ -30,6 +30,38 @@
     document.querySelectorAll("[data-theme-btn]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         applyTheme(btn.getAttribute("data-theme-btn"));
+      });
+    });
+  }
+
+  // Compact theme picker (public pages): icon button opens a dropdown menu.
+  // Theme selection itself is still handled by wireThemeToggle above, since
+  // the menu's buttons carry the same [data-theme-btn] attribute -- this
+  // only owns open/close: click the icon, pick a theme, click outside, or Esc.
+  function wireThemePicker() {
+    document.querySelectorAll(".theme-picker").forEach(function (picker) {
+      var toggle = picker.querySelector("[data-theme-picker-toggle]");
+      if (!toggle) return;
+      function close() {
+        picker.classList.remove("open");
+        toggle.setAttribute("aria-expanded", "false");
+      }
+      function open() {
+        picker.classList.add("open");
+        toggle.setAttribute("aria-expanded", "true");
+      }
+      toggle.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (picker.classList.contains("open")) close(); else open();
+      });
+      picker.querySelectorAll("[data-theme-btn]").forEach(function (btn) {
+        btn.addEventListener("click", close);
+      });
+      document.addEventListener("click", function (e) {
+        if (picker.classList.contains("open") && !picker.contains(e.target)) close();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") close();
       });
     });
   }
@@ -93,14 +125,37 @@
     els.forEach(function (el) { observer.observe(el); });
   }
 
+  // Fade/slide-in as `.reveal` elements enter the viewport. Unobserves
+  // after firing once -- this is a first-impression flourish, not something
+  // that should re-trigger every time a user scrolls back past a section.
+  function wireScrollReveal() {
+    var els = document.querySelectorAll(".reveal");
+    if (!els.length) return;
+    if (!("IntersectionObserver" in window) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      els.forEach(function (el) { el.classList.add("revealed"); });
+      return;
+    }
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("revealed");
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: "0px 0px -60px 0px" });
+    els.forEach(function (el) { observer.observe(el); });
+  }
+
   // Apply theme immediately (this file is loaded with `defer`, so DOM
   // exists, but we still run before paint-affecting layout settles).
   initTheme();
 
   document.addEventListener("DOMContentLoaded", function () {
     wireThemeToggle();
+    wireThemePicker();
     wireMobileNav();
     wireSpotlight();
     wireCountUp();
+    wireScrollReveal();
   });
 })();

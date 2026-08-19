@@ -69,126 +69,43 @@
   --mark-b: #7dd3fc;
 }
 
+/* Glass -- a real glassmorphism theme: a fixed, vivid, colorful gradient
+   sits behind the whole page (see body's background-image override below),
+   and every surface (panels, cards, header, menus) is a frosted, blurred,
+   semi-transparent pane floating on top of it -- not just a slightly
+   different flat color scheme wearing the name "glass". */
 :root[data-theme="glass"] {
-  --bg: #e7ecf7;
-  --bg-elevated: rgba(255, 255, 255, .55);
-  --panel: rgba(255, 255, 255, .5);
-  --panel-border: rgba(255, 255, 255, .6);
-  --ink: #14182a;
+  --bg: #eef1fb;
+  --bg-elevated: rgba(255, 255, 255, .42);
+  --panel: rgba(255, 255, 255, .38);
+  --panel-border: rgba(255, 255, 255, .55);
+  --ink: #171b2e;
   --muted: #4b5468;
-  --accent: #4f46e5;
+  --accent: #6d28d9;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(79, 70, 229, .14);
+  --accent-soft: rgba(109, 40, 217, .16);
   --ok: #0f9d58;
-  --ok-soft: rgba(15, 157, 88, .14);
+  --ok-soft: rgba(15, 157, 88, .16);
   --warn: #b45309;
-  --warn-soft: rgba(180, 83, 9, .14);
+  --warn-soft: rgba(180, 83, 9, .16);
   --bad: #c0263c;
-  --bad-soft: rgba(192, 38, 60, .14);
-  --neutral-soft: rgba(20, 24, 42, .06);
+  --bad-soft: rgba(192, 38, 60, .16);
+  --neutral-soft: rgba(23, 27, 46, .07);
   --neutral-ink: #33394d;
-  --header-bg: rgba(10, 14, 30, .55);
-  --header-ink: #d7ddf5;
-  --header-ink-hover: #ffffff;
-  --shadow: 0 1px 2px rgba(20, 24, 42, .08);
-  --shadow-lg: 0 16px 40px rgba(20, 24, 42, .18);
-  --hero-grad: radial-gradient(circle at 15% 10%, rgba(124, 58, 237, .25) 0%, transparent 45%),
-               radial-gradient(circle at 85% 0%, rgba(37, 99, 235, .2) 0%, transparent 40%),
-               radial-gradient(circle at 50% 100%, rgba(16, 185, 129, .18) 0%, transparent 45%);
+  --header-bg: rgba(255, 255, 255, .32);
+  --header-ink: #33394d;
+  --header-ink-hover: #171b2e;
+  --shadow: 0 1px 2px rgba(23, 27, 46, .08);
+  --shadow-lg: 0 16px 44px rgba(76, 29, 149, .22);
+  --hero-grad: radial-gradient(circle at 15% 10%, rgba(124, 58, 237, .38) 0%, transparent 48%),
+               radial-gradient(circle at 85% 0%, rgba(37, 99, 235, .32) 0%, transparent 42%),
+               radial-gradient(circle at 50% 100%, rgba(236, 72, 153, .28) 0%, transparent 48%);
+  --page-grad: linear-gradient(135deg, #dbe4ff 0%, #eef1fb 30%, #ffe4f3 65%, #dff5ea 100%);
   --mark-a: #7c3aed;
   --mark-b: #2563eb;
-  --glass-blur: blur(16px);
+  --glass-blur: blur(20px);
 }
-
-:root[data-theme="aurora"] {
-  --bg: #0e0a2a;
-  --bg-elevated: #16123f;
-  --panel: #17133f;
-  --panel-border: #322a6b;
-  --ink: #f1eeff;
-  --muted: #b3a9e6;
-  --accent: #c084fc;
-  --accent-ink: #1a0b33;
-  --accent-soft: #2c2166;
-  --ok: #6ee7b7;
-  --ok-soft: #113328;
-  --warn: #fcd34d;
-  --warn-soft: #3a2c08;
-  --bad: #fca5a5;
-  --bad-soft: #3a1620;
-  --neutral-soft: #241d54;
-  --neutral-ink: #d8d2f5;
-  --header-bg: #0a0722;
-  --header-ink: #c9bdf5;
-  --header-ink-hover: #ffffff;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .4);
-  --shadow-lg: 0 16px 44px rgba(124, 58, 237, .35);
-  --hero-grad: radial-gradient(circle at 15% 15%, #6d28d9 0%, transparent 50%),
-               radial-gradient(circle at 85% 10%, #2563eb 0%, transparent 45%),
-               radial-gradient(circle at 50% 100%, #db2777 0%, transparent 50%);
-  --mark-a: #c084fc;
-  --mark-b: #60a5fa;
-}
-
-:root[data-theme="emerald"] {
-  --bg: #071912;
-  --bg-elevated: #0c231a;
-  --panel: #0c2319;
-  --panel-border: #1c4432;
-  --ink: #ecfdf5;
-  --muted: #8fbfa8;
-  --accent: #34d399;
-  --accent-ink: #052014;
-  --accent-soft: #113827;
-  --ok: #6ee7b7;
-  --ok-soft: #0f3626;
-  --warn: #fcd34d;
-  --warn-soft: #3a2c08;
-  --bad: #fca5a5;
-  --bad-soft: #3a1620;
-  --neutral-soft: #123526;
-  --neutral-ink: #cdece0;
-  --header-bg: #04120c;
-  --header-ink: #a7d9c4;
-  --header-ink-hover: #ffffff;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .4);
-  --shadow-lg: 0 16px 40px rgba(16, 185, 129, .25);
-  --hero-grad: radial-gradient(circle at 20% 20%, #0d5236 0%, transparent 48%),
-               radial-gradient(circle at 80% 0%, #065f46 0%, transparent 42%),
-               radial-gradient(circle at 50% 100%, #134e4a 0%, transparent 48%);
-  --mark-a: #34d399;
-  --mark-b: #059669;
-}
-
-:root[data-theme="midnight"] {
-  --bg: #04050a;
-  --bg-elevated: #0a0c14;
-  --panel: #0a0c14;
-  --panel-border: #1c2030;
-  --ink: #e6e9f2;
-  --muted: #7d859c;
-  --accent: #5eead4;
-  --accent-ink: #04050a;
-  --accent-soft: #0e2a26;
-  --ok: #5eead4;
-  --ok-soft: #0e2a26;
-  --warn: #fbbf24;
-  --warn-soft: #2c2308;
-  --bad: #fb7185;
-  --bad-soft: #2c1218;
-  --neutral-soft: #12151f;
-  --neutral-ink: #b7bdd0;
-  --header-bg: #000000;
-  --header-ink: #7d859c;
-  --header-ink-hover: #ffffff;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .6);
-  --shadow-lg: 0 16px 44px rgba(0, 0, 0, .7);
-  --hero-grad: radial-gradient(circle at 20% 10%, #0e2a26 0%, transparent 45%),
-               radial-gradient(circle at 85% 0%, #0f1f3a 0%, transparent 42%),
-               radial-gradient(circle at 50% 100%, #1a1030 0%, transparent 48%);
-  --mark-a: #5eead4;
-  --mark-b: #818cf8;
-}
+:root[data-theme="glass"] body { background-image: var(--page-grad); background-attachment: fixed; }
 
 /* ---------------------------------------------------------------------- */
 /* Base                                                                    */
@@ -259,7 +176,12 @@ main.app-main { padding: 20px; max-width: 1500px; margin: 0 auto; }
 }
 :root[data-theme="glass"] .panel,
 :root[data-theme="glass"] .stat,
-:root[data-theme="glass"] .kpi-card {
+:root[data-theme="glass"] .kpi-card,
+:root[data-theme="glass"] .feature-card,
+:root[data-theme="glass"] .theme-picker-menu,
+:root[data-theme="glass"] .dashboard-widget,
+:root[data-theme="glass"] header.app-header,
+:root[data-theme="glass"] .site-header {
   backdrop-filter: var(--glass-blur, blur(12px));
   -webkit-backdrop-filter: var(--glass-blur, blur(12px));
 }
@@ -333,6 +255,47 @@ pre.pagetext {
 }
 .theme-toggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 
+/* Compact theme picker (public pages) -- one icon button + dropdown, in
+   place of six always-visible text buttons. The old .theme-toggle above is
+   still used by the admin shell (header.app-header genuinely has a dark
+   --header-bg, so --header-ink reads fine there); the public .site-header
+   tints toward --bg instead, which is light in Light/Glass, and that
+   mismatch is exactly what made the old toggle's text unreadable. Menu
+   items here use --panel/--ink like every other piece of UI, so contrast
+   is correct in every theme by construction. */
+.theme-picker { position: relative; }
+.theme-picker-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+  background: var(--bg-elevated); border: 1px solid var(--panel-border);
+  color: var(--muted); cursor: pointer; transition: color .15s ease, border-color .15s ease, transform .3s ease;
+}
+.theme-picker-btn:hover { color: var(--accent); border-color: var(--accent); transform: rotate(24deg); }
+.theme-picker.open .theme-picker-btn { color: var(--accent); border-color: var(--accent); }
+.theme-picker-menu {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 60;
+  display: none; flex-direction: column; gap: 2px; min-width: 168px;
+  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px;
+  padding: 6px; box-shadow: var(--shadow-lg);
+}
+.theme-picker.open .theme-picker-menu { display: flex; animation: picker-in .16s cubic-bezier(.2,.8,.2,1); }
+@keyframes picker-in { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: none; } }
+.theme-picker-menu button {
+  display: flex; align-items: center; gap: 10px; background: transparent; border: 0; border-radius: 8px;
+  padding: 8px 10px; font-size: 13.5px; font-weight: 500; color: var(--ink); text-align: left; cursor: pointer;
+  transition: background .12s ease;
+}
+.theme-picker-menu button:hover { background: var(--neutral-soft); }
+.theme-picker-menu button[aria-pressed="true"] { color: var(--accent); font-weight: 700; }
+.theme-picker-menu button[aria-pressed="true"]::after { content: "✓"; margin-left: auto; }
+.swatch { width: 15px; height: 15px; border-radius: 50%; border: 1px solid rgba(127,127,127,.25); flex-shrink: 0; }
+.swatch-light { background: linear-gradient(135deg, #f6f7f9, #1d4ed8); }
+.swatch-dark { background: linear-gradient(135deg, #0b0e14, #6d8dff); }
+.swatch-glass { background: linear-gradient(135deg, #dbe4ff, #6d28d9, #ec4899); }
+@media (max-width: 860px) {
+  .theme-picker-menu { right: auto; left: 0; }
+}
+
 /* ---------------------------------------------------------------------- */
 /* Marketing / landing components                                          */
 /* ---------------------------------------------------------------------- */
@@ -363,7 +326,6 @@ header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--he
 @media (max-width: 860px) {
   .site-header nav, header.app-header nav { display: none; }
   .nav-toggle { display: inline-flex; }
-  .site-header .header-end .theme-toggle { display: none; }
   .site-header.nav-open nav {
     display: flex; position: absolute; top: 100%; left: 0; right: 0; flex-direction: column;
     align-items: flex-start; background: var(--bg-elevated); padding: 16px 24px;
@@ -391,10 +353,17 @@ header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--he
   max-width: 900px; letter-spacing: -.02em; font-weight: 900;
 }
 .hero-highlight {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--mark-b) 100%);
+  background: linear-gradient(100deg, var(--accent) 0%, var(--mark-a) 35%, var(--mark-b) 65%, var(--accent) 100%);
+  background-size: 300% 100%;
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text;
+  animation: hero-highlight-shift 6s ease-in-out infinite;
 }
+@keyframes hero-highlight-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+@media (prefers-reduced-motion: reduce) { .hero-highlight { animation: none; } }
 .hero .sub { font-size: 18px; color: var(--muted); max-width: 640px; margin: 0 auto 24px; }
 .hero .actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 56px; }
 .btn-lg { padding: 13px 26px; font-size: 15px; border-radius: 10px; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease; }
@@ -426,7 +395,7 @@ header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--he
 }
 a.glass-card { display: block; text-decoration: none; color: inherit; transition: transform .15s ease, box-shadow .15s ease; }
 a.glass-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
-:root[data-theme="glass"] .glass-card { background: rgba(255,255,255,.45); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+:root[data-theme="glass"] .glass-card { background: rgba(255,255,255,.4); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid rgba(255,255,255,.55); }
 .glass-card .metric-n { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .glass-card .metric-l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; margin-top: 4px; }
 
@@ -900,13 +869,20 @@ a.explore-node { text-decoration: none; color: inherit; }
 /* ── Phase 4A: citizen accounts ────────────────────────────────────────── */
 /* Scrolling registration banner -- shown only to fully anonymous visitors
    (see public_header() in _partials.html). Two copies of the text scroll
-   as one continuous loop so there's never a visible gap. */
+   as one continuous loop so there's never a visible gap.
+   Solid --accent + --accent-ink (not the decorative --hero-grad + a
+   hardcoded white) -- accent-ink is specifically the token every theme
+   already defines as "readable on top of accent", the same pairing
+   .btn-primary uses, so contrast is guaranteed rather than assumed. */
 .citizen-banner {
-  background-image: var(--hero-grad); color: #fff; overflow: hidden;
-  white-space: nowrap; padding: 8px 0; font-size: 13px; font-weight: 600;
+  background: var(--accent); color: var(--accent-ink); overflow: hidden;
+  padding: 9px 0; font-size: 13px; font-weight: 600;
 }
-.citizen-banner-track { display: inline-flex; gap: 60px; animation: banner-scroll 22s linear infinite; }
-.citizen-banner-track span { padding-right: 60px; }
+.citizen-banner-track {
+  display: flex; width: max-content; white-space: nowrap;
+  animation: banner-scroll 26s linear infinite;
+}
+.citizen-banner-track span { flex-shrink: 0; padding-right: 60px; white-space: nowrap; }
 @keyframes banner-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) { .citizen-banner-track { animation: none; } }
 
@@ -950,6 +926,25 @@ body.auth-page {
 .dashboard-list-item { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--panel-border); }
 .dashboard-list-item:last-child { border-bottom: none; padding-bottom: 0; }
 .dashboard-empty { color: var(--muted); font-size: 13px; }
+
+/* ── Scroll reveal ──────────────────────────────────────────────────────── */
+/* Generic fade/slide-in for anything marked .reveal, fired once by
+   IntersectionObserver in theme.js's wireScrollReveal(). .reveal-stagger's
+   children each get a progressively longer delay via CSS nth-child, so a
+   card grid or timeline animates in as a cascade rather than all at once. */
+.reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s cubic-bezier(.2,.8,.2,1), transform .7s cubic-bezier(.2,.8,.2,1); }
+.reveal.revealed { opacity: 1; transform: none; }
+.reveal-stagger.revealed > * { opacity: 0; transform: translateY(18px); animation: reveal-stagger-in .6s cubic-bezier(.2,.8,.2,1) forwards; }
+.reveal-stagger.revealed > *:nth-child(1) { animation-delay: .05s; }
+.reveal-stagger.revealed > *:nth-child(2) { animation-delay: .12s; }
+.reveal-stagger.revealed > *:nth-child(3) { animation-delay: .19s; }
+.reveal-stagger.revealed > *:nth-child(4) { animation-delay: .26s; }
+.reveal-stagger.revealed > *:nth-child(5) { animation-delay: .33s; }
+.reveal-stagger.revealed > *:nth-child(6) { animation-delay: .40s; }
+@keyframes reveal-stagger-in { to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal-stagger.revealed > * { opacity: 1; transform: none; transition: none; animation: none; }
+}
 
 footer.site-footer {
   border-top: 1px solid var(--panel-border); padding: 48px 32px;
