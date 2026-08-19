@@ -353,6 +353,15 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 print(f"No active sources match department(s): {', '.join(args.department)}", file=sys.stderr)
                 return 2
 
+        if args.resync_all:
+            reset_sql = "UPDATE documents SET agent_synced_at = NULL, agent_sync_error = NULL"
+            params: list = []
+            if source_ids is not None:
+                reset_sql += f" WHERE source_id IN ({','.join('?' * len(source_ids))})"
+                params.extend(source_ids)
+            n = conn.execute(reset_sql, params).rowcount
+            print(f"--resync-all: marked {n} already-synced document(s) for re-push")
+
         auth_headers = {"Authorization": f"Bearer {api_key}"}
         with httpx.Client(timeout=60.0) as client:
             results = _sync_documents(
@@ -1142,6 +1151,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="restrict to sources in this department bucket; repeat for more than one")
     p.add_argument("--limit", type=int, default=50)
     p.add_argument("--retry-failed", action="store_true", help="also re-attempt documents whose last sync failed")
+    p.add_argument(
+        "--resync-all", action="store_true",
+        help="also re-push documents already marked synced -- for recovering after the server's "
+             "durable storage lost bytes it never actually had (e.g. before document_blobs "
+             "existed). Re-uploads what's already archived on this machine; does not re-download "
+             "anything from the source site.",
+    )
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser(
