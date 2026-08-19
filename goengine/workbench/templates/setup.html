@@ -6,44 +6,46 @@
 <title>Set up Third Eye</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/theme.css?v=5">
-{% from "_partials.html" import mark, theme_init_script %}
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=7">
+{% from "_partials.html" import theme_init_script %}
 {{ theme_init_script() }}
 </head>
 <body class="auth-page">
-<div class="auth-shell">
-  <div class="auth-shell-brand">
-    <div class="auth-shell-brand-top">{{ mark(28, 'setupMark') }} <span>Third Eye</span></div>
-    <div class="auth-shell-brand-mid">
-      <h1>Let's get your instance running.</h1>
-      <p>Create the first Platform Administrator account to continue — this is the only setup step that happens outside the browser.</p>
-    </div>
-    <div class="auth-shell-brand-bottom">© 2026 Third Eye</div>
+<div class="auth-modal">
+  <div class="auth-modal-icon">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m14.4-6.4-2.1 2.1M8.7 15.7l-2.1 2.1m10.8 0-2.1-2.1M8.7 8.3 6.6 6.2"/><circle cx="12" cy="12" r="3.2"/></svg>
   </div>
-  <div class="auth-shell-form">
-    <div class="auth-card auth-card-wide">
-      <h1>Welcome to Third Eye</h1>
-      <p class="sub">No administrator account exists yet.</p>
-      <form method="post" action="/setup">
-        <div class="auth-field">
-          <label for="username">Username</label>
-          <input id="username" type="text" name="username" required autofocus autocomplete="username">
-        </div>
-        <div class="auth-field">
-          <label for="password">Password</label>
-          <input id="password" type="password" name="password" minlength="8" required autocomplete="new-password">
-        </div>
-        <div class="auth-field" style="margin-bottom:0;">
-          <label for="confirm_password">Confirm password</label>
-          <input id="confirm_password" type="password" name="confirm_password" minlength="8" required autocomplete="new-password">
-        </div>
-        <button class="auth-submit" type="submit">Create administrator account</button>
-      </form>
-      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+  <h1>Welcome to Third Eye</h1>
+  <p class="sub">Create the first Platform Administrator account to continue.</p>
+
+  <form method="post" action="/setup">
+    <div class="auth-field">
+      <label for="username">Username</label>
+      <div class="auth-field-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+        <input id="username" type="text" name="username" placeholder="Username" required autofocus autocomplete="username">
+      </div>
     </div>
-  </div>
+    <div class="auth-field">
+      <label for="password">Password</label>
+      <div class="auth-field-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <input id="password" type="password" name="password" placeholder="••••••••" minlength="8" required autocomplete="new-password">
+      </div>
+    </div>
+    <div class="auth-field" style="margin-bottom:0;">
+      <label for="confirm_password">Confirm password</label>
+      <div class="auth-field-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <input id="confirm_password" type="password" name="confirm_password" placeholder="••••••••" minlength="8" required autocomplete="new-password">
+      </div>
+    </div>
+    <button class="auth-submit" type="submit">Create administrator account</button>
+  </form>
+  {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+  <p class="auth-footnote">This is the only setup step that happens outside the browser.</p>
 </div>
-<script src="/static/theme.js?v=5" defer></script>
+<script src="/static/theme.js?v=7" defer></script>
 </body>
 </html>

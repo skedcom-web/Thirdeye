@@ -7,39 +7,43 @@
 */
 
 :root {
-  /* Warm neutral base -- a cool grey (#f6f7f9) reads as generic-SaaS-template;
-     a cream-tinted off-white feels considered instead of default. */
-  --bg: #faf8f4;
+  /* Reference-driven palette (OrchestrAI Lead Academy): crisp cool white,
+     near-black ink, indigo/violet gradient accent -- not a warm cream, not
+     a soft grey-on-grey. Clean and high-contrast reads as "product," not
+     "template." */
+  --bg: #f5f4fb;
   --bg-elevated: #ffffff;
   --panel: #ffffff;
-  --panel-border: #e9e3d8;
+  --panel-border: #e5e3f0;
   /* Deliberately darker/more visible than --panel-border: a card's edge
      can be a whisper, but a form field a citizen needs to type into
      cannot -- confirmed live, --panel-border on white read as no border
      at all on the register form. */
-  --input-border: #c7bfaa;
-  --ink: #1b1a17;
-  --muted: #6f6a60;
-  --accent: #1d4ed8;
+  --input-border: #c7c2dd;
+  --input-fill: #f3f2fa;
+  --ink: #0f1222;
+  --muted: #656a80;
+  --accent: #6d28d9;
+  --accent-2: #4338ca;
   --accent-ink: #ffffff;
-  --accent-soft: #e8edfd;
+  --accent-soft: #ede9fe;
   --ok: #15803d;
   --ok-soft: #dcfce7;
   --warn: #b45309;
   --warn-soft: #fef3c7;
   --bad: #b91c1c;
   --bad-soft: #fee2e2;
-  --neutral-soft: #efece4;
-  --neutral-ink: #3d3a33;
+  --neutral-soft: #eeedf6;
+  --neutral-ink: #35394a;
   --header-bg: #12161c;
   --header-ink: #b9c6dd;
   --header-ink-hover: #ffffff;
-  --shadow: 0 1px 2px rgba(30, 25, 15, .06), 0 1px 3px rgba(30, 25, 15, .08);
-  --shadow-lg: 0 8px 24px rgba(30, 25, 15, .12), 0 2px 6px rgba(30, 25, 15, .08);
+  --shadow: 0 1px 2px rgba(15, 18, 34, .06), 0 1px 3px rgba(15, 18, 34, .08);
+  --shadow-lg: 0 8px 24px rgba(15, 18, 34, .12), 0 2px 6px rgba(15, 18, 34, .08);
   --radius: 14px;
-  --radius-sm: 8px;
-  /* A confident two-stop diagonal wash, not a three-blob pastel soup. */
-  --hero-grad: linear-gradient(135deg, #eef1ff 0%, #faf8f4 45%, #fdf2e9 100%);
+  --radius-sm: 10px;
+  --accent-grad: linear-gradient(100deg, var(--accent) 0%, var(--accent-2) 100%);
+  --hero-grad: linear-gradient(160deg, #e8e4fb 0%, #f5f4fb 55%, #eef0fd 100%);
   /* Deep indigo -- the signature contrast-block color (auth panels, CTA
      bands, footer accents), the role the reference material's dark-green
      sidebar plays: one confident dark color used deliberately, not six
@@ -47,9 +51,8 @@
   --ink-contrast: #171233;
   --ink-contrast-ink: #f3f0ff;
   --mark-a: #7c3aed;
-  --mark-b: #2563eb;
+  --mark-b: #4338ca;
   --font-sans: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
 }
 
 :root[data-theme="dark"] {
@@ -58,11 +61,14 @@
   --panel: #12161f;
   --panel-border: #262c3a;
   --input-border: #3a4256;
+  --input-fill: #171c28;
   --ink: #e9edf5;
   --muted: #9aa4b7;
   --accent: #6d8dff;
+  --accent-2: #a78bfa;
   --accent-ink: #0b0e14;
   --accent-soft: #1a2440;
+  --accent-grad: linear-gradient(100deg, var(--accent) 0%, var(--accent-2) 100%);
   --ok: #4ade80;
   --ok-soft: #123421;
   --warn: #fbbf24;
@@ -94,11 +100,14 @@
   --panel: rgba(255, 255, 255, .38);
   --panel-border: rgba(255, 255, 255, .55);
   --input-border: rgba(23, 27, 46, .32);
+  --input-fill: rgba(255, 255, 255, .55);
   --ink: #171b2e;
   --muted: #4b5468;
   --accent: #6d28d9;
+  --accent-2: #4338ca;
   --accent-ink: #ffffff;
   --accent-soft: rgba(109, 40, 217, .16);
+  --accent-grad: linear-gradient(100deg, var(--accent) 0%, var(--accent-2) 100%);
   --ok: #0f9d58;
   --ok-soft: rgba(15, 157, 88, .16);
   --warn: #b45309;
@@ -193,7 +202,8 @@ main.app-main { padding: 20px; max-width: 1500px; margin: 0 auto; }
 :root[data-theme="glass"] .stat,
 :root[data-theme="glass"] .kpi-card,
 :root[data-theme="glass"] .feature-card,
-:root[data-theme="glass"] .theme-picker-menu,
+:root[data-theme="glass"] .theme-pill,
+:root[data-theme="glass"] .auth-modal,
 :root[data-theme="glass"] .dashboard-widget,
 :root[data-theme="glass"] header.app-header,
 :root[data-theme="glass"] .site-header {
@@ -291,54 +301,29 @@ pre.pagetext {
 }
 .theme-toggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 
-/* Compact theme picker (public pages) -- one icon button + dropdown, in
-   place of six always-visible text buttons. The old .theme-toggle above is
-   still used by the admin shell (header.app-header genuinely has a dark
-   --header-bg, so --header-ink reads fine there); the public .site-header
-   tints toward --bg instead, which is light in Light/Glass, and that
-   mismatch is exactly what made the old toggle's text unreadable. Menu
-   items here use --panel/--ink like every other piece of UI, so contrast
-   is correct in every theme by construction. */
-.theme-picker { position: relative; }
-.theme-picker-btn {
+/* Theme pill (public pages): three icon buttons in one rounded group,
+   matching a real reference product's header control. The old dropdown
+   picker above it in this file's history was still more UI than the
+   reference actually shows -- three icons, no menu, is genuinely simpler
+   and matches what was asked for. */
+.theme-pill {
+  display: flex; align-items: center; gap: 2px; background: var(--neutral-soft);
+  border-radius: 999px; padding: 4px; flex-shrink: 0;
+}
+.theme-pill button {
   display: flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
-  background: var(--bg-elevated); border: 1px solid var(--panel-border);
-  color: var(--muted); cursor: pointer; transition: color .15s ease, border-color .15s ease, transform .3s ease;
+  width: 30px; height: 30px; border-radius: 50%; background: transparent; border: 0;
+  color: var(--muted); cursor: pointer; transition: background .15s ease, color .15s ease;
 }
-.theme-picker-btn:hover { color: var(--accent); border-color: var(--accent); transform: rotate(24deg); }
-.theme-picker.open .theme-picker-btn { color: var(--accent); border-color: var(--accent); }
-.theme-picker-menu {
-  position: absolute; top: calc(100% + 10px); right: 0; z-index: 60;
-  display: none; flex-direction: column; gap: 2px; min-width: 168px;
-  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px;
-  padding: 6px; box-shadow: var(--shadow-lg);
-}
-.theme-picker.open .theme-picker-menu { display: flex; animation: picker-in .16s cubic-bezier(.2,.8,.2,1); }
-@keyframes picker-in { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: none; } }
-.theme-picker-menu button {
-  display: flex; align-items: center; gap: 10px; background: transparent; border: 0; border-radius: 8px;
-  padding: 8px 10px; font-size: 13.5px; font-weight: 500; color: var(--ink); text-align: left; cursor: pointer;
-  transition: background .12s ease;
-}
-.theme-picker-menu button:hover { background: var(--neutral-soft); }
-.theme-picker-menu button[aria-pressed="true"] { color: var(--accent); font-weight: 700; }
-.theme-picker-menu button[aria-pressed="true"]::after { content: "✓"; margin-left: auto; }
-.swatch { width: 15px; height: 15px; border-radius: 50%; border: 1px solid rgba(127,127,127,.25); flex-shrink: 0; }
-.swatch-light { background: linear-gradient(135deg, #f6f7f9, #1d4ed8); }
-.swatch-dark { background: linear-gradient(135deg, #0b0e14, #6d8dff); }
-.swatch-glass { background: linear-gradient(135deg, #dbe4ff, #6d28d9, #ec4899); }
-@media (max-width: 860px) {
-  .theme-picker-menu { right: auto; left: 0; }
-}
+.theme-pill button:hover { color: var(--ink); }
+.theme-pill button[aria-pressed="true"] { background: var(--bg-elevated); color: var(--accent); box-shadow: var(--shadow); }
 
 /* ---------------------------------------------------------------------- */
 /* Marketing / landing components                                          */
 /* ---------------------------------------------------------------------- */
 .site-header {
   position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 28px;
-  padding: 14px 32px; background: color-mix(in srgb, var(--bg) 78%, transparent);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  padding: 14px 32px; background: var(--bg-elevated);
   border-bottom: 1px solid var(--panel-border);
 }
 .site-header .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; color: var(--ink); text-decoration: none; }
@@ -385,21 +370,14 @@ header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--he
   transition: background .1s ease;
 }
 .hero h1 {
-  font-family: var(--font-display); font-size: clamp(32px, 5.6vw, 64px); line-height: 1.05; margin: 0 auto 20px;
-  max-width: 880px; letter-spacing: -.01em; font-weight: 600;
+  font-family: var(--font-sans); font-size: clamp(34px, 6vw, 68px); line-height: 1.04; margin: 0 auto 20px;
+  max-width: 900px; letter-spacing: -.02em; font-weight: 900;
 }
-.hero-highlight {
-  background: linear-gradient(100deg, var(--accent) 0%, var(--mark-a) 35%, var(--mark-b) 65%, var(--accent) 100%);
-  background-size: 300% 100%;
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: hero-highlight-shift 6s ease-in-out infinite;
-}
-@keyframes hero-highlight-shift {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-@media (prefers-reduced-motion: reduce) { .hero-highlight { animation: none; } }
+/* A flat, confident accent color -- not an animated rainbow shimmer. One
+   still color reads as deliberate; a moving gradient reads as "trying to
+   look fancy." The reference material uses a single flat violet for its
+   highlighted line, nothing more. */
+.hero-highlight { color: var(--accent); }
 .hero .sub { font-size: 18px; color: var(--muted); max-width: 640px; margin: 0 auto 24px; }
 .hero .actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 56px; }
 .btn-lg { padding: 13px 26px; font-size: 15px; border-radius: 10px; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease; }
@@ -438,7 +416,7 @@ a.glass-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 section.section { padding: 88px 32px; max-width: 1120px; margin: 0 auto; }
 section.section.tight { padding-top: 48px; padding-bottom: 48px; }
 .section-kicker { color: var(--accent); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; text-align: center; margin-bottom: 10px; }
-.section-title { font-family: var(--font-display); font-size: clamp(28px, 3.8vw, 42px); font-weight: 600; text-align: center; margin: 0 0 14px; letter-spacing: -.005em; }
+.section-title { font-size: clamp(26px, 3.4vw, 38px); font-weight: 800; text-align: center; margin: 0 0 14px; letter-spacing: -.015em; }
 .section-sub { text-align: center; color: var(--muted); max-width: 620px; margin: 0 auto 52px; font-size: 16px; }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
@@ -913,96 +891,100 @@ a.explore-node { text-decoration: none; color: inherit; }
 .save-toggle.is-saved { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 /* ── Phase 4A: citizen accounts ────────────────────────────────────────── */
-/* Scrolling registration banner -- shown only to fully anonymous visitors
-   (see public_header() in _partials.html). Two copies of the text scroll
-   as one continuous loop so there's never a visible gap.
-   Solid --accent + --accent-ink (not the decorative --hero-grad + a
-   hardcoded white) -- accent-ink is specifically the token every theme
-   already defines as "readable on top of accent", the same pairing
-   .btn-primary uses, so contrast is guaranteed rather than assumed. */
+/* Static registration banner -- shown only to fully anonymous visitors
+   (see public_header() in _partials.html). A solid gradient bar with an
+   embedded CTA pill, matching a real reference product exactly: no
+   scrolling marquee (which wrapped unevenly and read as noisy), just one
+   confident line and a clear next action. --accent-grad + --accent-ink
+   (the same guaranteed-contrast pairing .btn-primary uses). */
 .citizen-banner {
-  background: var(--accent); color: var(--accent-ink); overflow: hidden;
-  padding: 9px 0; font-size: 13px; font-weight: 600;
+  background: var(--accent-grad); color: var(--accent-ink);
+  padding: 11px 20px; font-size: 13.5px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; text-align: center;
 }
-.citizen-banner-track {
-  display: flex; width: max-content; white-space: nowrap;
-  animation: banner-scroll 26s linear infinite;
+.citizen-banner-cta {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  background: rgba(255,255,255,.2); color: #fff; text-decoration: none;
+  padding: 6px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  transition: background .15s ease;
 }
-.citizen-banner-track span { flex-shrink: 0; padding-right: 60px; white-space: nowrap; }
-@keyframes banner-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-@media (prefers-reduced-motion: reduce) { .citizen-banner-track { animation: none; } }
+.citizen-banner-cta:hover { background: rgba(255,255,255,.32); }
 
-/* Auth pages (login.html/citizen_login.html/register.html) -- a real
-   split-screen shell, not a small card centered on a decorative gradient.
-   Left panel carries the brand and the "why" in a few words; right panel
-   is the form on a plain, calm surface. This is the pattern real premium
-   products use for auth (Linear, Stripe, Vercel, ...) -- a floating card
-   on a pastel blob is the generic-template look this replaces. */
-body.auth-page { margin: 0; min-height: 100vh; background: var(--bg); }
-.auth-shell { display: flex; min-height: 100vh; }
-.auth-shell-brand {
-  flex: 1 1 44%; position: relative; overflow: hidden;
-  background: var(--ink-contrast); color: var(--ink-contrast-ink);
-  display: flex; flex-direction: column; justify-content: space-between;
-  padding: 48px 56px;
+/* Auth pages (login.html/citizen_login.html/register.html/setup.html) --
+   a modal popup over a blurred, dimmed backdrop, matching a real reference
+   product (OrchestrAI Lead Academy) pixel-for-pixel in spirit: a crisp
+   white card, an icon badge, an in-card Log In/Register tab switcher (no
+   page navigation between them), icon-prefixed inputs on a filled (not
+   just outlined) background. The split-screen version this replaces was
+   still fighting the actual brief -- this is what was asked for. */
+body.auth-page {
+  margin: 0; min-height: 100vh; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  background-image: var(--hero-grad);
 }
-.auth-shell-brand::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background-image: radial-gradient(rgba(255,255,255,.16) 1.4px, transparent 1.4px);
-  background-size: 22px 22px;
-  -webkit-mask-image: radial-gradient(circle at 30% 24%, black, transparent 72%);
-  mask-image: radial-gradient(circle at 30% 24%, black, transparent 72%);
+body.auth-page::before {
+  content: ""; position: absolute; inset: 0; z-index: 0;
+  background: rgba(15, 18, 34, .4);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
 }
-.auth-shell-brand::after {
-  content: ""; position: absolute; width: 480px; height: 480px; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, rgba(124,58,237,.4), transparent 70%);
-  top: -140px; right: -160px;
+.auth-modal {
+  position: relative; z-index: 1; width: 100%; max-width: 420px;
+  background: var(--bg-elevated); border-radius: 24px; padding: 40px 36px;
+  box-shadow: 0 30px 70px rgba(15, 18, 34, .4);
+  animation: modal-in .35s cubic-bezier(.2,.8,.2,1);
+  max-height: calc(100vh - 48px); overflow-y: auto;
 }
-.auth-shell-brand-top { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
-.auth-shell-brand-top span { font-weight: 700; font-size: 18px; }
-.auth-shell-brand-mid { position: relative; z-index: 1; max-width: 420px; }
-.auth-shell-brand-mid h1 { font-family: var(--font-display); font-size: clamp(28px, 3vw, 38px); line-height: 1.16; font-weight: 600; margin: 0 0 16px; }
-.auth-shell-brand-mid p { color: rgba(243,240,255,.72); font-size: 15px; line-height: 1.6; margin: 0; }
-.auth-shell-points { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 13px; margin-top: 28px; }
-.auth-shell-point { display: flex; align-items: center; gap: 10px; font-size: 14px; color: rgba(243,240,255,.92); }
-.auth-shell-point .dot {
-  width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,.14);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+@keyframes modal-in { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: none; } }
+.auth-modal-close {
+  position: absolute; top: 18px; right: 18px; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--neutral-soft); color: var(--muted); border: 0; cursor: pointer; text-decoration: none;
 }
-.auth-shell-brand-bottom { position: relative; z-index: 1; font-size: 12.5px; color: rgba(243,240,255,.5); }
-.auth-shell-form {
-  flex: 1 1 56%; display: flex; align-items: center; justify-content: center;
-  padding: 40px 24px; background: var(--bg); position: relative;
-  overflow-y: auto; max-height: 100vh;
+.auth-modal-close:hover { color: var(--ink); }
+.auth-modal-icon {
+  width: 56px; height: 56px; border-radius: 16px; background: var(--accent-grad);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  margin: 0 auto 18px; box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 35%, transparent);
 }
-.auth-card {
-  width: 100%; max-width: 380px; background: var(--bg-elevated);
-  border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 8px 4px;
-  animation: card-in .5s cubic-bezier(.2,.8,.2,1);
+.auth-modal h1 { text-align: center; font-size: 24px; font-weight: 800; margin: 0 0 6px; letter-spacing: -.01em; }
+.auth-modal p.sub { text-align: center; color: var(--muted); font-size: 14px; margin: 0 0 26px; }
+.auth-tabs { display: flex; background: var(--neutral-soft); border-radius: 13px; padding: 4px; margin-bottom: 24px; }
+.auth-tab {
+  flex: 1; text-align: center; padding: 10px; border-radius: 10px; font-weight: 700; font-size: 14px;
+  cursor: pointer; color: var(--muted); background: transparent; border: 0; text-decoration: none;
 }
-.auth-card.auth-card-wide { max-width: 420px; }
-@keyframes card-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-.auth-card h1 { font-family: var(--font-display); font-size: 26px; font-weight: 600; margin: 0 0 6px; }
-.auth-card p.sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+.auth-tab.active { background: var(--accent-grad); color: #fff; box-shadow: var(--shadow); }
+.auth-panel { display: none; }
+.auth-panel.active { display: block; }
 .auth-field { margin-bottom: 16px; }
 .auth-field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
+.auth-field-icon { position: relative; }
+.auth-field-icon svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.auth-field-icon input { padding-left: 40px; background: var(--input-fill); border-color: transparent; }
+.auth-field-icon input:hover { border-color: var(--input-border); }
+.auth-field-icon input:focus { background: var(--bg-elevated); }
+.auth-field-phone { display: flex; gap: 8px; }
+.auth-field-phone .cc {
+  flex: 0 0 68px; display: flex; align-items: center; justify-content: center;
+  background: var(--input-fill); border: 1px solid transparent; border-radius: var(--radius-sm);
+  font-size: 13.5px; font-weight: 600; color: var(--ink);
+}
+.auth-field-phone .auth-field-icon { flex: 1; }
+.auth-field-hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
 .auth-field-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
 .auth-field-check input { margin-top: 3px; }
 .auth-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
 .auth-actions a { font-size: 12.5px; color: var(--muted); text-decoration: none; }
 .auth-actions a:hover { color: var(--accent); }
-.auth-submit { width: 100%; margin-top: 18px; padding: 12px; font-size: 14.5px; font-weight: 600; border-radius: 10px; }
+.auth-submit {
+  width: 100%; margin-top: 18px; padding: 13px; font-size: 14.5px; font-weight: 700; border-radius: 12px;
+  background: var(--accent-grad); border: 0;
+}
 .auth-error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 16px; }
 .auth-switch { text-align: center; margin-top: 22px; font-size: 13px; color: var(--muted); }
-.back-home { position: absolute; top: 24px; left: 24px; font-size: 13px; color: var(--muted); text-decoration: none; z-index: 2; }
-.back-home:hover { color: var(--ink); }
-@media (max-width: 860px) {
-  .auth-shell { flex-direction: column; }
-  .auth-shell-brand { flex: 0 0 auto; padding: 24px 24px 28px; }
-  .auth-shell-brand-mid p, .auth-shell-points, .auth-shell-brand-bottom { display: none; }
-  .auth-shell-brand-mid h1 { font-size: 20px; margin: 10px 0 0; }
-  .auth-shell-brand::after { width: 260px; height: 260px; top: -100px; right: -100px; }
-  .back-home { display: none; }
+.auth-footnote { text-align: center; font-size: 12px; color: var(--muted); margin-top: 18px; }
+@media (max-width: 520px) {
+  .auth-modal { padding: 32px 22px; border-radius: 18px; }
 }
 
 /* Citizen dashboard */

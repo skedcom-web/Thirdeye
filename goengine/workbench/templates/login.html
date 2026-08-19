@@ -6,50 +6,47 @@
 <title>Sign in — Third Eye</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/theme.css?v=5">
-{% from "_partials.html" import mark, theme_init_script %}
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=7">
+{% from "_partials.html" import theme_init_script %}
 {{ theme_init_script() }}
 </head>
 <body class="auth-page">
-<div class="auth-shell">
-  <div class="auth-shell-brand">
-    <a class="back-home" href="/" style="position:static; color:rgba(243,240,255,.6);">← Back to Third Eye</a>
-    <div class="auth-shell-brand-top">{{ mark(28, 'loginMark') }} <span>Third Eye</span></div>
-    <div class="auth-shell-brand-mid">
-      <h1>Operations Control Center</h1>
-      <p>Extraction, review, certification, and publication — the tools behind Third Eye's Verified GO Database.</p>
-      <div class="auth-shell-points">
-        <div class="auth-shell-point"><span class="dot">✓</span> Staff and reviewer access only</div>
-        <div class="auth-shell-point"><span class="dot">✓</span> Every action is audited</div>
+<div class="auth-modal">
+  <a class="auth-modal-close" href="/" aria-label="Close">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </a>
+  <div class="auth-modal-icon">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  </div>
+  <h1>Operations Control Center</h1>
+  <p class="sub">Staff and reviewer access only.</p>
+
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next or '' }}">
+    <div class="auth-field">
+      <label for="username">Username</label>
+      <div class="auth-field-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+        <input id="username" type="text" name="username" placeholder="Username" required autofocus autocomplete="username">
       </div>
     </div>
-    <div class="auth-shell-brand-bottom">© 2026 Third Eye</div>
-  </div>
-  <div class="auth-shell-form">
-    <div class="auth-card">
-      <h1>Welcome back</h1>
-      <p class="sub">Sign in to the Operations Control Center</p>
-      <form method="post" action="/login">
-        <input type="hidden" name="next" value="{{ next or '' }}">
-        <div class="auth-field">
-          <label for="username">Username</label>
-          <input id="username" type="text" name="username" required autofocus autocomplete="username">
-        </div>
-        <div class="auth-field" style="margin-bottom:0;">
-          <label for="password">Password</label>
-          <input id="password" type="password" name="password" required autocomplete="current-password">
-        </div>
-        <div class="auth-actions">
-          <span></span>
-          <a href="#" title="Contact your platform administrator to reset your password" tabindex="-1" aria-disabled="true" style="pointer-events:none; opacity:.6;">Forgot password?</a>
-        </div>
-        <button class="auth-submit" type="submit">Sign In</button>
-      </form>
-      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+    <div class="auth-field" style="margin-bottom:0;">
+      <label for="password">Password</label>
+      <div class="auth-field-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <input id="password" type="password" name="password" placeholder="••••••••" required autocomplete="current-password">
+      </div>
     </div>
-  </div>
+    <div class="auth-actions">
+      <span></span>
+      <a href="#" title="Contact your platform administrator to reset your password" tabindex="-1" aria-disabled="true" style="pointer-events:none; opacity:.55;">Forgot password?</a>
+    </div>
+    <button class="auth-submit" type="submit">Sign In</button>
+  </form>
+  {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+  <p class="auth-footnote">Every action here is audited.</p>
 </div>
-<script src="/static/theme.js?v=5" defer></script>
+<script src="/static/theme.js?v=7" defer></script>
 </body>
 </html>

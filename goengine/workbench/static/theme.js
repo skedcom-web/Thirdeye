@@ -34,38 +34,6 @@
     });
   }
 
-  // Compact theme picker (public pages): icon button opens a dropdown menu.
-  // Theme selection itself is still handled by wireThemeToggle above, since
-  // the menu's buttons carry the same [data-theme-btn] attribute -- this
-  // only owns open/close: click the icon, pick a theme, click outside, or Esc.
-  function wireThemePicker() {
-    document.querySelectorAll(".theme-picker").forEach(function (picker) {
-      var toggle = picker.querySelector("[data-theme-picker-toggle]");
-      if (!toggle) return;
-      function close() {
-        picker.classList.remove("open");
-        toggle.setAttribute("aria-expanded", "false");
-      }
-      function open() {
-        picker.classList.add("open");
-        toggle.setAttribute("aria-expanded", "true");
-      }
-      toggle.addEventListener("click", function (e) {
-        e.stopPropagation();
-        if (picker.classList.contains("open")) close(); else open();
-      });
-      picker.querySelectorAll("[data-theme-btn]").forEach(function (btn) {
-        btn.addEventListener("click", close);
-      });
-      document.addEventListener("click", function (e) {
-        if (picker.classList.contains("open") && !picker.contains(e.target)) close();
-      });
-      document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") close();
-      });
-    });
-  }
-
   function wireMobileNav() {
     // Generic over both header shells (marketing .site-header and the
     // admin app-header) -- each page only ever has one of them.
@@ -152,7 +120,6 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     wireThemeToggle();
-    wireThemePicker();
     wireMobileNav();
     wireSpotlight();
     wireCountUp();

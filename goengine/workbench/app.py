@@ -332,11 +332,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # identity system from staff auth above -- see CITIZEN_SESSION_COOKIE's
     # docstring in deps.py and schema_citizen.sql's header comment for why.
     # -----------------------------------------------------------------------
+    # /register and /citizen/login render the same citizen_auth.html modal --
+    # a Log In/Register tab switcher inside one popup, matching a real
+    # reference product exactly rather than two separate full pages.
+    # default_tab picks which tab/panel starts active; each tab is a real
+    # link to the other route (not JS-only), so it degrades correctly
+    # without JavaScript and a direct link to either URL always renders the
+    # right starting state server-side.
     @app.get("/register", response_class=HTMLResponse)
     def citizen_register_form(request: Request, current_citizen: CurrentCitizen, next: str = ""):
         if current_citizen is not None:
             return RedirectResponse("/dashboard", status_code=303)
-        return templates.TemplateResponse(request, "register.html", {"next": next})
+        return templates.TemplateResponse(request, "citizen_auth.html", {"next": next, "default_tab": "register"})
 
     @app.post("/register")
     def citizen_register_submit(
@@ -352,7 +359,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         if password != confirm_password:
             return templates.TemplateResponse(
-                request, "register.html", {"error": "Passwords do not match", "next": next}, status_code=400,
+                request, "citizen_auth.html",
+                {"error": "Passwords do not match", "next": next, "default_tab": "register"}, status_code=400,
             )
         try:
             citizen_id = ops_citizen.register(
@@ -361,7 +369,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except ops_citizen.CitizenError as exc:
             return templates.TemplateResponse(
-                request, "register.html", {"error": str(exc), "next": next}, status_code=400,
+                request, "citizen_auth.html",
+                {"error": str(exc), "next": next, "default_tab": "register"}, status_code=400,
             )
         new_citizen = ops_citizen.get_citizen(conn, citizen_id)
         token = ops_citizen.create_session(conn, new_citizen)
@@ -374,7 +383,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def citizen_login_form(request: Request, current_citizen: CurrentCitizen, next: str = ""):
         if current_citizen is not None:
             return RedirectResponse("/dashboard", status_code=303)
-        return templates.TemplateResponse(request, "citizen_login.html", {"next": next})
+        return templates.TemplateResponse(request, "citizen_auth.html", {"next": next, "default_tab": "login"})
 
     @app.post("/citizen/login")
     def citizen_login_submit(
@@ -387,7 +396,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         found = ops_citizen.authenticate(conn, email, password)
         if found is None:
             return templates.TemplateResponse(
-                request, "citizen_login.html", {"error": "Invalid email or password", "next": next},
+                request, "citizen_auth.html",
+                {"error": "Invalid email or password", "next": next, "default_tab": "login"},
                 status_code=401,
             )
         token = ops_citizen.create_session(conn, found)

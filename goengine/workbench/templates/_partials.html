@@ -46,26 +46,22 @@
 </svg>
 {% endmacro %}
 
-{# Compact theme picker: one icon button that opens a dropdown of the three
-   themes (Light / Dark / Glass -- Aurora/Emerald/Midnight were dropped, one
-   clear glass-morphism theme is worth more than six thin variants). Menu
-   items are rendered on --panel/--ink, the same tokens every other piece of
-   UI uses, so contrast is correct in every theme by construction. Wired up
-   by theme.js's wireThemePicker(). #}
+{# Theme switcher: three icon buttons in one rounded pill -- Light / Dark /
+   Glass, matching a real reference product's header control exactly rather
+   than a dropdown menu. Each button carries the same [data-theme-btn]
+   attribute theme.js's wireThemeToggle() already listens for, so no new JS
+   is needed beyond dropping the old open/close picker wiring. #}
 {% macro theme_picker() %}
-<div class="theme-picker">
-  <button type="button" class="theme-picker-btn" data-theme-picker-toggle aria-haspopup="true" aria-expanded="false" title="Choose theme" aria-label="Choose theme">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
-      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
-      <path d="M12 2a10 10 0 1 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.3-.5-.8-.5-1.2 0-1.1.9-2 2-2h2.3A4.7 4.7 0 0 0 22 11c0-5-4.5-9-10-9Z"/>
-    </svg>
+<div class="theme-pill" role="group" aria-label="Choose theme">
+  <button type="button" data-theme-btn="light" aria-pressed="true" title="Light theme" aria-label="Light theme">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7"/></svg>
   </button>
-  <div class="theme-picker-menu" role="menu" data-theme-picker-menu>
-    <button type="button" role="menuitemradio" data-theme-btn="light" aria-pressed="true" title="Light theme"><span class="swatch swatch-light" aria-hidden="true"></span>Light</button>
-    <button type="button" role="menuitemradio" data-theme-btn="dark" aria-pressed="false" title="Dark theme"><span class="swatch swatch-dark" aria-hidden="true"></span>Dark</button>
-    <button type="button" role="menuitemradio" data-theme-btn="glass" aria-pressed="false" title="Glass theme"><span class="swatch swatch-glass" aria-hidden="true"></span>Glass</button>
-  </div>
+  <button type="button" data-theme-btn="dark" aria-pressed="false" title="Dark theme" aria-label="Dark theme">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+  </button>
+  <button type="button" data-theme-btn="glass" aria-pressed="false" title="Glass theme" aria-label="Glass theme">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 8.5 12 14l9-5.5L12 3Z"/><path d="m3 15.5 9 5.5 9-5.5M3 12l9 5.5 9-5.5"/></svg>
+  </button>
 </div>
 {% endmacro %}
 
@@ -79,10 +75,8 @@
 {% macro public_header(current_user=none, current_citizen=none) %}
 {% if not current_user and not current_citizen %}
 <div class="citizen-banner" role="note">
-  <div class="citizen-banner-track">
-    <span>📢 Register for FREE to download Government Orders, save searches, track projects, receive alerts, and access citizen dashboards.</span>
-    <span>📢 Register for FREE to download Government Orders, save searches, track projects, receive alerts, and access citizen dashboards.</span>
-  </div>
+  <span>🎓 Government Orders are free to browse. Register to download, save searches, and track your area.</span>
+  <a href="/register" class="citizen-banner-cta">Start Now <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
 </div>
 {% endif %}
 <header class="site-header" id="top">
