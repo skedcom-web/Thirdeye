@@ -377,7 +377,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
             print(f"--resync-all: marked {n} already-synced document(s) for re-push")
 
         auth_headers = {"Authorization": f"Bearer {api_key}"}
-        with httpx.Client(timeout=60.0) as client:
+        # 60s was too tight for a real production run: a handful of larger
+        # OCR'd documents genuinely take longer than that server-side (parse
+        # + Turso blob write), and the client giving up doesn't mean the
+        # server did. Matches agent-daemon's own client timeout below.
+        with httpx.Client(timeout=120.0) as client:
             results = _sync_documents(
                 conn, settings, client, server_url, auth_headers,
                 source_ids=source_ids, retry_failed=args.retry_failed, limit=args.limit,
