@@ -342,7 +342,7 @@ pre.pagetext {
   background: currentColor; border-radius: 2px; transition: transform .2s ease, opacity .2s ease;
 }
 header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--header-ink); }
-.site-header .header-end { display: flex; align-items: center; gap: 12px; }
+.site-header .header-end { display: flex; align-items: center; gap: 16px; margin-left: auto; }
 .btn-nav-cta { padding: 8px 16px; font-size: 13px; }
 @media (max-width: 860px) {
   .site-header nav, header.app-header nav { display: none; }
