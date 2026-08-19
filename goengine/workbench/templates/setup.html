@@ -6,54 +6,44 @@
 <title>Set up Third Eye</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/theme.css?v=2">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=3">
 {% from "_partials.html" import mark, theme_init_script %}
 {{ theme_init_script() }}
-<style>
-  body.auth-page {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background-image: var(--hero-grad); padding: 24px;
-  }
-  .auth-card {
-    width: 100%; max-width: 420px; background: var(--bg-elevated);
-    border: 1px solid var(--panel-border); border-radius: 16px; padding: 36px 32px;
-    box-shadow: var(--shadow-lg); animation: card-in .45s cubic-bezier(.2,.8,.2,1);
-  }
-  :root[data-theme="glass"] .auth-card { background: rgba(255,255,255,.5); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-  @keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
-  .auth-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 22px; }
-  .auth-brand span { font-weight: 800; font-size: 17px; }
-  .auth-card h1 { font-size: 17px; margin: 0 0 4px; text-align: center; }
-  .auth-card p.sub { color: var(--muted); margin: 0 0 24px; font-size: 13px; text-align: center; line-height: 1.6; }
-  .auth-field { margin-bottom: 16px; }
-  .auth-field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
-  .auth-submit { width: 100%; margin-top: 6px; padding: 11px; font-size: 14px; font-weight: 600; border-radius: 10px; }
-  .auth-error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 16px; }
-</style>
 </head>
 <body class="auth-page">
-<div class="auth-card">
-  <div class="auth-brand">{{ mark(30, 'setupMark') }} <span>Third Eye</span></div>
-  <h1>Welcome to Third Eye</h1>
-  <p class="sub">No administrator account exists yet. Create the first Platform Administrator to continue — the only setup step that happens outside the browser is starting the server.</p>
-  <form method="post" action="/setup">
-    <div class="auth-field">
-      <label for="username">Username</label>
-      <input id="username" type="text" name="username" required autofocus autocomplete="username">
+<div class="auth-shell">
+  <div class="auth-shell-brand">
+    <div class="auth-shell-brand-top">{{ mark(28, 'setupMark') }} <span>Third Eye</span></div>
+    <div class="auth-shell-brand-mid">
+      <h1>Let's get your instance running.</h1>
+      <p>Create the first Platform Administrator account to continue — this is the only setup step that happens outside the browser.</p>
     </div>
-    <div class="auth-field">
-      <label for="password">Password</label>
-      <input id="password" type="password" name="password" minlength="8" required autocomplete="new-password">
+    <div class="auth-shell-brand-bottom">© 2026 Third Eye</div>
+  </div>
+  <div class="auth-shell-form">
+    <div class="auth-card auth-card-wide">
+      <h1>Welcome to Third Eye</h1>
+      <p class="sub">No administrator account exists yet.</p>
+      <form method="post" action="/setup">
+        <div class="auth-field">
+          <label for="username">Username</label>
+          <input id="username" type="text" name="username" required autofocus autocomplete="username">
+        </div>
+        <div class="auth-field">
+          <label for="password">Password</label>
+          <input id="password" type="password" name="password" minlength="8" required autocomplete="new-password">
+        </div>
+        <div class="auth-field" style="margin-bottom:0;">
+          <label for="confirm_password">Confirm password</label>
+          <input id="confirm_password" type="password" name="confirm_password" minlength="8" required autocomplete="new-password">
+        </div>
+        <button class="auth-submit" type="submit">Create administrator account</button>
+      </form>
+      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
     </div>
-    <div class="auth-field" style="margin-bottom:0;">
-      <label for="confirm_password">Confirm password</label>
-      <input id="confirm_password" type="password" name="confirm_password" minlength="8" required autocomplete="new-password">
-    </div>
-    <button class="auth-submit" type="submit">Create administrator account</button>
-  </form>
-  {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+  </div>
 </div>
-<script src="/static/theme.js?v=2" defer></script>
+<script src="/static/theme.js?v=3" defer></script>
 </body>
 </html>

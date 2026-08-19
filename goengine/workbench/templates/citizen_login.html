@@ -6,32 +6,48 @@
 <title>Sign in — Third Eye</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/theme.css?v=2">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=3">
 {% from "_partials.html" import mark, theme_init_script %}
 {{ theme_init_script() }}
 </head>
 <body class="auth-page">
-<a class="back-home" href="/">← Third Eye</a>
-<div class="auth-card">
-  <div class="auth-brand">{{ mark(30, 'citizenLoginMark') }} <span>Third Eye</span></div>
-  <h1>Welcome back</h1>
-  <p class="sub">Sign in to download Government Orders and manage your dashboard</p>
-  <form method="post" action="/citizen/login">
-    <input type="hidden" name="next" value="{{ next or '' }}">
-    <div class="auth-field">
-      <label for="email">Email address</label>
-      <input id="email" type="email" name="email" required autofocus autocomplete="email">
+<div class="auth-shell">
+  <div class="auth-shell-brand">
+    <a class="back-home" href="/" style="position:static; color:rgba(243,240,255,.6);">← Back to Third Eye</a>
+    <div class="auth-shell-brand-top">{{ mark(28, 'citizenLoginMark') }} <span>Third Eye</span></div>
+    <div class="auth-shell-brand-mid">
+      <h1>Every claim, traced back to the original government record.</h1>
+      <p>Sign in to download Government Orders, save searches, and keep track of what's happening in your district.</p>
+      <div class="auth-shell-points">
+        <div class="auth-shell-point"><span class="dot">✓</span> Official records only</div>
+        <div class="auth-shell-point"><span class="dot">✓</span> Evidence quoted, page by page</div>
+        <div class="auth-shell-point"><span class="dot">✓</span> Free citizen account</div>
+      </div>
     </div>
-    <div class="auth-field" style="margin-bottom:0;">
-      <label for="password">Password</label>
-      <input id="password" type="password" name="password" required autocomplete="current-password">
+    <div class="auth-shell-brand-bottom">© 2026 Third Eye</div>
+  </div>
+  <div class="auth-shell-form">
+    <div class="auth-card">
+      <h1>Welcome back</h1>
+      <p class="sub">Sign in to your citizen account</p>
+      <form method="post" action="/citizen/login">
+        <input type="hidden" name="next" value="{{ next or '' }}">
+        <div class="auth-field">
+          <label for="email">Email address</label>
+          <input id="email" type="email" name="email" required autofocus autocomplete="email">
+        </div>
+        <div class="auth-field" style="margin-bottom:0;">
+          <label for="password">Password</label>
+          <input id="password" type="password" name="password" required autocomplete="current-password">
+        </div>
+        <button class="auth-submit btn-primary" type="submit">Sign In</button>
+      </form>
+      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+      <p class="auth-switch">New to Third Eye? <a href="/register{% if next %}?next={{ next }}{% endif %}">Register for free</a></p>
     </div>
-    <button class="auth-submit" type="submit">Sign In</button>
-  </form>
-  {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
-  <p class="auth-switch">New to Third Eye? <a href="/register{% if next %}?next={{ next }}{% endif %}">Register for free</a></p>
+  </div>
 </div>
-<script src="/static/theme.js?v=2" defer></script>
+<script src="/static/theme.js?v=3" defer></script>
 </body>
 </html>

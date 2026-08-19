@@ -7,12 +7,14 @@
 */
 
 :root {
-  --bg: #f6f7f9;
+  /* Warm neutral base -- a cool grey (#f6f7f9) reads as generic-SaaS-template;
+     a cream-tinted off-white feels considered instead of default. */
+  --bg: #faf8f4;
   --bg-elevated: #ffffff;
   --panel: #ffffff;
-  --panel-border: #dfe3e8;
-  --ink: #16191d;
-  --muted: #666e7a;
+  --panel-border: #e9e3d8;
+  --ink: #1b1a17;
+  --muted: #6f6a60;
   --accent: #1d4ed8;
   --accent-ink: #ffffff;
   --accent-soft: #e8edfd;
@@ -22,21 +24,27 @@
   --warn-soft: #fef3c7;
   --bad: #b91c1c;
   --bad-soft: #fee2e2;
-  --neutral-soft: #e5e7eb;
-  --neutral-ink: #374151;
+  --neutral-soft: #efece4;
+  --neutral-ink: #3d3a33;
   --header-bg: #12161c;
   --header-ink: #b9c6dd;
   --header-ink-hover: #ffffff;
-  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
-  --shadow-lg: 0 8px 24px rgba(16, 24, 40, .12), 0 2px 6px rgba(16, 24, 40, .08);
-  --radius: 10px;
-  --radius-sm: 6px;
-  --hero-grad: radial-gradient(circle at 20% 20%, #dbe4ff 0%, transparent 45%),
-               radial-gradient(circle at 80% 0%, #e8f6ee 0%, transparent 40%),
-               radial-gradient(circle at 50% 100%, #fdeedd 0%, transparent 45%);
+  --shadow: 0 1px 2px rgba(30, 25, 15, .06), 0 1px 3px rgba(30, 25, 15, .08);
+  --shadow-lg: 0 8px 24px rgba(30, 25, 15, .12), 0 2px 6px rgba(30, 25, 15, .08);
+  --radius: 14px;
+  --radius-sm: 8px;
+  /* A confident two-stop diagonal wash, not a three-blob pastel soup. */
+  --hero-grad: linear-gradient(135deg, #eef1ff 0%, #faf8f4 45%, #fdf2e9 100%);
+  /* Deep indigo -- the signature contrast-block color (auth panels, CTA
+     bands, footer accents), the role the reference material's dark-green
+     sidebar plays: one confident dark color used deliberately, not six
+     interchangeable theme variants. */
+  --ink-contrast: #171233;
+  --ink-contrast-ink: #f3f0ff;
   --mark-a: #7c3aed;
   --mark-b: #2563eb;
   --font-sans: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
 }
 
 :root[data-theme="dark"] {
@@ -349,8 +357,8 @@ header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--he
   transition: background .1s ease;
 }
 .hero h1 {
-  font-size: clamp(30px, 5.2vw, 58px); line-height: 1.08; margin: 0 auto 20px;
-  max-width: 900px; letter-spacing: -.02em; font-weight: 900;
+  font-family: var(--font-display); font-size: clamp(32px, 5.6vw, 64px); line-height: 1.05; margin: 0 auto 20px;
+  max-width: 880px; letter-spacing: -.01em; font-weight: 600;
 }
 .hero-highlight {
   background: linear-gradient(100deg, var(--accent) 0%, var(--mark-a) 35%, var(--mark-b) 65%, var(--accent) 100%);
@@ -402,7 +410,7 @@ a.glass-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 section.section { padding: 88px 32px; max-width: 1120px; margin: 0 auto; }
 section.section.tight { padding-top: 48px; padding-bottom: 48px; }
 .section-kicker { color: var(--accent); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; text-align: center; margin-bottom: 10px; }
-.section-title { font-size: clamp(26px, 3.6vw, 40px); font-weight: 800; text-align: center; margin: 0 0 14px; letter-spacing: -.01em; }
+.section-title { font-family: var(--font-display); font-size: clamp(28px, 3.8vw, 42px); font-weight: 600; text-align: center; margin: 0 0 14px; letter-spacing: -.005em; }
 .section-sub { text-align: center; color: var(--muted); max-width: 620px; margin: 0 auto 52px; font-size: 16px; }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
@@ -830,9 +838,25 @@ a.explore-node { text-decoration: none; color: inherit; }
 .explore-arrow { color: var(--muted); font-size: 20px; align-self: center; }
 
 /* ── Vision section ─────────────────────────────────────────────────────── */
-.vision-section { background: var(--accent-soft); border-radius: 24px; margin: 0 32px 80px; max-width: none; }
-.vision-quote { font-style: italic; }
-.vision-body { font-size: 17px; line-height: 1.8; }
+/* The one deliberate dark section on an otherwise light page -- a
+   confident color block for the mission statement, not another pastel
+   card. Uses --ink-contrast regardless of the active theme (Light or
+   Glass), the same signature-dark role the reference material's dark
+   sidebar plays. */
+.vision-section {
+  background: var(--ink-contrast); color: var(--ink-contrast-ink);
+  border-radius: 28px; margin: 0 32px 80px; max-width: none; position: relative; overflow: hidden;
+}
+.vision-section::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255,255,255,.14) 1.4px, transparent 1.4px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(circle at 80% 20%, black, transparent 65%);
+  mask-image: radial-gradient(circle at 80% 20%, black, transparent 65%);
+}
+.vision-section .section-kicker { color: #b8a8ff; position: relative; }
+.vision-quote { font-style: normal; color: var(--ink-contrast-ink); position: relative; }
+.vision-body { font-size: 17px; line-height: 1.8; color: rgba(243,240,255,.72); position: relative; }
 
 /* ── CTA band ───────────────────────────────────────────────────────────── */
 .cta-band {
@@ -886,26 +910,58 @@ a.explore-node { text-decoration: none; color: inherit; }
 @keyframes banner-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 @media (prefers-reduced-motion: reduce) { .citizen-banner-track { animation: none; } }
 
-/* Auth pages (login.html/citizen_login.html/register.html) -- lifted out of
-   login.html's original inline <style> so new auth pages can share it
-   instead of re-pasting the block. */
-body.auth-page {
-  min-height: 100vh; display: flex; align-items: center; justify-content: center;
-  background-image: var(--hero-grad); padding: 24px;
+/* Auth pages (login.html/citizen_login.html/register.html) -- a real
+   split-screen shell, not a small card centered on a decorative gradient.
+   Left panel carries the brand and the "why" in a few words; right panel
+   is the form on a plain, calm surface. This is the pattern real premium
+   products use for auth (Linear, Stripe, Vercel, ...) -- a floating card
+   on a pastel blob is the generic-template look this replaces. */
+body.auth-page { margin: 0; min-height: 100vh; background: var(--bg); }
+.auth-shell { display: flex; min-height: 100vh; }
+.auth-shell-brand {
+  flex: 1 1 44%; position: relative; overflow: hidden;
+  background: var(--ink-contrast); color: var(--ink-contrast-ink);
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 48px 56px;
+}
+.auth-shell-brand::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255,255,255,.16) 1.4px, transparent 1.4px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(circle at 30% 24%, black, transparent 72%);
+  mask-image: radial-gradient(circle at 30% 24%, black, transparent 72%);
+}
+.auth-shell-brand::after {
+  content: ""; position: absolute; width: 480px; height: 480px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, rgba(124,58,237,.4), transparent 70%);
+  top: -140px; right: -160px;
+}
+.auth-shell-brand-top { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
+.auth-shell-brand-top span { font-weight: 700; font-size: 18px; }
+.auth-shell-brand-mid { position: relative; z-index: 1; max-width: 420px; }
+.auth-shell-brand-mid h1 { font-family: var(--font-display); font-size: clamp(28px, 3vw, 38px); line-height: 1.16; font-weight: 600; margin: 0 0 16px; }
+.auth-shell-brand-mid p { color: rgba(243,240,255,.72); font-size: 15px; line-height: 1.6; margin: 0; }
+.auth-shell-points { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 13px; margin-top: 28px; }
+.auth-shell-point { display: flex; align-items: center; gap: 10px; font-size: 14px; color: rgba(243,240,255,.92); }
+.auth-shell-point .dot {
+  width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,.14);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.auth-shell-brand-bottom { position: relative; z-index: 1; font-size: 12.5px; color: rgba(243,240,255,.5); }
+.auth-shell-form {
+  flex: 1 1 56%; display: flex; align-items: center; justify-content: center;
+  padding: 40px 24px; background: var(--bg); position: relative;
+  overflow-y: auto; max-height: 100vh;
 }
 .auth-card {
   width: 100%; max-width: 380px; background: var(--bg-elevated);
-  border: 1px solid var(--panel-border); border-radius: 16px; padding: 36px 32px;
-  box-shadow: var(--shadow-lg);
-  animation: card-in .45s cubic-bezier(.2,.8,.2,1);
+  border: 1px solid var(--panel-border); border-radius: var(--radius); padding: 8px 4px;
+  animation: card-in .5s cubic-bezier(.2,.8,.2,1);
 }
-.auth-card.auth-card-wide { max-width: 440px; }
-:root[data-theme="glass"] .auth-card { background: rgba(255,255,255,.5); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-@keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
-.auth-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 22px; }
-.auth-brand span { font-weight: 800; font-size: 17px; }
-.auth-card h1 { font-size: 17px; margin: 0 0 4px; text-align: center; }
-.auth-card p.sub { color: var(--muted); margin: 0 0 24px; font-size: 13px; text-align: center; }
+.auth-card.auth-card-wide { max-width: 420px; }
+@keyframes card-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.auth-card h1 { font-family: var(--font-display); font-size: 26px; font-weight: 600; margin: 0 0 6px; }
+.auth-card p.sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
 .auth-field { margin-bottom: 16px; }
 .auth-field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
 .auth-field-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
@@ -913,11 +969,19 @@ body.auth-page {
 .auth-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
 .auth-actions a { font-size: 12.5px; color: var(--muted); text-decoration: none; }
 .auth-actions a:hover { color: var(--accent); }
-.auth-submit { width: 100%; margin-top: 18px; padding: 11px; font-size: 14px; font-weight: 600; border-radius: 10px; }
+.auth-submit { width: 100%; margin-top: 18px; padding: 12px; font-size: 14.5px; font-weight: 600; border-radius: 10px; }
 .auth-error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 16px; }
-.auth-switch { text-align: center; margin-top: 18px; font-size: 13px; color: var(--muted); }
-.back-home { position: fixed; top: 20px; left: 24px; font-size: 13px; color: var(--muted); text-decoration: none; }
+.auth-switch { text-align: center; margin-top: 22px; font-size: 13px; color: var(--muted); }
+.back-home { position: absolute; top: 24px; left: 24px; font-size: 13px; color: var(--muted); text-decoration: none; z-index: 2; }
 .back-home:hover { color: var(--ink); }
+@media (max-width: 860px) {
+  .auth-shell { flex-direction: column; }
+  .auth-shell-brand { flex: 0 0 auto; padding: 24px 24px 28px; }
+  .auth-shell-brand-mid p, .auth-shell-points, .auth-shell-brand-bottom { display: none; }
+  .auth-shell-brand-mid h1 { font-size: 20px; margin: 10px 0 0; }
+  .auth-shell-brand::after { width: 260px; height: 260px; top: -100px; right: -100px; }
+  .back-home { display: none; }
+}
 
 /* Citizen dashboard */
 .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-bottom: 24px; }
