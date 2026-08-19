@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from . import audit, benchmark, pipeline, registry, repository, review
@@ -260,6 +261,15 @@ def _sync_documents(
     params.append(limit)
     rows = conn.execute(sql, params).fetchall()
 
+    # A tight loop of hundreds of synchronous uploads (each triggering a
+    # real parse + a Turso write server-side) is exactly what overloaded a
+    # small Render instance the first time this ran -- 502/503s partway
+    # through, then a Cloudflare "Just a moment" 429 challenge once the edge
+    # decided the traffic looked abusive. A small pause between requests,
+    # and a longer one whenever the server signals it's struggling, keeps
+    # this from happening again.
+    _OVERLOAD_STATUS = {429, 502, 503}
+
     results: list[list] = []
     for row in rows:
         document_id = int(row["id"])
@@ -319,10 +329,14 @@ def _sync_documents(
                 error = f"HTTP {resp.status_code}: {resp.text[:150]}"
                 conn.execute("UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id))
                 results.append([row["file_name"], "failed", "", error])
+                if resp.status_code in _OVERLOAD_STATUS:
+                    time.sleep(8)  # let an overloaded server/edge recover before hammering it again
         except Exception as exc:  # httpx.HTTPError or a filesystem error -- never abort the batch
             error = str(exc)
             conn.execute("UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id))
             results.append([row["file_name"], "failed", "", error])
+
+        time.sleep(0.75)  # polite pacing between uploads, not just on failure
 
     return results
 
