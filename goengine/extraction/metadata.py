@@ -101,22 +101,54 @@ def page_regions(text: str) -> tuple[int | None, int | None]:
     )
 
 
-def region_at(position: int, bounds: tuple[int | None, int | None]) -> str:
+def region_at(position: int, bounds: tuple[int | None, int | None], default: str = HEADER) -> str:
     read_start, order_start = bounds
     if order_start is not None and position >= order_start:
         return BODY
     if read_start is not None and position >= read_start:
         return REFERENCES
-    return HEADER
+    return default
 
 
 def _region_weight(field_name: str, region: str) -> float:
     return REGION_WEIGHTS.get(field_name, DEFAULT_REGION_WEIGHT)[region]
 
 
-def _positional_weight(field_name: str, page: PageText, position: int) -> tuple[float, str]:
+def _document_region_state(pages: list[PageText]) -> dict[int, tuple[tuple[int | None, int | None], str]]:
+    """Per-page (read_start, order_start) bounds plus the region carried in
+    from the end of the previous page.
+
+    The "Read:" citation block and the operative ORDER: text routinely run
+    on past a single OCR page, but the literal marker word only appears on
+    the page where it starts -- every later page of that same block has no
+    marker of its own, so without carrying the region forward it silently
+    fell back to HEADER (full trust) for the rest of the document. That let
+    OCR-garbled reference numbers on page 2+ outscore the real header value
+    on page 1, confirmed on a real GO where a garbled Read-block digit run
+    briefly outranked the true "No.300" header match.
+    """
+    state: dict[int, tuple[tuple[int | None, int | None], str]] = {}
+    carry = HEADER
+    for page in pages:
+        bounds = page_regions(page.text)
+        state[page.page_number] = (bounds, carry)
+        read_start, order_start = bounds
+        if order_start is not None:
+            carry = BODY
+        elif read_start is not None:
+            carry = REFERENCES
+    return state
+
+
+def _positional_weight(
+    field_name: str,
+    page: PageText,
+    position: int,
+    region_state: dict[int, tuple[tuple[int | None, int | None], str]],
+) -> tuple[float, str]:
     """Combined page + region multiplier, and the region name for the audit."""
-    region = region_at(position, page_regions(page.text))
+    bounds, carry = region_state[page.page_number]
+    region = region_at(position, bounds, default=carry)
     return _page_weight(page.page_number) * _region_weight(field_name, region), region
 
 
@@ -124,6 +156,8 @@ def _positional_weight(field_name: str, page: PageText, position: int) -> tuple[
 # Field extractors
 # ---------------------------------------------------------------------------
 def extract_go_number(pages: Iterable[PageText]) -> list[FieldCandidate]:
+    pages = list(pages)
+    region_state = _document_region_state(pages)
     found: list[FieldCandidate] = []
     for page in pages:
         for match in P.GO_NUMBER_FULL.finditer(page.text):
@@ -136,7 +170,7 @@ def extract_go_number(pages: Iterable[PageText]) -> list[FieldCandidate]:
             # An explicit series is the strongest signal that this is the
             # order's own number rather than a reference to another one.
             base = 0.98 if series else 0.86
-            weight, region = _positional_weight("go_number", page, match.start())
+            weight, region = _positional_weight("go_number", page, match.start(), region_state)
             found.append(
                 FieldCandidate(
                     field_name="go_number",
@@ -152,7 +186,7 @@ def extract_go_number(pages: Iterable[PageText]) -> list[FieldCandidate]:
             )
         if not found:
             for match in P.ORDER_NUMBER_LOOSE.finditer(page.text):
-                weight, region = _positional_weight("go_number", page, match.start())
+                weight, region = _positional_weight("go_number", page, match.start(), region_state)
                 found.append(
                     FieldCandidate(
                         field_name="go_number",
@@ -179,6 +213,8 @@ def _build_date(day: int, month: int, year: int) -> date | None:
 
 
 def extract_go_date(pages: Iterable[PageText]) -> list[FieldCandidate]:
+    pages = list(pages)
+    region_state = _document_region_state(pages)
     found: list[FieldCandidate] = []
     specs: tuple[tuple[re.Pattern[str], str, float, bool], ...] = (
         (P.DATE_NUMERIC_LABELLED, "DATE_NUMERIC_LABELLED", 0.97, False),
@@ -199,7 +235,7 @@ def extract_go_date(pages: Iterable[PageText]) -> list[FieldCandidate]:
                 # (usually a day/month swap) rather than a real value.
                 if parsed > date.today():
                     continue
-                weight, region = _positional_weight("go_date", page, match.start())
+                weight, region = _positional_weight("go_date", page, match.start(), region_state)
                 found.append(
                     FieldCandidate(
                         field_name="go_date",
@@ -217,6 +253,8 @@ def extract_go_date(pages: Iterable[PageText]) -> list[FieldCandidate]:
 
 
 def extract_department(pages: Iterable[PageText]) -> list[FieldCandidate]:
+    pages = list(pages)
+    region_state = _document_region_state(pages)
     found: list[FieldCandidate] = []
     for page in pages:
         for match in P.DEPARTMENT_HEADING.finditer(page.text):
@@ -224,7 +262,7 @@ def extract_department(pages: Iterable[PageText]) -> list[FieldCandidate]:
             if not normalized:
                 continue
             base = 0.98 if P.is_known_department(normalized) else 0.80
-            weight, region = _positional_weight("department", page, match.start())
+            weight, region = _positional_weight("department", page, match.start(), region_state)
             found.append(
                 FieldCandidate(
                     field_name="department",
@@ -242,7 +280,7 @@ def extract_department(pages: Iterable[PageText]) -> list[FieldCandidate]:
             normalized = P.normalize_department(match.group("name"))
             if not normalized or not P.is_known_department(normalized):
                 continue
-            weight, region = _positional_weight("department", page, match.start())
+            weight, region = _positional_weight("department", page, match.start(), region_state)
             found.append(
                 FieldCandidate(
                     field_name="department",
