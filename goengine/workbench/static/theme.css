@@ -424,6 +424,8 @@ header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--he
   background: var(--bg-elevated); border: 1px solid var(--panel-border); border-radius: var(--radius);
   padding: 22px 18px; box-shadow: var(--shadow-lg);
 }
+a.glass-card { display: block; text-decoration: none; color: inherit; transition: transform .15s ease, box-shadow .15s ease; }
+a.glass-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 :root[data-theme="glass"] .glass-card { background: rgba(255,255,255,.45); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .glass-card .metric-n { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .glass-card .metric-l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; margin-top: 4px; }
@@ -846,6 +848,7 @@ ul.plain-list li::marker { color: var(--accent); }
 }
 .explore-node:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
 .explore-node.active { border-color: var(--accent); background: var(--accent-soft); }
+a.explore-node { text-decoration: none; color: inherit; }
 .explore-node.future { border-style: dashed; opacity: .65; }
 .explore-node-icon { font-size: 22px; }
 .explore-node-label { font-weight: 700; font-size: 14px; }
@@ -873,6 +876,23 @@ ul.plain-list li::marker { color: var(--accent); }
 :root[data-theme="glass"] .cta-band {
   backdrop-filter: var(--glass-blur, blur(12px)); -webkit-backdrop-filter: var(--glass-blur, blur(12px));
 }
+
+/* ── Government Order browse/search (/orders) ──────────────────────────── */
+.orders-filter-bar {
+  display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 32px;
+}
+.orders-filter-search { flex: 1; min-width: 220px; }
+.orders-filter-bar select, .orders-filter-bar input[type=text] {
+  min-width: 160px;
+}
+.orders-grid { margin-bottom: 32px; }
+.orders-card { display: flex; flex-direction: column; gap: 8px; text-align: left; text-decoration: none; color: inherit; }
+.orders-card-number { font-weight: 700; font-size: 17px; }
+.orders-card-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.orders-card-subject { color: var(--muted); font-size: 14px; margin: 0; line-height: 1.5; }
+.orders-card-link { color: var(--accent); font-weight: 600; font-size: 13px; margin-top: auto; }
+.orders-pagination { display: flex; gap: 16px; align-items: center; justify-content: center; margin-top: 24px; }
+.orders-empty { text-align: center; padding: 48px 24px; }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 footer.site-footer {

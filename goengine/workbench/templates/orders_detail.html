@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ record.go_number or ('Record #' ~ record.record_id) }} — Third Eye</title>
+<meta name="description" content="{{ record.subject[:160] if record.subject else 'A verified Tamil Nadu Government Order, backed by the original document.' }}">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css">
+{% from "_partials.html" import mark, theme_init_script %}
+{{ theme_init_script() }}
+</head>
+<body>
+
+<header class="site-header" id="top">
+  <a class="brand" href="/">{{ mark(30, 'headMark') }} Third Eye</a>
+  <nav aria-label="Main navigation">
+    <a href="/" class="nav-link">Home</a>
+    <a href="/orders" class="nav-link">Government Orders</a>
+  </nav>
+  <div class="header-end">
+    {% if current_user %}
+    <a class="btn-lg btn-secondary btn-nav-cta" href="/admin" aria-label="Go to Admin dashboard">Admin →</a>
+    {% else %}
+    <a class="btn-lg btn-secondary btn-nav-cta" href="/login" aria-label="Sign in to administrator portal">Login</a>
+    {% endif %}
+  </div>
+</header>
+
+<section class="section tight" aria-labelledby="record-heading">
+  <p style="text-align:center;"><a href="/orders" class="muted" style="font-size:14px;">← Back to Government Orders</a></p>
+
+  <div class="panel">
+    <div style="display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;">
+      <h1 id="record-heading" style="margin:0; font-size:24px;">{{ record.go_number or ('Record #' ~ record.record_id) }}</h1>
+      <span class="pill ok">Verified</span>
+      <span class="muted">{{ record.department }}</span>
+    </div>
+    {% if record.subject %}<p style="margin:10px 0 0; font-size:16px;">{{ record.subject }}</p>{% endif %}
+    <table style="margin-top:14px;">
+      <tr><th style="width:150px;">Date</th><td>{{ record.go_date or 'Not stated' }}</td></tr>
+      {% if record.district %}<tr><th>District</th><td>{{ record.district }}</td></tr>{% endif %}
+      <tr><th>Source</th><td class="mono"><a href="{{ record.source_url }}" rel="noreferrer noopener nofollow">{{ record.source_url }}</a></td></tr>
+      <tr><th>Document</th><td class="mono">{{ record.file_name }}</td></tr>
+    </table>
+  </div>
+
+  <div class="split">
+    <div class="panel">
+      <h2>Original document</h2>
+      <iframe src="/orders/{{ record.record_id }}/pdf" title="Original PDF"></iframe>
+      <p class="muted" style="margin-bottom:0;">
+        Served byte-for-byte from the government source.
+        <a href="/orders/{{ record.record_id }}/pdf">Open in new tab</a>
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>What this record says, and where it comes from</h2>
+      {% for group, names in [('Core details', core_fields), ('Additional details', optional_fields)] %}
+      <h3 style="font-size:13px; color:var(--muted); margin:14px 0 6px;">{{ group }}</h3>
+      <table>
+        {% for name in names %}
+        {% set f = record.fields.get(name) %}
+        <tr>
+          <th style="width:120px;">{{ name.replace('_', ' ')|title }}</th>
+          <td>
+            {% if f %}
+              <div><strong>{{ f.value }}</strong></div>
+              <div class="muted" style="font-size:12px; margin-top:2px;">Page {{ f.source_page }} of the original document</div>
+              <div class="evidence">&ldquo;{{ f.source_text }}&rdquo;</div>
+            {% else %}
+              <span class="pill neutral">Not stated in this document</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-brand">
+    {{ mark(22, 'footMark') }}
+    <strong>Third Eye</strong>
+  </div>
+  <p class="footer-tagline">The Citizen's Third Eye — Making government information accessible to everyone.</p>
+  <nav class="footer-nav" aria-label="Footer navigation">
+    <a href="/">Home</a>
+    <a href="/orders">Government Orders</a>
+    <a href="/login">Administrator Sign In</a>
+  </nav>
+  <p class="footer-copy">© 2026 Third Eye. Built on official Tamil Nadu government records.</p>
+</footer>
+
+<script src="/static/theme.js" defer></script>
+</body>
+</html>

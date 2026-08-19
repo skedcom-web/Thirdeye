@@ -17,7 +17,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import audit, registry, repository, review
+from .. import audit, public, registry, repository, review
 from ..certification import calibration as calib
 from ..certification import categorize
 from ..certification import failures as failure_intel
@@ -239,6 +239,81 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/admin")
     def admin_entry(current_user: LoggedIn):
         return RedirectResponse(_post_login_destination(current_user), status_code=303)
+
+    # -----------------------------------------------------------------------
+    # Public Government Order browse/search -- the Verified GO Database,
+    # open to any visitor. Strictly scoped to approved records (see
+    # goengine/public.py); never shares a route or template with the
+    # reviewer-only /records/{id}.
+    # -----------------------------------------------------------------------
+    @app.get("/orders", response_class=HTMLResponse)
+    def public_orders(
+        request: Request,
+        conn: Conn,
+        current_user: CurrentUser,
+        department: str | None = None,
+        district: str | None = None,
+        q: str | None = None,
+        page: int = 1,
+    ):
+        page = max(page, 1)
+        limit = 20
+        records, total = public.search(
+            conn,
+            department_bucket=department or None,
+            district=district or None,
+            q=q or None,
+            limit=limit,
+            offset=(page - 1) * limit,
+        )
+        return templates.TemplateResponse(
+            request,
+            "orders_list.html",
+            {
+                "current_user": current_user,
+                "records": records,
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "has_next": page * limit < total,
+                "filters": public.filter_options(conn),
+                "selected_department": department or "",
+                "selected_district": district or "",
+                "q": q or "",
+            },
+        )
+
+    @app.get("/orders/{record_id}", response_class=HTMLResponse)
+    def public_order_detail(request: Request, record_id: int, conn: Conn, current_user: CurrentUser):
+        record = public.get(conn, record_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        return templates.TemplateResponse(
+            request,
+            "orders_detail.html",
+            {
+                "current_user": current_user,
+                "record": record,
+                "core_fields": meta.CORE_FIELDS,
+                "optional_fields": meta.OPTIONAL_FIELDS,
+            },
+        )
+
+    @app.get("/orders/{record_id}/pdf")
+    def public_order_pdf(record_id: int, config: Config, conn: Conn):
+        located = public.stored_path_for(conn, record_id)
+        if located is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        stored_path, file_name = located
+        path = repository.absolute_path(config, stored_path)
+        if not path.exists():
+            raise HTTPException(status_code=410, detail="file missing from repository")
+        safe_name = file_name.replace('"', "")
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            headers={"content-disposition": f'inline; filename="{safe_name}"'},
+        )
 
     # -----------------------------------------------------------------------
     # Validation Workbench dashboard (Phase 1). Lives at /workbench, not /:

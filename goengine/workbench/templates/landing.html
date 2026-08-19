@@ -124,10 +124,10 @@
     The platform, by the numbers
   </h2>
   <div class="metric-row">
-    <div class="glass-card" role="group" aria-label="Public records available metric">
+    <a class="glass-card" href="/orders" aria-label="View public records available">
       <div class="metric-n" data-count-to="{{ stats.records_available }}" aria-live="polite">0</div>
       <div class="metric-l">📄 Public Records Available</div>
-    </div>
+    </a>
     <div class="glass-card" role="group" aria-label="Departments tracked metric">
       <div class="metric-n" data-count-to="{{ stats.departments_tracked }}" aria-live="polite">0</div>
       <div class="metric-l">🏛 Departments Tracked</div>
@@ -257,18 +257,18 @@
   <h2 id="explore-heading" class="section-title">Find what's relevant to your area</h2>
   <p class="section-sub">Third Eye is built to let you drill down from state level all the way to your own locality.</p>
 
-  <div class="explore-flow" role="img" aria-label="Location drill-down flow: Tamil Nadu state, then District, then Locality, then Available Records">
+  <div class="explore-flow" aria-label="Location drill-down: Tamil Nadu state, then District, then Locality, then Government Orders">
     <div class="explore-node active">
       <span class="explore-node-icon" aria-hidden="true">🗺</span>
       <span class="explore-node-label">Tamil Nadu</span>
       <span class="explore-node-badge active-badge">Live</span>
     </div>
     <span class="explore-arrow" aria-hidden="true">→</span>
-    <div class="explore-node active">
+    <a class="explore-node active" href="/orders">
       <span class="explore-node-icon" aria-hidden="true">🏙</span>
       <span class="explore-node-label">District</span>
       <span class="explore-node-badge active-badge">Live</span>
-    </div>
+    </a>
     <span class="explore-arrow" aria-hidden="true">→</span>
     <div class="explore-node future">
       <span class="explore-node-icon" aria-hidden="true">📍</span>
@@ -276,13 +276,16 @@
       <span class="explore-node-badge future-badge">Coming Soon</span>
     </div>
     <span class="explore-arrow" aria-hidden="true">→</span>
-    <div class="explore-node future">
+    <a class="explore-node active" href="/orders">
       <span class="explore-node-icon" aria-hidden="true">📋</span>
-      <span class="explore-node-label">Records</span>
-      <span class="explore-node-badge future-badge">Coming Soon</span>
-    </div>
+      <span class="explore-node-label">Government Orders</span>
+      <span class="explore-node-badge active-badge">Live</span>
+    </a>
   </div>
-  <p class="section-sub" style="margin-top:8px; font-size:13px;">Full location-based search is on our roadmap — this shows how it will work.</p>
+  <p class="section-sub" style="margin-top:8px; font-size:13px;">
+    <a href="/orders">Browse verified Government Orders →</a>
+    Locality-level search is on our roadmap.
+  </p>
 </section>
 
 <!-- ═══════════════════════ SECTION 7: BUILT ON OFFICIAL INFO ═══════════════════════ -->
