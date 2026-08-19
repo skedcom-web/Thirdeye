@@ -126,7 +126,8 @@ def _register_states(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 def _register_districts(app: FastAPI) -> None:
     @app.get("/ops/districts", response_class=HTMLResponse)
-    def districts_list(request: Request, conn: Conn, current_user: LoggedIn, state_id: int | None = None):
+    def districts_list(request: Request, conn: Conn, current_user: LoggedIn, state_id: str | None = None):
+        state_id = int(state_id) if state_id else None
         can_manage = current_user.has_permission("manage_districts")
         states = geography.list_states(conn)
         # A state admin only sees/edits their own state's districts.
@@ -475,25 +476,27 @@ def _register_documents(app: FastAPI) -> None:
     @app.get("/ops/documents", response_class=HTMLResponse)
     def documents_list(
         request: Request, conn: Conn, current_user: LoggedIn,
-        source_id: int | None = None, q: str | None = None, department: str | None = None,
-        year: int | None = None, language: str | None = None, status: str | None = None,
+        source_id: str | None = None, q: str | None = None, department: str | None = None,
+        year: str | None = None, language: str | None = None, status: str | None = None,
     ):
+        source_id_int = int(source_id) if source_id else None
+        year_int = int(year) if year else None
         return templates.TemplateResponse(
             request, "documents.html",
             {
                 "documents": repository.list_documents(
-                    conn, source_id=source_id, search=q, department=department,
-                    year=year, language=language, status=status,
+                    conn, source_id=source_id_int, search=q, department=department,
+                    year=year_int, language=language, status=status,
                 ),
                 "sources": registry.list_sources(conn),
                 "departments": repository.list_document_departments(conn),
                 "years": repository.list_document_years(conn),
                 "languages": ("english", "tamil", "mixed", "unknown"),
                 "statuses": ("approved", "rejected", "pending", "new", "downloaded", "parsed", "verified"),
-                "selected_source_id": source_id,
+                "selected_source_id": source_id_int,
                 "search": q or "",
                 "selected_department": department or "",
-                "selected_year": year,
+                "selected_year": year_int,
                 "selected_language": language or "",
                 "selected_status": status or "",
                 "current_user": current_user,
