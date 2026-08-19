@@ -10,25 +10,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/theme.css">
-{% from "_partials.html" import mark, theme_init_script %}
+{% from "_partials.html" import mark, theme_init_script, public_header %}
 {{ theme_init_script() }}
 </head>
 <body>
 
-<header class="site-header" id="top">
-  <a class="brand" href="/">{{ mark(30, 'headMark') }} Third Eye</a>
-  <nav aria-label="Main navigation">
-    <a href="/" class="nav-link">Home</a>
-    <a href="/orders" class="nav-link">Government Orders</a>
-  </nav>
-  <div class="header-end">
-    {% if current_user %}
-    <a class="btn-lg btn-secondary btn-nav-cta" href="/admin" aria-label="Go to Admin dashboard">Admin →</a>
-    {% else %}
-    <a class="btn-lg btn-secondary btn-nav-cta" href="/login" aria-label="Sign in to administrator portal">Login</a>
-    {% endif %}
-  </div>
-</header>
+{{ public_header(current_user=current_user, current_citizen=current_citizen) }}
 
 <section class="section tight" aria-labelledby="orders-heading">
   <div class="section-kicker" aria-hidden="true">Verified GO Database</div>
@@ -66,6 +53,16 @@
     <a href="/orders" class="muted" style="font-size:13px; align-self:center;">Clear filters</a>
     {% endif %}
   </form>
+
+  {% if current_citizen and (selected_department or selected_district or q) %}
+  <form method="post" action="/dashboard/saved-searches" style="display:flex; gap:10px; align-items:center; margin:-16px 0 32px;">
+    <input type="hidden" name="department" value="{{ selected_department }}">
+    <input type="hidden" name="district" value="{{ selected_district }}">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="text" name="label" placeholder="Name this search (optional)" style="max-width:220px;">
+    <button type="submit" class="ghost" style="font-size:13px;">☆ Save this search</button>
+  </form>
+  {% endif %}
 
   {% if records %}
   <div class="card-grid orders-grid" role="list">

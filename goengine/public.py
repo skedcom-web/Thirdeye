@@ -168,6 +168,23 @@ def get(conn: sqlite3.Connection, record_id: int) -> PublicRecord | None:
     return _build_record(conn, row)
 
 
+def get_full_text(conn: sqlite3.Connection, record_id: int) -> str | None:
+    """The extracted page text of an approved record's document, page-break
+    joined -- backs the citizen "download OCR text" format. Same approved-only
+    gating as get()."""
+    row = conn.execute(
+        "SELECT extraction_id FROM go_records WHERE id = ? AND status = ?",
+        (record_id, STATUS_APPROVED),
+    ).fetchone()
+    if row is None:
+        return None
+    pages = conn.execute(
+        "SELECT text FROM extraction_pages WHERE extraction_id = ? ORDER BY page_number",
+        (row["extraction_id"],),
+    ).fetchall()
+    return "\n\n----- page break -----\n\n".join(p["text"] for p in pages)
+
+
 def stored_path_for(conn: sqlite3.Connection, record_id: int) -> tuple[str, str] | None:
     """(stored_path, file_name) for an approved record's PDF, or None -- the
     public PDF route gates on approval status this way, not just document

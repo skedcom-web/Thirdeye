@@ -10,25 +10,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/theme.css">
-{% from "_partials.html" import mark, theme_init_script %}
+{% from "_partials.html" import mark, theme_init_script, public_header %}
 {{ theme_init_script() }}
 </head>
 <body>
 
-<header class="site-header" id="top">
-  <a class="brand" href="/">{{ mark(30, 'headMark') }} Third Eye</a>
-  <nav aria-label="Main navigation">
-    <a href="/" class="nav-link">Home</a>
-    <a href="/orders" class="nav-link">Government Orders</a>
-  </nav>
-  <div class="header-end">
-    {% if current_user %}
-    <a class="btn-lg btn-secondary btn-nav-cta" href="/admin" aria-label="Go to Admin dashboard">Admin →</a>
-    {% else %}
-    <a class="btn-lg btn-secondary btn-nav-cta" href="/login" aria-label="Sign in to administrator portal">Login</a>
-    {% endif %}
-  </div>
-</header>
+{{ public_header(current_user=current_user, current_citizen=current_citizen) }}
 
 <section class="section tight" aria-labelledby="record-heading">
   <p style="text-align:center;"><a href="/orders" class="muted" style="font-size:14px;">← Back to Government Orders</a></p>
@@ -46,6 +33,22 @@
       <tr><th>Source</th><td class="mono"><a href="{{ record.source_url }}" rel="noreferrer noopener nofollow">{{ record.source_url }}</a></td></tr>
       <tr><th>Document</th><td class="mono">{{ record.file_name }}</td></tr>
     </table>
+
+    <div class="orders-detail-actions">
+      {% if current_citizen %}
+      <form method="post" action="/orders/{{ record.record_id }}/save">
+        <button type="submit" class="btn-lg save-toggle {{ 'is-saved' if is_saved else '' }}">
+          {{ '★ Saved' if is_saved else '☆ Save this record' }}
+        </button>
+      </form>
+      {% endif %}
+      <a class="btn-lg btn-secondary" href="/orders/{{ record.record_id }}/download/pdf">⬇ Download PDF</a>
+      <a class="btn-lg btn-secondary" href="/orders/{{ record.record_id }}/download/text">⬇ Download OCR Text</a>
+      <a class="btn-lg btn-secondary" href="/orders/{{ record.record_id }}/download/metadata">⬇ Download Metadata</a>
+      {% if not current_user and not current_citizen %}
+      <span class="muted" style="font-size:12.5px; align-self:center;">Downloads require a free account — you'll be asked to sign in.</span>
+      {% endif %}
+    </div>
   </div>
 
   <div class="split">

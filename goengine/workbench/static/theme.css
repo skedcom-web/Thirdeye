@@ -893,8 +893,64 @@ a.explore-node { text-decoration: none; color: inherit; }
 .orders-card-link { color: var(--accent); font-weight: 600; font-size: 13px; margin-top: auto; }
 .orders-pagination { display: flex; gap: 16px; align-items: center; justify-content: center; margin-top: 24px; }
 .orders-empty { text-align: center; padding: 48px 24px; }
+.orders-detail-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.save-toggle { border: 1px solid var(--panel-border); }
+.save-toggle.is-saved { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
-/* ── Footer ─────────────────────────────────────────────────────────────── */
+/* ── Phase 4A: citizen accounts ────────────────────────────────────────── */
+/* Scrolling registration banner -- shown only to fully anonymous visitors
+   (see public_header() in _partials.html). Two copies of the text scroll
+   as one continuous loop so there's never a visible gap. */
+.citizen-banner {
+  background-image: var(--hero-grad); color: #fff; overflow: hidden;
+  white-space: nowrap; padding: 8px 0; font-size: 13px; font-weight: 600;
+}
+.citizen-banner-track { display: inline-flex; gap: 60px; animation: banner-scroll 22s linear infinite; }
+.citizen-banner-track span { padding-right: 60px; }
+@keyframes banner-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .citizen-banner-track { animation: none; } }
+
+/* Auth pages (login.html/citizen_login.html/register.html) -- lifted out of
+   login.html's original inline <style> so new auth pages can share it
+   instead of re-pasting the block. */
+body.auth-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background-image: var(--hero-grad); padding: 24px;
+}
+.auth-card {
+  width: 100%; max-width: 380px; background: var(--bg-elevated);
+  border: 1px solid var(--panel-border); border-radius: 16px; padding: 36px 32px;
+  box-shadow: var(--shadow-lg);
+  animation: card-in .45s cubic-bezier(.2,.8,.2,1);
+}
+.auth-card.auth-card-wide { max-width: 440px; }
+:root[data-theme="glass"] .auth-card { background: rgba(255,255,255,.5); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+@keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+.auth-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 22px; }
+.auth-brand span { font-weight: 800; font-size: 17px; }
+.auth-card h1 { font-size: 17px; margin: 0 0 4px; text-align: center; }
+.auth-card p.sub { color: var(--muted); margin: 0 0 24px; font-size: 13px; text-align: center; }
+.auth-field { margin-bottom: 16px; }
+.auth-field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
+.auth-field-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+.auth-field-check input { margin-top: 3px; }
+.auth-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.auth-actions a { font-size: 12.5px; color: var(--muted); text-decoration: none; }
+.auth-actions a:hover { color: var(--accent); }
+.auth-submit { width: 100%; margin-top: 18px; padding: 11px; font-size: 14px; font-weight: 600; border-radius: 10px; }
+.auth-error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 16px; }
+.auth-switch { text-align: center; margin-top: 18px; font-size: 13px; color: var(--muted); }
+.back-home { position: fixed; top: 20px; left: 24px; font-size: 13px; color: var(--muted); text-decoration: none; }
+.back-home:hover { color: var(--ink); }
+
+/* Citizen dashboard */
+.dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-bottom: 24px; }
+.dashboard-widget h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.dashboard-list { display: flex; flex-direction: column; gap: 10px; }
+.dashboard-list-item { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--panel-border); }
+.dashboard-list-item:last-child { border-bottom: none; padding-bottom: 0; }
+.dashboard-empty { color: var(--muted); font-size: 13px; }
+
 footer.site-footer {
   border-top: 1px solid var(--panel-border); padding: 48px 32px;
   text-align: center; color: var(--muted); font-size: 13px;

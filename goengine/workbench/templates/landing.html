@@ -28,6 +28,7 @@
   <nav id="main-nav" aria-label="Main navigation">
     <a href="#home" class="nav-link">Home</a>
     <a href="#explore" class="nav-link">Explore</a>
+    <a href="/orders" class="nav-link">Districts</a>
     <a href="#how" class="nav-link">How It Works</a>
     <a href="#coverage" class="nav-link">Coverage</a>
     <a href="#about" class="nav-link">About</a>
@@ -44,11 +45,23 @@
     </div>
     {% if current_user %}
     <a class="btn-lg btn-secondary btn-nav-cta" href="/admin" aria-label="Go to Admin dashboard">Admin →</a>
+    {% elif current_citizen %}
+    <a class="btn-lg btn-secondary btn-nav-cta" href="/dashboard">Dashboard</a>
     {% else %}
-    <a class="btn-lg btn-secondary btn-nav-cta" href="/login" aria-label="Sign in to administrator portal">Login</a>
+    <a class="btn-lg btn-secondary btn-nav-cta" href="/citizen/login">Login</a>
+    <a class="btn-lg btn-primary btn-nav-cta" href="/register">Register Now</a>
     {% endif %}
   </div>
 </header>
+
+{% if not current_user and not current_citizen %}
+<div class="citizen-banner" role="note">
+  <div class="citizen-banner-track">
+    <span>📢 Register for FREE to download Government Orders, save searches, track projects, receive alerts, and access citizen dashboards.</span>
+    <span>📢 Register for FREE to download Government Orders, save searches, track projects, receive alerts, and access citizen dashboards.</span>
+  </div>
+</div>
+{% endif %}
 
 <!-- ═══════════════════════ SECTION 1: HERO ═══════════════════════ -->
 <section class="hero" id="home" aria-labelledby="hero-heading">

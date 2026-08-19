@@ -24,11 +24,17 @@ from fastapi.templating import Jinja2Templates
 from ..config import Settings
 from ..db import connect
 from ..fetching import Fetcher, HttpFetcher
-from ..operations import agent_auth, auth
+from ..operations import agent_auth, auth, citizen
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 SESSION_COOKIE = "thirdeye_session"
+# Phase 4A -- citizens are a fully separate identity system (see
+# schema_citizen.sql), so this is a different cookie name from SESSION_COOKIE
+# above, not a shared one with a role flag. A citizen session simply doesn't
+# exist as far as any staff-only LoggedIn route is concerned, and vice versa
+# -- no route-by-route sweep needed to keep the two audiences apart.
+CITIZEN_SESSION_COOKIE = "thirdeye_citizen_session"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["pct"] = lambda value: f"{float(value) * 100:.1f}%"
@@ -124,6 +130,32 @@ RequireStates = Annotated[auth.User, Depends(require_permission(auth.PERM_MANAGE
 RequireDepartments = Annotated[auth.User, Depends(require_permission(auth.PERM_MANAGE_DEPARTMENTS))]
 RequirePublish = Annotated[auth.User, Depends(require_permission(auth.PERM_PUBLISH))]
 RequireUsers = Annotated[auth.User, Depends(require_permission(auth.PERM_MANAGE_USERS))]
+
+
+# ---------------------------------------------------------------------------
+# Phase 4A -- Citizen accounts. Mirrors CurrentUser/LoggedIn above exactly,
+# but reads CITIZEN_SESSION_COOKIE against operations/citizen.py's separate
+# citizen_users/citizen_sessions tables.
+# ---------------------------------------------------------------------------
+class RedirectToCitizenLogin(HTTPException):
+    def __init__(self, next_path: str) -> None:
+        super().__init__(status_code=303, headers={"Location": f"/citizen/login?next={next_path}"})
+
+
+def get_current_citizen(request: Request, conn: Conn) -> citizen.CitizenUser | None:
+    return citizen.get_session_user(conn, request.cookies.get(CITIZEN_SESSION_COOKIE))
+
+
+CurrentCitizen = Annotated[citizen.CitizenUser | None, Depends(get_current_citizen)]
+
+
+def require_citizen_login(request: Request, current_citizen: CurrentCitizen) -> citizen.CitizenUser:
+    if current_citizen is None:
+        raise RedirectToCitizenLogin(next_path=request.url.path)
+    return current_citizen
+
+
+RequireCitizen = Annotated[citizen.CitizenUser, Depends(require_citizen_login)]
 
 
 # ---------------------------------------------------------------------------

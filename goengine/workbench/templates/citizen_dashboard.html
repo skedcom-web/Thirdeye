@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Dashboard — Third Eye</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css">
+{% from "_partials.html" import mark, theme_init_script, public_header %}
+{{ theme_init_script() }}
+</head>
+<body>
+
+{{ public_header(current_citizen=current_citizen) }}
+
+<section class="section tight" aria-labelledby="dashboard-heading">
+  <div class="section-kicker" aria-hidden="true">My Dashboard</div>
+  <h1 id="dashboard-heading" class="section-title">Welcome, {{ current_citizen.full_name }}</h1>
+  <p class="section-sub">Your downloads, saved records, and saved searches, all in one place.</p>
+
+  <div class="dashboard-grid">
+    <div class="panel dashboard-widget">
+      <h3>Recent Downloads</h3>
+      {% if recent_downloads %}
+      <div class="dashboard-list">
+        {% for d in recent_downloads %}
+        <div class="dashboard-list-item">
+          <a href="/orders/{{ d.record_id }}"><strong>{{ d.go_number or ('Record #' ~ d.record_id) }}</strong></a>
+          <span class="muted" style="font-size:12.5px;">{{ d.format|upper }} &middot; {{ d.downloaded_at }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="dashboard-empty">No downloads yet. <a href="/orders">Browse Government Orders →</a></p>
+      {% endif %}
+    </div>
+
+    <div class="panel dashboard-widget">
+      <h3>Saved Records</h3>
+      {% if saved_records %}
+      <div class="dashboard-list">
+        {% for r in saved_records %}
+        <div class="dashboard-list-item">
+          <a href="/orders/{{ r.record_id }}"><strong>{{ r.go_number or ('Record #' ~ r.record_id) }}</strong></a>
+          <span class="muted" style="font-size:12.5px;">{{ r.department }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="dashboard-empty">No saved records yet. Bookmark a record from its page to see it here.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel dashboard-widget">
+      <h3>Saved Searches</h3>
+      {% if saved_searches %}
+      <div class="dashboard-list">
+        {% for s in saved_searches %}
+        <div class="dashboard-list-item">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <a href="/orders?{% if s.department_bucket %}department={{ s.department_bucket }}&{% endif %}{% if s.district %}district={{ s.district }}&{% endif %}{% if s.q %}q={{ s.q }}{% endif %}">
+              <strong>{{ s.label or 'Saved search' }}</strong>
+            </a>
+            <form method="post" action="/dashboard/saved-searches/{{ s.id }}/delete">
+              <button type="submit" class="ghost" style="font-size:12px;">Remove</button>
+            </form>
+          </div>
+          <span class="muted" style="font-size:12.5px;">
+            {{ s.department_bucket or 'Any department' }} &middot; {{ s.district or 'Any district' }}{% if s.q %} &middot; "{{ s.q }}"{% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="dashboard-empty">No saved searches yet. Save a search from <a href="/orders">Government Orders</a> to see it here.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel dashboard-widget">
+      <h3>Profile</h3>
+      <table>
+        <tr><th style="width:100px;">Name</th><td>{{ current_citizen.full_name }}</td></tr>
+        <tr><th>Email</th><td>{{ current_citizen.email }}</td></tr>
+        <tr><th>Mobile</th><td>{{ current_citizen.mobile or 'Not provided' }}</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-brand">
+    {{ mark(22, 'footMark') }}
+    <strong>Third Eye</strong>
+  </div>
+  <p class="footer-tagline">The Citizen's Third Eye — Making government information accessible to everyone.</p>
+  <nav class="footer-nav" aria-label="Footer navigation">
+    <a href="/">Home</a>
+    <a href="/orders">Government Orders</a>
+  </nav>
+  <p class="footer-copy">© 2026 Third Eye. Built on official Tamil Nadu government records.</p>
+</footer>
+
+<script src="/static/theme.js" defer></script>
+</body>
+</html>

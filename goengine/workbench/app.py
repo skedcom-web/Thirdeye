@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import asdict
 from typing import Annotated
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -30,14 +31,18 @@ from ..extraction import metadata as meta
 from ..extraction.text import load_pages
 from ..fetching import FetchError
 from ..operations import auth
+from ..operations import citizen as ops_citizen
 from ..operations import departments as ops_departments
 from .deps import (
+    CITIZEN_SESSION_COOKIE,
     Config,
     Conn,
+    CurrentCitizen,
     CurrentUser,
     FetcherDep,
     LoggedIn,
     RequireCertify,
+    RequireCitizen,
     RequireEscalate,
     RequireReview,
     SESSION_COOKIE,
@@ -230,10 +235,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Phase 3.1 -- public landing page and role-routed /admin entry point
     # -----------------------------------------------------------------------
     @app.get("/", response_class=HTMLResponse)
-    def landing(request: Request, conn: Conn, config: Config, current_user: CurrentUser):
+    def landing(request: Request, conn: Conn, config: Config, current_user: CurrentUser, current_citizen: CurrentCitizen):
         return templates.TemplateResponse(
             request, "landing.html",
-            {"current_user": current_user, "stats": _landing_stats(conn, config)},
+            {"current_user": current_user, "current_citizen": current_citizen, "stats": _landing_stats(conn, config)},
         )
 
     @app.get("/admin")
@@ -251,6 +256,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         conn: Conn,
         current_user: CurrentUser,
+        current_citizen: CurrentCitizen,
         department: str | None = None,
         district: str | None = None,
         q: str | None = None,
@@ -271,6 +277,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "orders_list.html",
             {
                 "current_user": current_user,
+                "current_citizen": current_citizen,
                 "records": records,
                 "total": total,
                 "page": page,
@@ -284,7 +291,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/orders/{record_id}", response_class=HTMLResponse)
-    def public_order_detail(request: Request, record_id: int, conn: Conn, current_user: CurrentUser):
+    def public_order_detail(
+        request: Request, record_id: int, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
+    ):
         record = public.get(conn, record_id)
         if record is None:
             raise HTTPException(status_code=404, detail="no such Government Order")
@@ -293,9 +302,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "orders_detail.html",
             {
                 "current_user": current_user,
+                "current_citizen": current_citizen,
                 "record": record,
                 "core_fields": meta.CORE_FIELDS,
                 "optional_fields": meta.OPTIONAL_FIELDS,
+                "is_saved": ops_citizen.is_saved(conn, current_citizen.id, record_id) if current_citizen else False,
             },
         )
 
@@ -313,6 +324,189 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path,
             media_type="application/pdf",
             headers={"content-disposition": f'inline; filename="{safe_name}"'},
+        )
+
+    # -----------------------------------------------------------------------
+    # Phase 4A -- Citizen accounts: registration, login/logout, dashboard,
+    # saved searches, bookmarks, and gated downloads. A fully separate
+    # identity system from staff auth above -- see CITIZEN_SESSION_COOKIE's
+    # docstring in deps.py and schema_citizen.sql's header comment for why.
+    # -----------------------------------------------------------------------
+    @app.get("/register", response_class=HTMLResponse)
+    def citizen_register_form(request: Request, current_citizen: CurrentCitizen, next: str = ""):
+        if current_citizen is not None:
+            return RedirectResponse("/dashboard", status_code=303)
+        return templates.TemplateResponse(request, "register.html", {"next": next})
+
+    @app.post("/register")
+    def citizen_register_submit(
+        request: Request,
+        conn: Conn,
+        full_name: Annotated[str, Form()],
+        email: Annotated[str, Form()],
+        mobile: Annotated[str, Form()] = "",
+        password: Annotated[str, Form()] = "",
+        confirm_password: Annotated[str, Form()] = "",
+        terms_accepted: Annotated[str, Form()] = "",
+        next: Annotated[str, Form()] = "",
+    ):
+        if password != confirm_password:
+            return templates.TemplateResponse(
+                request, "register.html", {"error": "Passwords do not match", "next": next}, status_code=400,
+            )
+        try:
+            citizen_id = ops_citizen.register(
+                conn, full_name=full_name, email=email, mobile=mobile or None,
+                password=password, terms_accepted=bool(terms_accepted),
+            )
+        except ops_citizen.CitizenError as exc:
+            return templates.TemplateResponse(
+                request, "register.html", {"error": str(exc), "next": next}, status_code=400,
+            )
+        new_citizen = ops_citizen.get_citizen(conn, citizen_id)
+        token = ops_citizen.create_session(conn, new_citizen)
+        destination = next if next and next != "/" else "/dashboard"
+        response = RedirectResponse(destination, status_code=303)
+        response.set_cookie(CITIZEN_SESSION_COOKIE, token, httponly=True, samesite="lax", secure=COOKIE_SECURE)
+        return response
+
+    @app.get("/citizen/login", response_class=HTMLResponse)
+    def citizen_login_form(request: Request, current_citizen: CurrentCitizen, next: str = ""):
+        if current_citizen is not None:
+            return RedirectResponse("/dashboard", status_code=303)
+        return templates.TemplateResponse(request, "citizen_login.html", {"next": next})
+
+    @app.post("/citizen/login")
+    def citizen_login_submit(
+        request: Request,
+        conn: Conn,
+        email: Annotated[str, Form()],
+        password: Annotated[str, Form()],
+        next: Annotated[str, Form()] = "",
+    ):
+        found = ops_citizen.authenticate(conn, email, password)
+        if found is None:
+            return templates.TemplateResponse(
+                request, "citizen_login.html", {"error": "Invalid email or password", "next": next},
+                status_code=401,
+            )
+        token = ops_citizen.create_session(conn, found)
+        destination = next if next and next != "/" else "/dashboard"
+        response = RedirectResponse(destination, status_code=303)
+        response.set_cookie(CITIZEN_SESSION_COOKIE, token, httponly=True, samesite="lax", secure=COOKIE_SECURE)
+        return response
+
+    @app.post("/citizen/logout")
+    def citizen_logout(request: Request, conn: Conn):
+        token = request.cookies.get(CITIZEN_SESSION_COOKIE)
+        if token:
+            ops_citizen.delete_session(conn, token)
+        response = RedirectResponse("/", status_code=303)
+        response.delete_cookie(CITIZEN_SESSION_COOKIE)
+        return response
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def citizen_dashboard(request: Request, conn: Conn, current_citizen: RequireCitizen):
+        return templates.TemplateResponse(
+            request,
+            "citizen_dashboard.html",
+            {
+                "current_citizen": current_citizen,
+                "recent_downloads": ops_citizen.recent_downloads(conn, current_citizen.id),
+                "saved_records": ops_citizen.list_saved_records(conn, current_citizen.id),
+                "saved_searches": ops_citizen.list_saved_searches(conn, current_citizen.id),
+            },
+        )
+
+    @app.post("/orders/{record_id}/save")
+    def citizen_toggle_save(record_id: int, conn: Conn, current_citizen: RequireCitizen):
+        if public.get(conn, record_id) is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        ops_citizen.toggle_saved_record(conn, current_citizen.id, record_id)
+        return RedirectResponse(f"/orders/{record_id}", status_code=303)
+
+    @app.post("/dashboard/saved-searches")
+    def citizen_save_search(
+        conn: Conn,
+        current_citizen: RequireCitizen,
+        label: Annotated[str, Form()] = "",
+        department: Annotated[str, Form()] = "",
+        district: Annotated[str, Form()] = "",
+        q: Annotated[str, Form()] = "",
+    ):
+        ops_citizen.save_search(
+            conn, current_citizen.id, label=label or None,
+            department_bucket=department or None, district=district or None, q=q or None,
+        )
+        return RedirectResponse("/dashboard", status_code=303)
+
+    @app.post("/dashboard/saved-searches/{search_id}/delete")
+    def citizen_delete_search(search_id: int, conn: Conn, current_citizen: RequireCitizen):
+        ops_citizen.delete_saved_search(conn, current_citizen.id, search_id)
+        return RedirectResponse("/dashboard", status_code=303)
+
+    def _require_any_login(request: Request, current_user: CurrentUser, current_citizen: CurrentCitizen):
+        """Downloads accept *either* audience -- the blueprint says
+        'authenticated users', not 'citizens only'. Neither cookie present
+        means genuinely anonymous, so send them to register/login."""
+        if current_user is None and current_citizen is None:
+            raise HTTPException(
+                status_code=303, headers={"Location": f"/citizen/login?next={request.url.path}"},
+            )
+        return current_user, current_citizen
+
+    @app.get("/orders/{record_id}/download/pdf")
+    def download_pdf(record_id: int, request: Request, conn: Conn, config: Config, current_user: CurrentUser, current_citizen: CurrentCitizen):
+        current_user, current_citizen = _require_any_login(request, current_user, current_citizen)
+        located = public.stored_path_for(conn, record_id)
+        if located is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        stored_path, file_name = located
+        path = repository.absolute_path(config, stored_path)
+        if not path.exists():
+            raise HTTPException(status_code=410, detail="file missing from repository")
+        ops_citizen.log_download(
+            conn, record_id=record_id, format="pdf",
+            citizen_id=current_citizen.id if current_citizen else None,
+            staff_user_id=current_user.id if current_user else None,
+        )
+        safe_name = file_name.replace('"', "")
+        return FileResponse(
+            path, media_type="application/pdf",
+            headers={"content-disposition": f'attachment; filename="{safe_name}"'},
+        )
+
+    @app.get("/orders/{record_id}/download/text")
+    def download_text(record_id: int, request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen):
+        current_user, current_citizen = _require_any_login(request, current_user, current_citizen)
+        text = public.get_full_text(conn, record_id)
+        if text is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        ops_citizen.log_download(
+            conn, record_id=record_id, format="text",
+            citizen_id=current_citizen.id if current_citizen else None,
+            staff_user_id=current_user.id if current_user else None,
+        )
+        return Response(
+            content=text, media_type="text/plain",
+            headers={"content-disposition": f'attachment; filename="go-{record_id}-extracted-text.txt"'},
+        )
+
+    @app.get("/orders/{record_id}/download/metadata")
+    def download_metadata(record_id: int, request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen):
+        current_user, current_citizen = _require_any_login(request, current_user, current_citizen)
+        record = public.get(conn, record_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        ops_citizen.log_download(
+            conn, record_id=record_id, format="metadata",
+            citizen_id=current_citizen.id if current_citizen else None,
+            staff_user_id=current_user.id if current_user else None,
+        )
+        payload = json.dumps(asdict(record), indent=2, ensure_ascii=False)
+        return Response(
+            content=payload, media_type="application/json",
+            headers={"content-disposition": f'attachment; filename="go-{record_id}-metadata.json"'},
         )
 
     # -----------------------------------------------------------------------
