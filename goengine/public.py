@@ -3,7 +3,7 @@
 Everything here is scoped to `go_records.status == 'approved'` -- the same
 boundary `review.verified_records()` already enforces. A pending or rejected
 record's existence must never be distinguishable from a nonexistent one to a
-public caller, so `get()` and `stored_path_for()` both return `None` for
+public caller, so `get()` and `document_id_for()` both return `None` for
 either case rather than raising a lookup error that could leak which.
 
 Only evidence a citizen should see crosses this module's boundary: the
@@ -185,14 +185,14 @@ def get_full_text(conn: sqlite3.Connection, record_id: int) -> str | None:
     return "\n\n----- page break -----\n\n".join(p["text"] for p in pages)
 
 
-def stored_path_for(conn: sqlite3.Connection, record_id: int) -> tuple[str, str] | None:
-    """(stored_path, file_name) for an approved record's PDF, or None -- the
+def document_id_for(conn: sqlite3.Connection, record_id: int) -> tuple[int, str] | None:
+    """(document_id, file_name) for an approved record's PDF, or None -- the
     public PDF route gates on approval status this way, not just document
     existence, so a pending/rejected document's file can't be fetched by
     guessing its record id."""
     row = conn.execute(
         """
-        SELECT d.stored_path, d.file_name
+        SELECT d.id AS document_id, d.file_name
           FROM go_records r JOIN documents d ON d.id = r.document_id
          WHERE r.id = ? AND r.status = ?
         """,
@@ -200,7 +200,7 @@ def stored_path_for(conn: sqlite3.Connection, record_id: int) -> tuple[str, str]
     ).fetchone()
     if row is None:
         return None
-    return row["stored_path"], row["file_name"]
+    return int(row["document_id"]), row["file_name"]
 
 
 def filter_options(conn: sqlite3.Connection) -> dict:

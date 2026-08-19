@@ -10,7 +10,27 @@
       Every Government Order downloaded from an authorized source, independent of review status.
     </p>
   </div>
+  {% if current_user.has_permission('manage_sources') %}
+  <form method="post" action="/ops/documents/backfill-blobs">
+    <button class="ghost" type="submit"
+            title="Copies any document still on local disk into durable Turso storage, for documents synced before that existed.">
+      Backfill missing files into Turso
+    </button>
+  </form>
+  {% endif %}
 </div>
+
+{% if backfilled is not none %}
+<div class="panel" style="margin-bottom:16px;">
+  <p style="margin:0;">
+    <span class="pill {{ 'ok' if backfill_missing == '0' else 'warn' }}">backfill complete</span>
+    {{ backfilled }} document(s) copied into durable storage.
+    {% if backfill_missing != '0' %}
+    {{ backfill_missing }} still have no file anywhere (neither Turso nor local disk) &mdash; those need a re-crawl from source.
+    {% endif %}
+  </p>
+</div>
+{% endif %}
 
 <div class="panel">
   <form method="get" action="/ops/documents" class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">

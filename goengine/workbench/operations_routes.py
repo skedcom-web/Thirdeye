@@ -500,7 +500,22 @@ def _register_documents(app: FastAPI) -> None:
                 "selected_language": language or "",
                 "selected_status": status or "",
                 "current_user": current_user,
+                "backfilled": request.query_params.get("backfilled"),
+                "backfill_missing": request.query_params.get("backfill_missing"),
             },
+        )
+
+    @app.post("/ops/documents/backfill-blobs")
+    def documents_backfill_blobs(conn: Conn, config: Config, current_user: RequireSources):
+        """One-time (repeatable) repair for documents synced before durable
+        blob storage existed: copies whatever's still on local disk into
+        Turso. Anything already missing from disk can't be recovered here --
+        it needs a genuine re-crawl from source. See repository.py's
+        backfill_blobs_from_disk for the sweep itself."""
+        result = repository.backfill_blobs_from_disk(config, conn)
+        return RedirectResponse(
+            f"/ops/documents?backfilled={len(result['backfilled'])}&backfill_missing={len(result['missing_on_disk'])}",
+            status_code=303,
         )
 
 

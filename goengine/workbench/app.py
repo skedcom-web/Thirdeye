@@ -15,7 +15,7 @@ from dataclasses import asdict
 from typing import Annotated
 
 from fastapi import FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import audit, public, registry, repository, review
@@ -312,16 +312,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/orders/{record_id}/pdf")
     def public_order_pdf(record_id: int, config: Config, conn: Conn):
-        located = public.stored_path_for(conn, record_id)
+        located = public.document_id_for(conn, record_id)
         if located is None:
             raise HTTPException(status_code=404, detail="no such Government Order")
-        stored_path, file_name = located
-        path = repository.absolute_path(config, stored_path)
-        if not path.exists():
+        document_id, file_name = located
+        payload = repository.read_bytes(config, conn, document_id)
+        if payload is None:
             raise HTTPException(status_code=410, detail="file missing from repository")
         safe_name = file_name.replace('"', "")
-        return FileResponse(
-            path,
+        return Response(
+            content=payload,
             media_type="application/pdf",
             headers={"content-disposition": f'inline; filename="{safe_name}"'},
         )
@@ -468,12 +468,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/orders/{record_id}/download/pdf")
     def download_pdf(record_id: int, request: Request, conn: Conn, config: Config, current_user: CurrentUser, current_citizen: CurrentCitizen):
         current_user, current_citizen = _require_any_login(request, current_user, current_citizen)
-        located = public.stored_path_for(conn, record_id)
+        located = public.document_id_for(conn, record_id)
         if located is None:
             raise HTTPException(status_code=404, detail="no such Government Order")
-        stored_path, file_name = located
-        path = repository.absolute_path(config, stored_path)
-        if not path.exists():
+        document_id, file_name = located
+        payload = repository.read_bytes(config, conn, document_id)
+        if payload is None:
             raise HTTPException(status_code=410, detail="file missing from repository")
         ops_citizen.log_download(
             conn, record_id=record_id, format="pdf",
@@ -481,8 +481,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             staff_user_id=current_user.id if current_user else None,
         )
         safe_name = file_name.replace('"', "")
-        return FileResponse(
-            path, media_type="application/pdf",
+        return Response(
+            content=payload, media_type="application/pdf",
             headers={"content-disposition": f'attachment; filename="{safe_name}"'},
         )
 
@@ -588,20 +588,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         document_id: int, conn: Conn, config: Config, current_user: LoggedIn, download: bool = False,
     ):
         row = conn.execute(
-            "SELECT stored_path, file_name FROM documents WHERE id = ?", (document_id,)
+            "SELECT file_name FROM documents WHERE id = ?", (document_id,)
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="document not found")
-        path = repository.absolute_path(config, row["stored_path"])
-        if not path.exists():
+        payload = repository.read_bytes(config, conn, document_id)
+        if payload is None:
             raise HTTPException(status_code=410, detail="file missing from repository")
         # Default "inline" so the reviewer sees the original beside the
         # extracted fields; ?download=1 (the Document Library's Download
         # link) switches to "attachment" so the browser saves it instead.
         safe_name = row["file_name"].replace('"', "")
         disposition = "attachment" if download else "inline"
-        return FileResponse(
-            path,
+        return Response(
+            content=payload,
             media_type="application/pdf",
             headers={"content-disposition": f'{disposition}; filename="{safe_name}"'},
         )

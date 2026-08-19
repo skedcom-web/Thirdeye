@@ -18,7 +18,7 @@ from typing import Annotated
 from fastapi import Body, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from .. import acquisition, pipeline, registry
+from .. import acquisition, pipeline, registry, repository
 from ..db import utcnow
 from ..extraction import ocr as ocrengine
 from ..operations import agent_auth, extraction_queue
@@ -108,6 +108,22 @@ def register(app: FastAPI) -> None:
         except (registry.SourceRejected, LookupError, ValueError) as exc:
             log_attempt(ok=False, document_id=None, go_record_id=None, is_new_version=False, sha256=None, error=str(exc))
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # The durable copy: local disk (even Render's persistent disk) is
+        # only scratch space the parse pipeline just read from -- see
+        # repository.store_blob's docstring. A failure here must fail the
+        # whole sync (agent_synced_at stays NULL so a retry picks it back
+        # up) rather than leave a documents row with nothing durable behind
+        # it, which is exactly the "file missing from repository" bug this
+        # table exists to close.
+        try:
+            repository.store_blob(conn, document_id, file_bytes)
+        except Exception as exc:
+            log_attempt(
+                ok=False, document_id=document_id, go_record_id=go_record_id,
+                is_new_version=is_new_version, sha256=None, error=f"durable blob store failed: {exc}",
+            )
+            raise HTTPException(status_code=500, detail=f"archived but durable blob store failed: {exc}") from exc
 
         sha256_row = conn.execute("SELECT sha256 FROM documents WHERE id = ?", (document_id,)).fetchone()
         sha256 = sha256_row["sha256"] if sha256_row else None

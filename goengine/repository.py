@@ -79,19 +79,92 @@ def absolute_path(settings: Settings, relative_path: str) -> Path:
     return settings.repository_dir / relative_path
 
 
+def store_blob(conn: sqlite3.Connection, document_id: int, payload: bytes) -> None:
+    """The durable copy of an archived document's bytes -- written to
+    whatever `conn` is connected to (local SQLite in dev/tests, Turso in
+    production; see turso_db.py), unlike `store()` above which only ever
+    writes to local disk. Local disk (even Render's persistent disk) is
+    scratch space the parse pipeline reads from mid-sync, not something a
+    citizen's download should ever depend on surviving a redeploy -- see
+    read_bytes() below for how the two are reconciled during the rollout of
+    this table on documents synced before it existed."""
+    conn.execute(
+        """
+        INSERT INTO document_blobs (document_id, data, byte_size, created_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (document_id) DO UPDATE SET
+            data = excluded.data, byte_size = excluded.byte_size, created_at = excluded.created_at
+        """,
+        (document_id, payload, len(payload), utcnow()),
+    )
+
+
+def read_blob(conn: sqlite3.Connection, document_id: int) -> bytes | None:
+    row = conn.execute(
+        "SELECT data FROM document_blobs WHERE document_id = ?", (document_id,)
+    ).fetchone()
+    return bytes(row["data"]) if row is not None else None
+
+
+def read_bytes(settings: Settings, conn: sqlite3.Connection, document_id: int) -> bytes | None:
+    """A document's bytes for serving: the durable blob if this document has
+    been synced since document_blobs was introduced, else whatever's
+    currently on local disk. The disk fallback exists only so documents
+    synced before this table existed keep working until they're backfilled
+    (see the Document Library's "Backfill" action) or naturally re-synced --
+    disk is never the durable answer, just what's left of the old behavior."""
+    blob = read_blob(conn, document_id)
+    if blob is not None:
+        return blob
+    row = conn.execute("SELECT stored_path FROM documents WHERE id = ?", (document_id,)).fetchone()
+    if row is None:
+        return None
+    path = absolute_path(settings, row["stored_path"])
+    return path.read_bytes() if path.exists() else None
+
+
+def backfill_blobs_from_disk(settings: Settings, conn: sqlite3.Connection) -> dict:
+    """One-time (repeatable) sweep: for every document with no durable blob
+    yet, copy its bytes out of local disk and into document_blobs while
+    they're still there. Safe to run any number of times -- store_blob()
+    upserts, and a document already backfilled is skipped without touching
+    disk again."""
+    rows = conn.execute(
+        """
+        SELECT d.id, d.stored_path FROM documents d
+         WHERE NOT EXISTS (SELECT 1 FROM document_blobs b WHERE b.document_id = d.id)
+         ORDER BY d.id
+        """
+    ).fetchall()
+    backfilled: list[int] = []
+    missing: list[int] = []
+    for row in rows:
+        document_id = int(row["id"])
+        path = absolute_path(settings, row["stored_path"])
+        if not path.exists():
+            missing.append(document_id)
+            continue
+        store_blob(conn, document_id, path.read_bytes())
+        backfilled.append(document_id)
+    return {"backfilled": backfilled, "missing_on_disk": missing}
+
+
 def verify_document(
     settings: Settings, conn: sqlite3.Connection, document_id: int
 ) -> tuple[bool, str]:
-    """Re-hash an archived file and compare it to the recorded fingerprint."""
+    """Re-hash an archived document's bytes and compare to the recorded
+    fingerprint. Checks the durable Turso blob first; only falls back to
+    local disk for documents synced before document_blobs existed (see
+    read_bytes())."""
     row = conn.execute(
         "SELECT stored_path, sha256 FROM documents WHERE id = ?", (document_id,)
     ).fetchone()
     if row is None:
         return False, "document not found"
-    path = absolute_path(settings, row["stored_path"])
-    if not path.exists():
+    payload = read_bytes(settings, conn, document_id)
+    if payload is None:
         return False, f"file missing from repository: {row['stored_path']}"
-    actual = sha256_file(path)
+    actual = sha256_bytes(payload)
     if actual != row["sha256"]:
         return False, f"hash mismatch: stored {actual}, expected {row['sha256']}"
     return True, "ok"
