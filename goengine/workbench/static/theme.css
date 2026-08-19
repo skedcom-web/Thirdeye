@@ -13,6 +13,11 @@
   --bg-elevated: #ffffff;
   --panel: #ffffff;
   --panel-border: #e9e3d8;
+  /* Deliberately darker/more visible than --panel-border: a card's edge
+     can be a whisper, but a form field a citizen needs to type into
+     cannot -- confirmed live, --panel-border on white read as no border
+     at all on the register form. */
+  --input-border: #c7bfaa;
   --ink: #1b1a17;
   --muted: #6f6a60;
   --accent: #1d4ed8;
@@ -52,6 +57,7 @@
   --bg-elevated: #12161f;
   --panel: #12161f;
   --panel-border: #262c3a;
+  --input-border: #3a4256;
   --ink: #e9edf5;
   --muted: #9aa4b7;
   --accent: #6d8dff;
@@ -87,6 +93,7 @@
   --bg-elevated: rgba(255, 255, 255, .42);
   --panel: rgba(255, 255, 255, .38);
   --panel-border: rgba(255, 255, 255, .55);
+  --input-border: rgba(23, 27, 46, .32);
   --ink: #171b2e;
   --muted: #4b5468;
   --accent: #6d28d9;
@@ -239,9 +246,30 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
 
-input[type=text], input[type=number], input[type=password], textarea, select {
-  border: 1px solid var(--panel-border); border-radius: var(--radius-sm); padding: 6px 8px;
+/* Every text-like input type, one list -- a selector list missing a type
+   (email/tel were missing here) means that field silently falls back to
+   the browser's own UA-stylesheet input, which looks nothing like its
+   siblings: different border, different width, different everything.
+   Confirmed live on the register form (full_name/password got this rule,
+   email/mobile silently didn't, side by side in the same form). */
+input[type=text], input[type=email], input[type=tel], input[type=url],
+input[type=search], input[type=number], input[type=password], input[type=date],
+textarea, select {
+  border: 1px solid var(--input-border); border-radius: var(--radius-sm); padding: 9px 12px;
   font: inherit; width: 100%; background: var(--bg-elevated); color: var(--ink);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+input[type=text]:hover, input[type=email]:hover, input[type=tel]:hover, input[type=url]:hover,
+input[type=search]:hover, input[type=number]:hover, input[type=password]:hover, input[type=date]:hover,
+textarea:hover, select:hover { border-color: var(--muted); }
+input[type=text]:focus, input[type=email]:focus, input[type=tel]:focus, input[type=url]:focus,
+input[type=search]:focus, input[type=number]:focus, input[type=password]:focus, input[type=date]:focus,
+textarea:focus, select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+input[type=checkbox], input[type=radio] {
+  accent-color: var(--accent); width: 16px; height: 16px; flex-shrink: 0; cursor: pointer;
 }
 form.inline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .muted { color: var(--muted); }
@@ -768,12 +796,6 @@ footer.site-footer a { color: var(--muted); }
 :root[data-theme="dark"] .cat-water    { background: #0c2f38; color: #22d3ee; }
 :root[data-theme="dark"] .cat-agri     { background: #123421; color: #4ade80; }
 :root[data-theme="dark"] .cat-community{ background: #2c1f56; color: #c084fc; }
-:root[data-theme="aurora"] .cat-roads    { background: #3a2c08; color: #fcd34d; }
-:root[data-theme="aurora"] .cat-health   { background: #3a1620; color: #fca5a5; }
-:root[data-theme="aurora"] .cat-edu      { background: #0e1f40; color: #60a5fa; }
-:root[data-theme="aurora"] .cat-water    { background: #0a2832; color: #67e8f9; }
-:root[data-theme="aurora"] .cat-agri     { background: #113328; color: #6ee7b7; }
-:root[data-theme="aurora"] .cat-community{ background: #2c2166; color: #c084fc; }
 
 .chip-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 28px 0; }
 .chip-row .chip {
@@ -1049,7 +1071,8 @@ footer.site-footer {
   .theme-toggle button { min-height: 36px; padding: 7px 11px; }
   .nav-toggle { min-width: 44px; min-height: 44px; }
 
-  input[type=text], input[type=number], input[type=password], input[type=email],
+  input[type=text], input[type=email], input[type=tel], input[type=url],
+  input[type=search], input[type=number], input[type=password], input[type=date],
   textarea, select { font-size: 16px; padding: 10px; min-height: 44px; }
 
   table { font-size: 12.5px; }
