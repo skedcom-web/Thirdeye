@@ -13,10 +13,25 @@
   </div>
 </div>
 
+{# ═══ Department filter ═════════════════════════════════════════════ #}
+<form method="get" action="/ops/review" class="form-row" style="display:flex; gap:12px; align-items:flex-end; margin-bottom:16px;">
+  <input type="hidden" name="queue" value="{{ selected_queue }}">
+  <div>
+    <label class="field-label" for="review-dept">Department</label>
+    <select name="department" id="review-dept" onchange="this.form.submit()">
+      <option value="">All departments</option>
+      {% for d in departments %}
+      <option value="{{ d }}" {% if selected_department == d %}selected{% endif %}>{{ d.replace('_', ' ')|title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
 {# ═══ Queue selector cards ══════════════════════════════════════════ #}
+{% set dept_qs = ('&department=' ~ selected_department) if selected_department else '' %}
 <div class="review-queue-grid">
   <a class="review-queue-card {% if selected_queue == 'extraction' %}active{% endif %}"
-     href="/ops/review?queue=extraction" id="review-queue-extraction-btn">
+     href="/ops/review?queue=extraction{{ dept_qs }}" id="review-queue-extraction-btn">
     <div class="rq-icon" aria-hidden="true">📄</div>
     <div class="rq-count {% if counts.extraction %}rq-count-warn{% endif %}">{{ counts.extraction }}</div>
     <div class="rq-label">Pending Review</div>
@@ -25,7 +40,7 @@
   </a>
 
   <a class="review-queue-card {% if selected_queue == 'ocr' %}active{% endif %}"
-     href="/ops/review?queue=ocr" id="review-queue-ocr-btn">
+     href="/ops/review?queue=ocr{{ dept_qs }}" id="review-queue-ocr-btn">
     <div class="rq-icon" aria-hidden="true">🔬</div>
     <div class="rq-count {% if counts.ocr %}rq-count-warn{% endif %}">{{ counts.ocr }}</div>
     <div class="rq-label">OCR Review</div>
@@ -34,7 +49,7 @@
   </a>
 
   <a class="review-queue-card {% if selected_queue == 'metadata' %}active{% endif %}"
-     href="/ops/review?queue=metadata" id="review-queue-metadata-btn">
+     href="/ops/review?queue=metadata{{ dept_qs }}" id="review-queue-metadata-btn">
     <div class="rq-icon" aria-hidden="true">📊</div>
     <div class="rq-count {% if counts.metadata %}rq-count-warn{% endif %}">{{ counts.metadata }}</div>
     <div class="rq-label">Metadata Review</div>
@@ -43,7 +58,7 @@
   </a>
 
   <a class="review-queue-card {% if selected_queue == 'failure' %}active{% endif %}"
-     href="/ops/review?queue=failure" id="review-queue-failures-btn">
+     href="/ops/review?queue=failure{{ dept_qs }}" id="review-queue-failures-btn">
     <div class="rq-icon" aria-hidden="true">⚠</div>
     <div class="rq-count {% if counts.failure %}rq-count-bad{% endif %}">{{ counts.failure }}</div>
     <div class="rq-label">Failed Documents</div>

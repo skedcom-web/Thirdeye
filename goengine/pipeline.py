@@ -292,7 +292,26 @@ def ingest_document_bytes(
         actor=actor,
     )
     crawler.set_status(conn, discovered_id, crawler.STATUS_DOWNLOADED)
-    record_id = parse_document(conn, settings, document_id, precomputed_ocr=precomputed_ocr, actor=actor)
+
+    if is_new_version:
+        record_id = parse_document(conn, settings, document_id, precomputed_ocr=precomputed_ocr, actor=actor)
+    else:
+        # Byte-identical resync (e.g. a local agent retrying a sync that
+        # already succeeded): this document_id has already been through
+        # extract_document/parse_document once. Re-running it would create
+        # a brand-new extractions + go_records row for the exact same
+        # content every single time -- which is exactly what repeatedly
+        # retrying a sync during a recovery does to the review queue: real
+        # duplicate "pending review" rows for one underlying PDF. Reuse
+        # whatever record already exists; only fall back to a real parse if
+        # this document somehow has none yet (an earlier parse attempt
+        # failed before ever reaching this point).
+        existing = conn.execute(
+            "SELECT id FROM go_records WHERE document_id = ? ORDER BY id DESC LIMIT 1", (document_id,)
+        ).fetchone()
+        record_id = int(existing["id"]) if existing is not None else parse_document(
+            conn, settings, document_id, precomputed_ocr=precomputed_ocr, actor=actor
+        )
     return document_id, record_id, is_new_version
 
 

@@ -16,8 +16,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import audit, registry, repository
 from ..db import utcnow
-from ..certification.categorize import ALL_BUCKETS
+from ..certification.categorize import ALL_BUCKETS, BUCKET_OTHER
 from ..certification.sources import certification_history
+
+REVIEW_FILTER_BUCKETS = ALL_BUCKETS + (BUCKET_OTHER,)
 from ..operations import auth
 from ..operations import departments as ops_departments
 from ..operations import email as ops_email
@@ -526,15 +528,23 @@ def _register_documents(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 def _register_review(app: FastAPI) -> None:
     @app.get("/ops/review", response_class=HTMLResponse)
-    def review_hub(request: Request, conn: Conn, current_user: LoggedIn, queue: str = ops_review.QUEUE_EXTRACTION):
+    def review_hub(
+        request: Request, conn: Conn, current_user: LoggedIn,
+        queue: str = ops_review.QUEUE_EXTRACTION, department: str | None = None,
+    ):
         if queue not in (ops_review.QUEUE_EXTRACTION, ops_review.QUEUE_OCR, ops_review.QUEUE_METADATA, ops_review.QUEUE_FAILURE):
             raise HTTPException(status_code=400, detail="unknown queue type")
+        department = department or None
+        if department is not None and department not in REVIEW_FILTER_BUCKETS:
+            raise HTTPException(status_code=400, detail="unknown department")
         return templates.TemplateResponse(
             request, "review_hub.html",
             {
-                "counts": ops_review.queue_counts(conn),
+                "counts": ops_review.queue_counts(conn, department=department),
                 "selected_queue": queue,
-                "records": ops_review.queue_by_type(conn, queue, limit=50),
+                "selected_department": department or "",
+                "departments": REVIEW_FILTER_BUCKETS,
+                "records": ops_review.queue_by_type(conn, queue, department=department, limit=50),
                 "open_escalations": ops_review.open_escalations(conn),
                 "current_user": current_user,
                 "can_escalate": current_user.has_permission("escalate_records"),

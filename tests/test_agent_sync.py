@@ -134,6 +134,20 @@ def test_sync_endpoint_idempotent_retry(client, conn, source_id, sample_pdf):
     doc_count_2 = conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
     assert doc_count_2 == doc_count_1  # no duplicate row
 
+    # A real production recovery (retrying a sync that had already
+    # succeeded, repeatedly, across a multi-day migration) exposed the
+    # actual bug here: the documents row was correctly deduplicated, but
+    # extraction re-ran on every retry regardless, quietly piling up a
+    # brand-new go_records row per retry for the exact same content --
+    # inflating the review queue with duplicates of documents that were
+    # never actually re-extracted.
+    document_id = res1.json()["document_id"]
+    assert res2.json()["go_record_id"] == res1.json()["go_record_id"]
+    record_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM go_records WHERE document_id = ?", (document_id,)
+    ).fetchone()["n"]
+    assert record_count == 1
+
 
 def test_agents_ui_generate_and_revoke(client, conn):
     login_as(client, conn)

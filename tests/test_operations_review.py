@@ -97,6 +97,29 @@ def test_queue_counts_sums_correctly(conn, parsed_documents):
     assert counts[ops_review.QUEUE_OCR] == 0
 
 
+def test_department_filter_narrows_to_matching_documents_only(conn, parsed_documents):
+    doc_id = parsed_documents[0]
+    bucket = conn.execute(
+        "SELECT department_bucket FROM document_categories WHERE document_id = ?", (doc_id,)
+    ).fetchone()["department_bucket"]
+
+    unfiltered = ops_review.queue_counts(conn)
+    filtered = ops_review.queue_counts(conn, department=bucket)
+    assert 1 <= filtered[ops_review.QUEUE_EXTRACTION] <= unfiltered[ops_review.QUEUE_EXTRACTION]
+
+    # A bucket nothing in this fixture set was classified into must return
+    # zero everywhere, not error -- distinct from the "unknown department
+    # string" case, which the HTTP route rejects outright (see below).
+    every_bucket = {
+        r["department_bucket"] for r in conn.execute("SELECT DISTINCT department_bucket FROM document_categories")
+    }
+    from goengine.certification.categorize import ALL_BUCKETS, BUCKET_OTHER
+
+    unused = [b for b in (*ALL_BUCKETS, BUCKET_OTHER) if b not in every_bucket]
+    if unused:
+        assert ops_review.queue_counts(conn, department=unused[0])[ops_review.QUEUE_EXTRACTION] == 0
+
+
 # ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
@@ -115,6 +138,22 @@ def test_review_hub_renders_all_queue_types(client):
 
 def test_review_hub_rejects_unknown_queue(client):
     response = client.get("/ops/review?queue=not_a_real_queue")
+    assert response.status_code == 400
+
+
+def test_review_hub_department_filter_via_http(client, conn, parsed_documents):
+    doc_id = parsed_documents[0]
+    bucket = conn.execute(
+        "SELECT department_bucket FROM document_categories WHERE document_id = ?", (doc_id,)
+    ).fetchone()["department_bucket"]
+
+    response = client.get(f"/ops/review?queue=extraction&department={bucket}")
+    assert response.status_code == 200
+    assert f'value="{bucket}" selected' in response.text
+
+
+def test_review_hub_rejects_unknown_department(client):
+    response = client.get("/ops/review?queue=extraction&department=not-a-real-bucket")
     assert response.status_code == 400
 
 

@@ -101,45 +101,55 @@ QUEUE_FAILURE = "failure"
 LOW_CONFIDENCE_THRESHOLD = 0.7
 
 
-def queue_by_type(conn: sqlite3.Connection, queue_type: str, *, limit: int = 100) -> list[sqlite3.Row]:
+def queue_by_type(
+    conn: sqlite3.Connection, queue_type: str, *, department: str | None = None, limit: int = 100,
+) -> list[sqlite3.Row]:
     """The existing pending-review queue, filtered/tagged by what kind of
     attention it most likely needs -- reusing Phase 1/2 data, not a new
-    parallel queue table."""
+    parallel queue table. `department` narrows to one of categorize.py's
+    department buckets (health/education/public_works/rural_development/
+    other), the same classification publish_department() gates on."""
+    dept_join = "LEFT JOIN document_categories dc ON dc.document_id = d.id"
+    dept_clause = " AND dc.department_bucket = ?" if department else ""
+    dept_params = [department] if department else []
+
     if queue_type == QUEUE_OCR:
         return conn.execute(
-            """
+            f"""
             SELECT r.id, r.status, d.file_name, s.name AS source_name, e.confidence AS extraction_confidence
               FROM go_records r
               JOIN documents d ON d.id = r.document_id
               JOIN sources s ON s.id = r.source_id
               JOIN extractions e ON e.id = r.extraction_id
-             WHERE r.status = 'pending' AND e.needs_ocr = 1
+              {dept_join}
+             WHERE r.status = 'pending' AND e.needs_ocr = 1{dept_clause}
              ORDER BY r.id
              LIMIT ?
             """,
-            (limit,),
+            (*dept_params, limit),
         ).fetchall()
 
     if queue_type == QUEUE_FAILURE:
         return conn.execute(
-            """
+            f"""
             SELECT DISTINCT r.id, r.status, d.file_name, s.name AS source_name
               FROM go_records r
               JOIN documents d ON d.id = r.document_id
               JOIN sources s ON s.id = r.source_id
               JOIN extraction_failures f ON f.document_id = d.id
-             WHERE r.status = 'pending'
+              {dept_join}
+             WHERE r.status = 'pending'{dept_clause}
              ORDER BY r.id
              LIMIT ?
             """,
-            (limit,),
+            (*dept_params, limit),
         ).fetchall()
 
     if queue_type == QUEUE_METADATA:
         # Weak on a specific field, but the text layer itself was fine --
         # distinct from an OCR problem.
         return conn.execute(
-            """
+            f"""
             SELECT r.id, r.status, d.file_name, s.name AS source_name,
                    MIN(gf.confidence) AS min_field_confidence
               FROM go_records r
@@ -147,37 +157,43 @@ def queue_by_type(conn: sqlite3.Connection, queue_type: str, *, limit: int = 100
               JOIN sources s ON s.id = r.source_id
               JOIN extractions e ON e.id = r.extraction_id
               JOIN go_fields gf ON gf.record_id = r.id AND gf.superseded_by IS NULL
-             WHERE r.status = 'pending' AND e.needs_ocr = 0
+              {dept_join}
+             WHERE r.status = 'pending' AND e.needs_ocr = 0{dept_clause}
              GROUP BY r.id
             HAVING MIN(gf.confidence) < ?
              ORDER BY min_field_confidence
              LIMIT ?
             """,
-            (LOW_CONFIDENCE_THRESHOLD, limit),
+            (*dept_params, LOW_CONFIDENCE_THRESHOLD, limit),
         ).fetchall()
 
     # QUEUE_EXTRACTION: default -- everything pending, worst text-layer first.
     return conn.execute(
-        """
+        f"""
         SELECT r.id, r.status, d.file_name, s.name AS source_name, e.confidence AS extraction_confidence
           FROM go_records r
           JOIN documents d ON d.id = r.document_id
           JOIN sources s ON s.id = r.source_id
           JOIN extractions e ON e.id = r.extraction_id
-         WHERE r.status = 'pending'
+          {dept_join}
+         WHERE r.status = 'pending'{dept_clause}
          ORDER BY e.confidence ASC
          LIMIT ?
         """,
-        (limit,),
+        (*dept_params, limit),
     ).fetchall()
 
 
-def queue_counts(conn: sqlite3.Connection) -> dict[str, int]:
+def queue_counts(conn: sqlite3.Connection, *, department: str | None = None) -> dict[str, int]:
+    dept_join = "LEFT JOIN document_categories dc ON dc.document_id = r.document_id"
+    dept_clause = " AND dc.department_bucket = ?" if department else ""
+    dept_params = (department,) if department else ()
     return {
         QUEUE_EXTRACTION: conn.execute(
-            "SELECT COUNT(*) AS n FROM go_records WHERE status = 'pending'"
+            f"SELECT COUNT(*) AS n FROM go_records r {dept_join} WHERE r.status = 'pending'{dept_clause}",
+            dept_params,
         ).fetchone()["n"],
-        QUEUE_OCR: len(queue_by_type(conn, QUEUE_OCR, limit=10_000)),
-        QUEUE_METADATA: len(queue_by_type(conn, QUEUE_METADATA, limit=10_000)),
-        QUEUE_FAILURE: len(queue_by_type(conn, QUEUE_FAILURE, limit=10_000)),
+        QUEUE_OCR: len(queue_by_type(conn, QUEUE_OCR, department=department, limit=10_000)),
+        QUEUE_METADATA: len(queue_by_type(conn, QUEUE_METADATA, department=department, limit=10_000)),
+        QUEUE_FAILURE: len(queue_by_type(conn, QUEUE_FAILURE, department=department, limit=10_000)),
     }
