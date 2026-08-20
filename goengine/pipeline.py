@@ -103,7 +103,13 @@ def parse_document(
     Returns the GO record id.
     """
     extraction_id = textengine.extract_document(
-        conn, settings, document_id, preferred_backend=preferred_backend
+        conn, settings, document_id, preferred_backend=preferred_backend,
+        # Precomputed OCR is about to override this result regardless of
+        # which backend produced it, so there's no point paying for a
+        # multi-backend quality hunt -- see extract_file's docstring. This
+        # is what made a 55-page scanned GO take three full parses server-
+        # side and time out; a real production sync exposed it.
+        try_alternates=precomputed_ocr is None,
     )
 
     if precomputed_ocr is not None:

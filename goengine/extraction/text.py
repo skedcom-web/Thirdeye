@@ -157,8 +157,20 @@ def score_confidence(pages: list[PageText], backend: str) -> tuple[float, bool]:
     return round(confidence, 4), needs_ocr
 
 
-def extract_file(path: Path, *, preferred_backend: str | None = None) -> ExtractionOutput:
-    """Extract text from a PDF, falling back through the backend list."""
+def extract_file(
+    path: Path, *, preferred_backend: str | None = None, try_alternates: bool = True,
+) -> ExtractionOutput:
+    """Extract text from a PDF, falling back through the backend list.
+
+    `try_alternates=False` skips that fallback hunt entirely -- for a
+    genuinely scanned document, every backend agrees "needs OCR" anyway, so
+    the hunt just means paying for a second and third full parse of the same
+    file to arrive at the same answer. Worth it when digital-text quality is
+    the only source of truth (the normal case); wasted, and on a large
+    image-heavy scan expensive enough to matter, when the caller already has
+    real OCR text lined up to override this result regardless of which
+    backend produced it -- see pipeline.parse_document's precomputed_ocr path.
+    """
     if not path.exists():
         raise ExtractionError(f"file not found: {path}")
 
@@ -184,7 +196,7 @@ def extract_file(path: Path, *, preferred_backend: str | None = None) -> Extract
             f"{sum(p.char_count for p in pages)} chars, confidence {confidence}"
         )
 
-        if needs_ocr and any(other != name for other, _ in candidates):
+        if try_alternates and needs_ocr and any(other != name for other, _ in candidates):
             # A near-empty result may be this backend's fault rather than a
             # scanned document; note it and let the loop try the next one.
             log.append(f"{name}: sparse text layer, trying next backend")
@@ -242,6 +254,7 @@ def extract_document(
     document_id: int,
     *,
     preferred_backend: str | None = None,
+    try_alternates: bool = True,
     actor: str = audit.SYSTEM_ACTOR,
 ) -> int:
     """Extract and persist text for an archived document. Returns extraction id."""
@@ -252,7 +265,7 @@ def extract_document(
         raise LookupError(f"no document with id {document_id}")
 
     path = absolute_path(settings, row["stored_path"])
-    output = extract_file(path, preferred_backend=preferred_backend)
+    output = extract_file(path, preferred_backend=preferred_backend, try_alternates=try_alternates)
 
     cur = conn.execute(
         """

@@ -52,6 +52,37 @@ def test_empty_text_layer_is_flagged_for_ocr():
     assert needs_ocr is True
 
 
+def test_try_alternates_false_stops_after_one_backend_on_a_scan(tmp_path, monkeypatch):
+    # A real production sync of a 55-page scanned GO timed out server-side:
+    # every backend agreed "needs OCR", so extract_file paid for a second
+    # and third full parse of the same file chasing an answer it already
+    # had. try_alternates=False is exactly the case where the caller already
+    # has real OCR text lined up (pipeline.parse_document's precomputed_ocr
+    # path) and doesn't care which backend produced the (about to be
+    # discarded) digital-layer result.
+    from goengine.extraction import text as textmod
+
+    calls: list[str] = []
+
+    def _sparse(_path):
+        calls.append("call")
+        return [textmod.PageText(1, "")], "1.0"
+
+    monkeypatch.setattr(textmod, "BACKENDS", (
+        ("pymupdf", _sparse), ("pdfplumber", _sparse), ("pypdf", _sparse),
+    ))
+    fake_pdf = tmp_path / "scan.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4 fake")
+
+    textmod.extract_file(fake_pdf, try_alternates=True)
+    assert len(calls) == 3, "default behavior must still hunt across all backends"
+
+    calls.clear()
+    output = textmod.extract_file(fake_pdf, try_alternates=False)
+    assert len(calls) == 1, "try_alternates=False must not touch the other backends at all"
+    assert output.needs_ocr is True
+
+
 def test_missing_file_raises(tmp_path):
     from goengine.extraction.text import ExtractionError
 
