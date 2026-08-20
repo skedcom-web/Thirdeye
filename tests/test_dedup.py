@@ -109,3 +109,156 @@ def test_duplicates_report_requires_manage_sources_permission(conn, settings, pa
     login_as(client, conn, username="reviewer1", role="reviewer")
     response = client.get("/ops/review/duplicates")
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Actual cleanup (deletion)
+# ---------------------------------------------------------------------------
+def test_cleanup_removes_duplicate_and_keeps_the_newest(conn, parsed_documents):
+    document_id = parsed_documents[0]
+    original_id = conn.execute(
+        "SELECT id FROM go_records WHERE document_id = ?", (document_id,)
+    ).fetchone()["id"]
+    dup_id = _add_duplicate_pending_record(conn, document_id)
+
+    result = ops_dedup.run_cleanup(conn, actor="admin")
+    assert result == {"documents_cleaned": 1, "records_removed": 1, "cleaned_at": result["cleaned_at"]}
+
+    remaining = [
+        r["id"] for r in conn.execute("SELECT id FROM go_records WHERE document_id = ?", (document_id,))
+    ]
+    assert remaining == [dup_id]  # the *newer* row survives, not necessarily the original
+    assert original_id not in remaining
+    assert ops_dedup.duplicate_summary(conn)["documents_with_duplicates"] == 0
+
+
+def test_cleanup_never_touches_approved_or_rejected_records(conn, parsed_documents):
+    from goengine import review
+
+    document_id = parsed_documents[0]
+    record_id = conn.execute("SELECT id FROM go_records WHERE document_id = ?", (document_id,)).fetchone()["id"]
+    review.approve(conn, record_id, reviewer="admin")
+    _add_duplicate_pending_record(conn, document_id)  # a pending duplicate alongside the approved one
+
+    ops_dedup.run_cleanup(conn, actor="admin")
+
+    # The approved record and its evidence are completely untouched --
+    # cleanup only ever removes still-pending duplicates.
+    approved_row = conn.execute("SELECT status FROM go_records WHERE id = ?", (record_id,)).fetchone()
+    assert approved_row["status"] == "approved"
+    assert conn.execute("SELECT COUNT(*) AS n FROM go_fields WHERE record_id = ?", (record_id,)).fetchone()["n"] > 0
+
+
+def test_cleanup_is_idempotent(conn, parsed_documents):
+    document_id = parsed_documents[0]
+    _add_duplicate_pending_record(conn, document_id)
+
+    first = ops_dedup.run_cleanup(conn, actor="admin")
+    assert first["records_removed"] == 1
+
+    second = ops_dedup.run_cleanup(conn, actor="admin")
+    assert second == {"documents_cleaned": 0, "records_removed": 0, "cleaned_at": second["cleaned_at"]}
+
+
+def test_cleanup_removes_every_dependent_row_and_nulls_the_sync_log(conn, parsed_documents):
+    from goengine.operations import agent_auth
+
+    document_id = parsed_documents[0]
+    # The original (lowest id) is the one that gets removed -- the
+    # freshly-inserted duplicate always has the higher id and is what
+    # run_cleanup treats as "newest, keep it". Attach the dependent rows to
+    # whichever one is actually slated for removal, not the survivor.
+    original_id = conn.execute("SELECT id FROM go_records WHERE document_id = ?", (document_id,)).fetchone()["id"]
+    _add_duplicate_pending_record(conn, document_id)
+    to_remove_id = original_id
+    extraction_id = conn.execute(
+        "SELECT extraction_id FROM go_records WHERE id = ?", (to_remove_id,)
+    ).fetchone()["extraction_id"]
+
+    # Evidence + escalation hanging off the record that will be removed.
+    conn.execute(
+        """
+        INSERT INTO go_fields (record_id, field_name, value, normalized_value, source_page, source_text,
+                                confidence, method, created_at)
+        VALUES (?, 'go_number', 'x', 'x', 1, 'x', 0.9, 'test', ?)
+        """,
+        (to_remove_id, utcnow()),
+    )
+    conn.execute(
+        "INSERT INTO escalations (record_id, escalated_by, escalated_at, reason) VALUES (?, 'a', ?, 'r')",
+        (to_remove_id, utcnow()),
+    )
+    # OCR data hanging off that record's own extraction.
+    cur = conn.execute(
+        "INSERT INTO ocr_runs (extraction_id, languages, pages_ocred, ran_at) VALUES (?, 'eng', 1, ?)",
+        (extraction_id, utcnow()),
+    )
+    ocr_run_id = int(cur.lastrowid)
+    conn.execute(
+        "INSERT INTO ocr_pages (ocr_run_id, page_number, text) VALUES (?, 1, 'x')", (ocr_run_id,)
+    )
+    # A historical sync-log entry that pointed at this exact record.
+    key_id, _ = agent_auth.generate_key(conn, label="test", created_by="admin")
+    conn.execute(
+        "INSERT INTO agent_sync_log (agent_key_id, go_record_id, ok, synced_at) VALUES (?, ?, 1, ?)",
+        (key_id, to_remove_id, utcnow()),
+    )
+
+    ops_dedup.run_cleanup(conn, actor="admin")
+
+    assert conn.execute("SELECT COUNT(*) AS n FROM go_fields WHERE record_id = ?", (to_remove_id,)).fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM escalations WHERE record_id = ?", (to_remove_id,)).fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM ocr_runs WHERE extraction_id = ?", (extraction_id,)).fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM ocr_pages WHERE ocr_run_id = ?", (ocr_run_id,)).fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM extractions WHERE id = ?", (extraction_id,)).fetchone()["n"] == 0
+    # The log entry itself survives as history -- only its dangling
+    # reference is cleared, not the row.
+    log_row = conn.execute("SELECT go_record_id FROM agent_sync_log WHERE agent_key_id = ?", (key_id,)).fetchone()
+    assert log_row is not None
+    assert log_row["go_record_id"] is None
+
+
+def test_cleanup_writes_audit_trail(conn, parsed_documents):
+    from goengine import audit
+
+    document_id = parsed_documents[0]
+    _add_duplicate_pending_record(conn, document_id)
+    ops_dedup.run_cleanup(conn, actor="admin")
+
+    entries = audit.trail(conn, entity_type="document", entity_id=document_id)
+    assert any(e.action == "records.deduplicated" for e in entries)
+
+
+def test_cleanup_via_http_requires_confirmation(client, conn, parsed_documents):
+    document_id = parsed_documents[0]
+    _add_duplicate_pending_record(conn, document_id)
+
+    missing_confirm = client.post("/ops/review/duplicates/cleanup", data={})
+    assert missing_confirm.status_code == 400
+    assert ops_dedup.duplicate_summary(conn)["documents_with_duplicates"] == 1  # untouched
+
+
+def test_cleanup_via_http_succeeds_with_confirmation(client, conn, parsed_documents):
+    document_id = parsed_documents[0]
+    _add_duplicate_pending_record(conn, document_id)
+
+    response = client.post(
+        "/ops/review/duplicates/cleanup", data={"confirm": "yes"}, follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "cleaned=1" in response.headers["location"]
+
+    follow = client.get(response.headers["location"])
+    assert "cleanup complete" in follow.text
+    assert ops_dedup.duplicate_summary(conn)["documents_with_duplicates"] == 0
+
+
+def test_cleanup_via_http_requires_manage_sources_permission(conn, settings, parsed_documents):
+    document_id = parsed_documents[0]
+    _add_duplicate_pending_record(conn, document_id)
+
+    client = TestClient(create_app(settings))
+    login_as(client, conn, username="reviewer1", role="reviewer")
+    response = client.post("/ops/review/duplicates/cleanup", data={"confirm": "yes"})
+    assert response.status_code == 403
+    assert ops_dedup.duplicate_summary(conn)["documents_with_duplicates"] == 1  # untouched

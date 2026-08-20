@@ -7,13 +7,23 @@
     <div class="occ-page-kicker">Operations Control Center</div>
     <h1 class="occ-page-title">Duplicate Review Records</h1>
     <p class="muted" style="margin:4px 0 0; max-width:760px;">
-      Read-only report. Retrying a document sync used to re-run extraction every time, even when the
-      content hadn't changed, creating a brand-new pending review record for the same document each
-      retry. That's fixed now -- this only lists what's <em>already</em> in the database from before the
-      fix. Nothing here has been changed or removed.
+      Retrying a document sync used to re-run extraction every time, even when the content hadn't
+      changed, creating a brand-new pending review record for the same document each retry. That's
+      fixed now -- this lists what's <em>already</em> in the database from before the fix. Viewing this
+      page never changes anything; only the confirmed cleanup action below does.
     </p>
   </div>
 </div>
+
+{% if cleaned is not none %}
+<div class="panel" style="margin-bottom:16px;">
+  <p style="margin:0;">
+    <span class="pill ok">cleanup complete</span>
+    Removed {{ cleaned }} duplicate record(s) across {{ cleaned_docs }} document(s). The most recent
+    record for each was kept; nothing approved or rejected was touched.
+  </p>
+</div>
+{% endif %}
 
 <div class="panel" style="margin-bottom:16px;">
   <div style="display:flex; gap:32px; flex-wrap:wrap;">
@@ -36,6 +46,22 @@
 </div>
 
 {% if summary.groups %}
+<div class="panel" style="margin-bottom:16px;">
+  <h2>Run cleanup</h2>
+  <p class="muted" style="font-size:13px; margin-top:4px;">
+    Permanently removes the {{ summary.records_removable }} extra record(s) listed below, keeping the
+    most recent copy of each document. Never touches a record already approved or rejected.
+    This can't be undone.
+  </p>
+  <form method="post" action="/ops/review/duplicates/cleanup" style="margin-top:8px;">
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+      <input type="checkbox" name="confirm" value="yes" required>
+      I've reviewed the table below and want to remove these {{ summary.records_removable }} duplicate record(s) now.
+    </label>
+    <button class="danger" type="submit" style="margin-top:12px;">Remove Duplicates</button>
+  </form>
+</div>
+
 <div class="panel">
   <h2>Documents with duplicate pending records</h2>
   <table>

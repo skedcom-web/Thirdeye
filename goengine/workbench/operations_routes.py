@@ -554,15 +554,39 @@ def _register_review(app: FastAPI) -> None:
 
     @app.get("/ops/review/duplicates", response_class=HTMLResponse)
     def review_duplicates(request: Request, conn: Conn, current_user: LoggedIn):
-        """Read-only report: which documents currently have more than one
-        'pending' go_records row, almost certainly from retrying a sync
-        before that was fixed to stop happening. Reports only -- removing
-        anything is a deliberate follow-up action, not offered here."""
+        """Report: which documents currently have more than one 'pending'
+        go_records row, almost certainly from retrying a sync before that
+        was fixed to stop happening. The cleanup action below it is opt-in
+        and requires its own confirmation -- viewing this page alone never
+        changes anything."""
         if not current_user.has_permission("manage_sources"):
             raise HTTPException(status_code=403, detail="Not authorized")
         return templates.TemplateResponse(
             request, "review_duplicates.html",
-            {"summary": ops_dedup.duplicate_summary(conn), "current_user": current_user},
+            {
+                "summary": ops_dedup.duplicate_summary(conn),
+                "current_user": current_user,
+                "cleaned": request.query_params.get("cleaned"),
+                "cleaned_docs": request.query_params.get("cleaned_docs"),
+            },
+        )
+
+    @app.post("/ops/review/duplicates/cleanup")
+    def review_duplicates_cleanup(
+        conn: Conn, current_user: LoggedIn, confirm: Annotated[str | None, Form()] = None,
+    ):
+        """Actually removes the duplicate pending records the report above
+        lists. Requires the confirmation checkbox -- this permanently
+        deletes rows, even though it never touches an approved/rejected
+        record."""
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        if confirm != "yes":
+            raise HTTPException(status_code=400, detail="confirmation required")
+        result = ops_dedup.run_cleanup(conn, actor=current_user.username)
+        return RedirectResponse(
+            f"/ops/review/duplicates?cleaned={result['records_removed']}&cleaned_docs={result['documents_cleaned']}",
+            status_code=303,
         )
 
     @app.post("/ops/review/escalations/{escalation_id}/resolve")
