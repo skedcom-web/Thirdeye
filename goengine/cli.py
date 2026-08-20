@@ -265,11 +265,9 @@ def _sync_documents(
     # real parse + a Turso write server-side) is exactly what overloaded a
     # small Render instance the first time this ran -- 502/503s partway
     # through, then a Cloudflare "Just a moment" 429 challenge once the edge
-    # decided the traffic looked abusive. A small pause between requests,
-    # and a longer one whenever the server signals it's struggling, keeps
-    # this from happening again.
-    _OVERLOAD_STATUS = {429, 502, 503}
-
+    # decided the traffic looked abusive. A small pause between every
+    # request, and a longer one after any failure (including a plain
+    # timeout -- see below), keeps this from happening again.
     results: list[list] = []
     for row in rows:
         document_id = int(row["id"])
@@ -309,6 +307,7 @@ def _sync_documents(
             "ocr_pages": ocr_pages_payload,
         }
         file_path = repository.absolute_path(settings, row["stored_path"])
+        failed = False
         try:
             with open(file_path, "rb") as fh:
                 resp = http_client.post(
@@ -329,14 +328,19 @@ def _sync_documents(
                 error = f"HTTP {resp.status_code}: {resp.text[:150]}"
                 conn.execute("UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id))
                 results.append([row["file_name"], "failed", "", error])
-                if resp.status_code in _OVERLOAD_STATUS:
-                    time.sleep(8)  # let an overloaded server/edge recover before hammering it again
+                failed = True
         except Exception as exc:  # httpx.HTTPError or a filesystem error -- never abort the batch
+            # A client-side timeout is just as strong a distress signal as an
+            # explicit 429/502/503 -- a real production run showed one large
+            # document (5MB, 55 OCR'd pages) time out and then take the
+            # *next* few documents down with it, because nothing paused
+            # before hammering the still-recovering server again.
             error = str(exc)
             conn.execute("UPDATE documents SET agent_sync_error = ? WHERE id = ?", (error, document_id))
             results.append([row["file_name"], "failed", "", error])
+            failed = True
 
-        time.sleep(0.75)  # polite pacing between uploads, not just on failure
+        time.sleep(15 if failed else 0.75)  # give a struggling server real room to recover
 
     return results
 
