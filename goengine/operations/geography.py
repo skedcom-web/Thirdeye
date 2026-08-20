@@ -213,6 +213,26 @@ def applicable_sources(conn: sqlite3.Connection, district_id: int) -> list[sqlit
     ).fetchall()
 
 
+def districts_affected_by_source(conn: sqlite3.Connection, source_id: int) -> list[int]:
+    """Districts whose certification_status depends on this source -- the
+    reverse of applicable_sources(): a district-scoped source affects just
+    its own district; a state-wide source (district_id NULL) affects every
+    district in that state. Lets a source-certification action refresh
+    exactly the districts it could have changed, instead of requiring a
+    separate manual "Refresh Certification" click per district that was
+    easy to forget existed."""
+    row = conn.execute("SELECT district_id, state_id FROM sources WHERE id = ?", (source_id,)).fetchone()
+    if row is None:
+        return []
+    if row["district_id"] is not None:
+        return [int(row["district_id"])]
+    return [
+        int(r["id"]) for r in conn.execute(
+            "SELECT id FROM districts WHERE state_id = ?", (row["state_id"],)
+        ).fetchall()
+    ]
+
+
 def refresh_district_certification(conn: sqlite3.Connection, district_id: int, *, actor: str) -> str:
     """Recompute a district's certification_status from its applicable
     sources' own Phase 2 certification results. Call after any certification

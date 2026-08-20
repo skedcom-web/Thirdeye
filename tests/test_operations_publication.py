@@ -166,6 +166,38 @@ def test_reviewer_cannot_publish(conn, settings, district_id, parsed_documents):
     assert response.status_code == 403
 
 
+def test_certifying_a_source_auto_refreshes_its_district(conn, settings, district_id):
+    # Publication Control used to stay stuck on PENDING even after certifying
+    # every source in a district, because certifying a source never told the
+    # district to recompute its own certification_status -- an admin had to
+    # separately remember a "Refresh Certification" button on a different
+    # page. Certifying via HTTP should now flip the district's status with
+    # no extra step. An unreachable source (empty OfflineFetcher, nothing
+    # registered) is enough to prove this -- FAILED still isn't PENDING.
+    from fastapi.testclient import TestClient
+
+    from goengine.fetching import OfflineFetcher
+    from goengine.operations import sources as ops_sources
+    from goengine.workbench.app import create_app, get_fetcher
+
+    district = geography.get_district(conn, district_id)
+    src_id = ops_sources.create_source(
+        conn, name="Chennai Portal", department="X", url="https://cms.tn.gov.in/chennai",
+        source_type="go_portal", state_id=district.state_id, district_id=district_id, actor="admin",
+    )
+    assert geography.get_district(conn, district_id).certification_status == "PENDING"
+
+    app = create_app(settings)
+    app.dependency_overrides[get_fetcher] = lambda: OfflineFetcher()
+    client = TestClient(app)
+    login_as(client, conn)
+
+    response = client.post(f"/certification/sources/{src_id}/certify", follow_redirects=False)
+    assert response.status_code == 303
+
+    assert geography.get_district(conn, district_id).certification_status == "FAILED"
+
+
 def test_state_admin_cannot_publish_another_states_district(conn, settings, district_id, parsed_documents):
     from goengine.operations import auth as ops_auth
 

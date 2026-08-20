@@ -27,7 +27,7 @@ from .discovery import crawler
 from .discovery.adapters import available as available_adapters
 from .extraction.metadata import ALL_FIELDS
 from .fetching import HttpFetcher, OfflineFetcher
-from .operations import extraction_queue
+from .operations import extraction_queue, geography
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -865,6 +865,16 @@ def cmd_certify_sources(args: argparse.Namespace) -> int:
                     conn, settings, fetcher, max_pages=args.max_pages,
                     download_sample=args.download_sample,
                 )
+
+            # Same reasoning as the web certify route: a source's result is
+            # what districts.certification_status is computed from, so
+            # publication stays correctly gated (or correctly unblocked)
+            # without a separate manual refresh step per district.
+            affected_districts: set[int] = set()
+            for r in results:
+                affected_districts.update(geography.districts_affected_by_source(conn, r.source_id))
+            for district_id in affected_districts:
+                geography.refresh_district_certification(conn, district_id, actor="cli")
     except LookupError as exc:
         print(str(exc), file=sys.stderr)
         return 2

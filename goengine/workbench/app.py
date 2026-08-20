@@ -844,11 +844,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/certification/sources/{source_id}/certify")
     def certify_one_source(source_id: int, conn: Conn, config: Config, fetcher: FetcherDep, current_user: RequireCertify):
+        from ..operations import geography
         from ..operations.sources import advance_lifecycle_on_certification
 
         try:
             result = certify_source(conn, config, fetcher, source_id, actor=current_user.username)
             advance_lifecycle_on_certification(conn, source_id, result.result)
+            # A source's certification result is what districts.certification_status
+            # is computed from -- refresh every district this source counts
+            # toward now, so Publication Control reflects it immediately
+            # instead of staying stuck on PENDING until someone separately
+            # remembers to click "Refresh Certification" on the Districts page.
+            for district_id in geography.districts_affected_by_source(conn, source_id):
+                geography.refresh_district_certification(conn, district_id, actor=current_user.username)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except FetchError as exc:

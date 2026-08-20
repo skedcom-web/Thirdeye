@@ -116,6 +116,29 @@ def test_district_scoped_source_does_not_leak_to_other_districts(conn, state_id)
     assert len(geography.applicable_sources(conn, d2)) == 0
 
 
+def test_districts_affected_by_source_is_the_reverse_of_applicable_sources(conn, state_id):
+    from goengine import registry
+
+    d1 = geography.add_district(conn, state_id=state_id, name="Chennai", code="CHE", actor="admin")
+    d2 = geography.add_district(conn, state_id=state_id, name="Madurai", code="MDU", actor="admin")
+
+    scoped_id = registry.add_source(
+        conn, name="Chennai Collectorate", department="Chennai", url="https://cms.tn.gov.in/chennai",
+        source_type="department_site",
+    )
+    conn.execute("UPDATE sources SET state_id = ?, district_id = ? WHERE id = ?", (state_id, d1, scoped_id))
+    assert geography.districts_affected_by_source(conn, scoped_id) == [d1]
+
+    statewide_id = registry.add_source(
+        conn, name="TN GO Portal", department="All", url="https://cms.tn.gov.in/go-search",
+        source_type="go_portal",
+    )
+    conn.execute("UPDATE sources SET state_id = ? WHERE id = ?", (state_id, statewide_id))
+    assert sorted(geography.districts_affected_by_source(conn, statewide_id)) == sorted([d1, d2])
+
+    assert geography.districts_affected_by_source(conn, 999999) == []
+
+
 def test_district_certification_reflects_mixed_source_status(conn, state_id):
     from goengine import registry
 
