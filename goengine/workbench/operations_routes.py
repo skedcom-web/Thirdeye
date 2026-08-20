@@ -9,9 +9,10 @@ established there (see deps.py).
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import audit, registry, repository
@@ -21,6 +22,7 @@ from ..certification.sources import certification_history
 
 REVIEW_FILTER_BUCKETS = ALL_BUCKETS + (BUCKET_OTHER,)
 from ..operations import auth
+from ..operations import backup as ops_backup
 from ..operations import dedup as ops_dedup
 from ..operations import departments as ops_departments
 from ..operations import email as ops_email
@@ -29,6 +31,7 @@ from ..operations import dashboard as ops_dashboard
 from ..operations import health as ops_health
 from ..operations import jobs as ops_jobs
 from ..operations import publication as ops_publication
+from ..operations import reset as ops_reset
 from ..operations import review as ops_review
 from ..operations import sources as ops_sources
 from ..discovery import crawler
@@ -66,6 +69,7 @@ def register(app: FastAPI) -> None:
     _register_agents(app)
     _register_diagnostics(app)
     _register_notifications(app)
+    _register_system_reset(app)
 
 
 # ---------------------------------------------------------------------------
@@ -1266,6 +1270,57 @@ def _get_failure_stats(conn: sqlite3.Connection, days_ago: int) -> dict:
         "ocr": ocr_failures,
         "publication": pub_failures,
     }
+
+
+# ---------------------------------------------------------------------------
+# Backup export + production reset. Reset never touches what the schema
+# treats as permanent (documents/document_blobs, audit_log, the golden
+# dataset, source_versions) -- see operations/reset.py's module docstring.
+# ---------------------------------------------------------------------------
+def _register_system_reset(app: FastAPI) -> None:
+    @app.get("/ops/backup/download")
+    def download_backup(conn: Conn, current_user: LoggedIn):
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        snapshot = ops_backup.export_review_snapshot(conn)
+        filename = f"thirdeye-review-backup-{utcnow().replace(':', '-')}.json"
+        return Response(
+            content=json.dumps(snapshot, indent=2, ensure_ascii=False, default=str),
+            media_type="application/json",
+            headers={"content-disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/ops/system-reset", response_class=HTMLResponse)
+    def system_reset_page(request: Request, conn: Conn, current_user: LoggedIn):
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        pending = conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"]
+        return templates.TemplateResponse(
+            request, "system_reset.html",
+            {
+                "current_user": current_user,
+                "go_records_count": pending,
+                "reset_result": None,
+            },
+        )
+
+    @app.post("/ops/system-reset/run")
+    def run_system_reset(
+        request: Request, conn: Conn, current_user: LoggedIn, confirm: Annotated[str, Form()],
+    ):
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        if confirm != "RESET":
+            raise HTTPException(status_code=400, detail='confirmation phrase must be exactly "RESET"')
+        result = ops_reset.reset_for_production(conn, actor=current_user.username)
+        return templates.TemplateResponse(
+            request, "system_reset.html",
+            {
+                "current_user": current_user,
+                "go_records_count": 0,
+                "reset_result": result,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}System Reset &middot; Third Eye{% endblock %}
+{% block content %}
+
+<h2>Reset for Production Launch</h2>
+<p class="muted" style="margin-top:4px; max-width:760px;">
+  Clears every extraction, OCR result, review decision, and publication status so the platform starts
+  genuinely fresh -- but does not delete the archived PDFs themselves (that's blocked by the database
+  schema on purpose, the same way the audit trail can't be erased). Because the documents stay archived,
+  nothing needs re-downloading: the next extraction run picks them straight back up and re-parses them
+  into brand-new records for review. Your source registry, geography, staff accounts, and Notifications
+  settings are never touched.
+</p>
+
+{% if reset_result %}
+<div class="panel" style="margin-top:16px; border-left: 5px solid var(--ok);">
+  <h3>Reset complete</h3>
+  <p style="margin:8px 0 0;">
+    <span class="pill ok">done</span>
+    Removed {{ reset_result.go_records_removed }} GO record(s). {{ reset_result.districts_reset }} district(s)
+    and {{ reset_result.departments_reset }} department(s) reverted to unpublished. Archived PDFs were left
+    untouched, as designed.
+  </p>
+  <p class="muted" style="font-size:12px; margin-top:8px;">
+    Reset at {{ reset_result.reset_at }}. Recorded permanently in the audit trail.
+  </p>
+</div>
+{% endif %}
+
+<div class="panel" style="margin-top:16px; max-width:560px;">
+  <h3>1. Download a backup first</h3>
+  <p class="muted" style="font-size:13px; margin-top:4px;">
+    Exports every GO record, its extracted fields, and its review history as a JSON file -- everything a
+    reset removes. Available any time, not just before a reset; use it periodically to keep an offline
+    record before the database grows large. The archived PDFs are not included (they're never at risk --
+    see above), so this stays small and fast regardless of how many documents you have.
+  </p>
+  <a class="btn btn-secondary" href="/ops/backup/download">Download Backup (JSON)</a>
+</div>
+
+<div class="panel" style="margin-top:16px; max-width:560px; border-left: 5px solid var(--bad);">
+  <h3>2. Reset</h3>
+  <p style="margin:8px 0;">
+    <span class="pill {{ 'bad' if go_records_count else 'ok' }}">{{ go_records_count }} GO record(s) currently in the system</span>
+  </p>
+  <p class="muted" style="font-size:13px;">
+    This permanently removes all of them, along with every review decision and publication status. It
+    cannot be undone from within the app -- only the JSON backup above (or Turso's own point-in-time
+    restore, if your plan includes one) could reconstruct this afterward.
+  </p>
+  <form method="post" action="/ops/system-reset/run" style="margin-top:12px;">
+    <label class="field-label" for="reset-confirm">Type <span class="mono">RESET</span> to confirm</label>
+    <input type="text" name="confirm" id="reset-confirm" required autocomplete="off" style="max-width:200px;">
+    <button class="danger" type="submit" style="margin-top:12px; display:block;">Reset for Production</button>
+  </form>
+</div>
+
+{% endblock %}
