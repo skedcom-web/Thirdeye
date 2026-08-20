@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Villages — Third Eye</title>
+<meta name="description" content="Browse Tamil Nadu Government Orders by village — coming soon on Third Eye.">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=8">
+{% from "_partials.html" import mark, theme_init_script, public_header %}
+{{ theme_init_script() }}
+</head>
+<body>
+
+{{ public_header(current_user=current_user, current_citizen=current_citizen) }}
+
+<section class="section tight" aria-labelledby="villages-heading">
+  <div class="section-kicker" aria-hidden="true">Coming Soon</div>
+  <h1 id="villages-heading" class="section-title">Browse by Village</h1>
+  <p class="section-sub">
+    Village-level browsing is on the roadmap — Government Orders will be searchable down to the
+    village once that level of detail is captured during extraction.
+  </p>
+
+  <div class="panel orders-empty">
+    <p style="font-size:18px; font-weight:600; margin:0 0 8px;">Not available yet</p>
+    <p class="muted" style="margin:0 0 16px;">
+      In the meantime, every Government Order can already be browsed and searched by district.
+    </p>
+    <a class="btn-lg btn-primary" href="/orders">Browse by District →</a>
+  </div>
+</section>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-brand">
+    {{ mark(22, 'footMark') }}
+    <strong>Third Eye</strong>
+  </div>
+  <p class="footer-tagline">The Citizen's Third Eye — Making government information accessible to everyone.</p>
+  <nav class="footer-nav" aria-label="Footer navigation">
+    <a href="/">Home</a>
+    <a href="/orders">Government Orders</a>
+    <a href="/login">Administrator Sign In</a>
+  </nav>
+  <p class="footer-copy">© 2026 Third Eye. Built on official Tamil Nadu government records.</p>
+</footer>
+
+<script src="/static/theme.js?v=8" defer></script>
+</body>
+</html>

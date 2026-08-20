@@ -109,6 +109,20 @@ def test_department_and_district_filters_narrow_results(public_client, conn):
     assert "No verified Government Orders" in response.text
 
 
+def test_taluks_and_villages_are_public_placeholders(public_client):
+    # Geography stops at district today -- these are nav-consistency
+    # placeholders, not real browsable data yet, but must still be reachable
+    # without login and never 404/500.
+    taluks = public_client.get("/taluks")
+    assert taluks.status_code == 200
+    assert "Coming Soon" in taluks.text
+    assert 'href="/orders"' in taluks.text  # points back at what does exist
+
+    villages = public_client.get("/villages")
+    assert villages.status_code == 200
+    assert "Coming Soon" in villages.text
+
+
 def test_search_query_matches_go_number(public_client, conn):
     record_id = _record_ids(conn)[0]
     review.approve(conn, record_id, reviewer="admin")

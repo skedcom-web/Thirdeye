@@ -20,6 +20,7 @@ from ..certification.categorize import ALL_BUCKETS
 from ..certification.sources import certification_history
 from ..operations import auth
 from ..operations import departments as ops_departments
+from ..operations import email as ops_email
 from ..operations import geography
 from ..operations import dashboard as ops_dashboard
 from ..operations import health as ops_health
@@ -61,6 +62,7 @@ def register(app: FastAPI) -> None:
     _register_users(app)
     _register_agents(app)
     _register_diagnostics(app)
+    _register_notifications(app)
 
 
 # ---------------------------------------------------------------------------
@@ -1216,4 +1218,69 @@ def _get_failure_stats(conn: sqlite3.Connection, days_ago: int) -> dict:
         "ocr": ocr_failures,
         "publication": pub_failures,
     }
+
+
+# ---------------------------------------------------------------------------
+# Notifications settings (EmailJS credentials + a test send). Only the send
+# primitive and its credential storage live here -- deciding when/to whom an
+# actual citizen-facing email (a digest, an alert) gets sent is a separate,
+# not-yet-scoped feature.
+# ---------------------------------------------------------------------------
+def _register_notifications(app: FastAPI) -> None:
+    @app.get("/ops/notifications", response_class=HTMLResponse)
+    def notifications_hub(request: Request, conn: Conn, current_user: LoggedIn):
+        cfg = ops_email.get_config(conn)
+        return templates.TemplateResponse(
+            request, "notifications.html",
+            {
+                "current_user": current_user,
+                "service_id": cfg.get("emailjs_service_id", ""),
+                "template_id": cfg.get("emailjs_template_id", ""),
+                "public_key": cfg.get("emailjs_public_key", ""),
+                "private_key": cfg.get("emailjs_private_key", ""),
+                "is_configured": ops_email.is_configured(conn),
+                "test_result": None,
+            },
+        )
+
+    @app.post("/ops/notifications/emailjs")
+    def notifications_save(
+        conn: Conn, current_user: LoggedIn,
+        service_id: Annotated[str, Form()], template_id: Annotated[str, Form()],
+        public_key: Annotated[str, Form()], private_key: Annotated[str, Form()] = "",
+    ):
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        ops_email.save_config(
+            conn, service_id=service_id, template_id=template_id,
+            public_key=public_key, private_key=private_key,
+        )
+        return RedirectResponse("/ops/notifications", status_code=303)
+
+    @app.post("/ops/notifications/test-email", response_class=HTMLResponse)
+    def notifications_test(request: Request, conn: Conn, current_user: LoggedIn, to_email: Annotated[str, Form()]):
+        cfg = ops_email.get_config(conn)
+        try:
+            ok, message = ops_email.send_email(
+                conn, to_email=to_email,
+                template_params={
+                    "subject": "Third Eye — Test Notification",
+                    "message": "This is a test email from Third Eye's Notifications settings. "
+                               "If you received this, EmailJS is configured correctly.",
+                },
+            )
+        except ops_email.EmailNotConfigured as exc:
+            ok, message = False, str(exc)
+        return templates.TemplateResponse(
+            request, "notifications.html",
+            {
+                "current_user": current_user,
+                "service_id": cfg.get("emailjs_service_id", ""),
+                "template_id": cfg.get("emailjs_template_id", ""),
+                "public_key": cfg.get("emailjs_public_key", ""),
+                "private_key": cfg.get("emailjs_private_key", ""),
+                "is_configured": ops_email.is_configured(conn),
+                "test_result": {"ok": ok, "message": message},
+            },
+        )
 

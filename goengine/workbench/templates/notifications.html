@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Notifications &middot; Thirdeye{% endblock %}
+{% block content %}
+
+<h2>Notifications</h2>
+<p class="muted" style="margin-top:4px;">
+  Third Eye sends email through <a href="https://www.emailjs.com" target="_blank" rel="noopener">EmailJS</a> rather than
+  its own mail server. Create a Service and Template in your EmailJS account, then enter their IDs below. Your
+  EmailJS template can use the variables <code>to_email</code>, <code>subject</code>, and <code>message</code> --
+  the test email below sends those three.
+</p>
+
+<div class="panel" style="margin-top:16px; max-width:520px;">
+  <h3>EmailJS Credentials</h3>
+  <form method="post" action="/ops/notifications/emailjs" style="display:flex; flex-direction:column; gap:12px; margin-top:8px;">
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label class="muted" style="font-size:12px;" for="service-id">Service ID</label>
+      <input type="text" name="service_id" id="service-id" value="{{ service_id }}" placeholder="service_xxxxxxx" required>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label class="muted" style="font-size:12px;" for="template-id">Template ID</label>
+      <input type="text" name="template_id" id="template-id" value="{{ template_id }}" placeholder="template_xxxxxxx" required>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label class="muted" style="font-size:12px;" for="public-key">Public Key</label>
+      <input type="text" name="public_key" id="public-key" value="{{ public_key }}" placeholder="user_xxxxxxxxxxxxxxxx" required>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label class="muted" style="font-size:12px;" for="private-key">Private Key <span style="font-weight:400;">(optional -- only if EmailJS's "API requests" restriction is enabled)</span></label>
+      <input type="text" name="private_key" id="private-key" value="{{ private_key }}" placeholder="leave blank if not using API request restriction">
+    </div>
+    <div>
+      <button type="submit" class="btn btn-primary">Save Settings</button>
+    </div>
+  </form>
+  <p class="muted" style="font-size:12px; margin-top:12px;">
+    Status:
+    {% if is_configured %}
+    <span class="pill ok">configured</span>
+    {% else %}
+    <span class="pill warn">not yet configured</span>
+    {% endif %}
+  </p>
+</div>
+
+<div class="panel" style="margin-top:16px; max-width:520px;">
+  <h3>Send a Test Email</h3>
+  <p class="muted" style="font-size:12px; margin-top:4px;">
+    Confirms the credentials above actually work end to end, before anything is built on top of them.
+  </p>
+  <form method="post" action="/ops/notifications/test-email" style="display:flex; gap:12px; align-items:flex-end; margin-top:8px;">
+    <div style="display:flex; flex-direction:column; gap:4px; flex:1;">
+      <label class="muted" style="font-size:12px;" for="test-to">Send to</label>
+      <input type="email" name="to_email" id="test-to" placeholder="you@example.com" required {% if not is_configured %}disabled{% endif %}>
+    </div>
+    <button type="submit" class="btn btn-secondary" {% if not is_configured %}disabled{% endif %}>Send Test Email</button>
+  </form>
+  {% if test_result %}
+  <p style="margin-top:12px;">
+    <span class="pill {{ 'ok' if test_result.ok else 'bad' }}">{{ 'sent' if test_result.ok else 'failed' }}</span>
+    <span class="muted" style="font-size:12px;">{{ test_result.message }}</span>
+  </p>
+  {% endif %}
+</div>
+
+{% endblock %}

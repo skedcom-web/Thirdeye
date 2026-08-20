@@ -251,6 +251,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # goengine/public.py); never shares a route or template with the
     # reviewer-only /records/{id}.
     # -----------------------------------------------------------------------
+    @app.get("/taluks", response_class=HTMLResponse)
+    def public_taluks(request: Request, current_user: CurrentUser, current_citizen: CurrentCitizen):
+        return templates.TemplateResponse(
+            request, "taluks.html", {"current_user": current_user, "current_citizen": current_citizen},
+        )
+
+    @app.get("/villages", response_class=HTMLResponse)
+    def public_villages(request: Request, current_user: CurrentUser, current_citizen: CurrentCitizen):
+        return templates.TemplateResponse(
+            request, "villages.html", {"current_user": current_user, "current_citizen": current_citizen},
+        )
+
     @app.get("/orders", response_class=HTMLResponse)
     def public_orders(
         request: Request,
