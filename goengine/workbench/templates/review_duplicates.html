@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Duplicate Review Records &middot; Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Duplicate Review Records</h1>
+    <p class="muted" style="margin:4px 0 0; max-width:760px;">
+      Read-only report. Retrying a document sync used to re-run extraction every time, even when the
+      content hadn't changed, creating a brand-new pending review record for the same document each
+      retry. That's fixed now -- this only lists what's <em>already</em> in the database from before the
+      fix. Nothing here has been changed or removed.
+    </p>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:16px;">
+  <div style="display:flex; gap:32px; flex-wrap:wrap;">
+    <div>
+      <div style="font-size:32px; font-weight:800;">{{ summary.documents_with_duplicates }}</div>
+      <div class="muted" style="font-size:12px;">documents with duplicate pending records</div>
+    </div>
+    <div>
+      <div style="font-size:32px; font-weight:800;">{{ summary.records_removable }}</div>
+      <div class="muted" style="font-size:12px;">extra records a cleanup could remove</div>
+    </div>
+  </div>
+  {% if summary.by_department %}
+  <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+    {% for dept, n in summary.by_department.items() %}
+    <span class="pill neutral">{{ dept.replace('_', ' ')|title }}: {{ n }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{% if summary.groups %}
+<div class="panel">
+  <h2>Documents with duplicate pending records</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Document</th>
+        <th>Source</th>
+        <th>Department</th>
+        <th># Records</th>
+        <th>Record IDs (would keep the last)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in summary.groups %}
+      <tr>
+        <td class="mono">{{ g.file_name }}</td>
+        <td>{{ g.source_name }}</td>
+        <td>{{ (g.department_bucket or 'uncategorized').replace('_', ' ')|title }}</td>
+        <td>{{ g.record_ids|length }}</td>
+        <td class="mono" style="font-size:12px;">
+          {% for rid in g.record_ids %}
+          <a href="/records/{{ rid }}" {% if rid == g.keep_id %}style="font-weight:700;"{% endif %}>#{{ rid }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+          <span class="muted">(bold = kept)</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="panel">
+  <div class="occ-empty-state">
+    <div class="occ-empty-icon" aria-hidden="true">✅</div>
+    <p>No duplicate pending records found.</p>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

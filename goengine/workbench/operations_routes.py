@@ -21,6 +21,7 @@ from ..certification.sources import certification_history
 
 REVIEW_FILTER_BUCKETS = ALL_BUCKETS + (BUCKET_OTHER,)
 from ..operations import auth
+from ..operations import dedup as ops_dedup
 from ..operations import departments as ops_departments
 from ..operations import email as ops_email
 from ..operations import geography
@@ -549,6 +550,19 @@ def _register_review(app: FastAPI) -> None:
                 "current_user": current_user,
                 "can_escalate": current_user.has_permission("escalate_records"),
             },
+        )
+
+    @app.get("/ops/review/duplicates", response_class=HTMLResponse)
+    def review_duplicates(request: Request, conn: Conn, current_user: LoggedIn):
+        """Read-only report: which documents currently have more than one
+        'pending' go_records row, almost certainly from retrying a sync
+        before that was fixed to stop happening. Reports only -- removing
+        anything is a deliberate follow-up action, not offered here."""
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        return templates.TemplateResponse(
+            request, "review_duplicates.html",
+            {"summary": ops_dedup.duplicate_summary(conn), "current_user": current_user},
         )
 
     @app.post("/ops/review/escalations/{escalation_id}/resolve")

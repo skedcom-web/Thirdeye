@@ -11,6 +11,9 @@
       Human review and approval of extracted documents before publication. Select a queue to start reviewing.
     </p>
   </div>
+  {% if current_user.has_permission('manage_sources') %}
+  <a class="ghost btn" href="/ops/review/duplicates">View duplicate records report</a>
+  {% endif %}
 </div>
 
 {# ═══ Department filter ═════════════════════════════════════════════ #}
