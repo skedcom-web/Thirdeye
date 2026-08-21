@@ -47,6 +47,28 @@
     });
   }
 
+  function wireAutoRefresh() {
+    // Was a plain <meta http-equiv="refresh" content="2"> on job/diagnostic-
+    // run pages -- a real usability bug: it reloaded the whole page (nav
+    // included) every 2s regardless of what the admin was doing, so opening
+    // a nav dropdown while a job ran meant it vanished out from under you
+    // within moments. This still auto-refreshes a live-running job, just
+    // never while a dropdown is actually open (checked again shortly after
+    // instead of giving up), and on a gentler interval.
+    var marker = document.querySelector("[data-auto-refresh]");
+    if (!marker) return;
+    var delay = parseInt(marker.getAttribute("data-auto-refresh"), 10) || 4000;
+    function attempt() {
+      var openDropdown = document.querySelector('.nav-group-toggle[aria-expanded="true"]');
+      if (openDropdown) {
+        setTimeout(attempt, 1500);
+        return;
+      }
+      location.reload();
+    }
+    setTimeout(attempt, delay);
+  }
+
   function wireSpotlight() {
     var hero = document.querySelector(".hero");
     if (!hero || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -121,6 +143,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     wireThemeToggle();
     wireMobileNav();
+    wireAutoRefresh();
     wireSpotlight();
     wireCountUp();
     wireScrollReveal();

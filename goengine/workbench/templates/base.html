@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/theme.css?v=8">
+<link rel="stylesheet" href="/static/theme.css?v=9">
 {% from "_partials.html" import mark, theme_init_script %}
 {{ theme_init_script() }}
 </head>
@@ -101,12 +101,9 @@
 
     {# ── Theme + User ────────────────────────────────────────────── #}
     <div class="theme-toggle" role="group" aria-label="Theme">
-      <button data-theme-btn="light"    aria-pressed="true"  title="Light">Light</button>
-      <button data-theme-btn="dark"     aria-pressed="false" title="Dark">Dark</button>
-      <button data-theme-btn="glass"    aria-pressed="false" title="Glass">Glass</button>
-      <button data-theme-btn="aurora"   aria-pressed="false" title="Aurora">Aurora</button>
-      <button data-theme-btn="emerald"  aria-pressed="false" title="Emerald">Emerald</button>
-      <button data-theme-btn="midnight" aria-pressed="false" title="Midnight">Midnight</button>
+      <button data-theme-btn="light" aria-pressed="true"  title="Light">Light</button>
+      <button data-theme-btn="dark"  aria-pressed="false" title="Dark">Dark</button>
+      <button data-theme-btn="glass" aria-pressed="false" title="Glass">Glass</button>
     </div>
 
     {% if current_user %}
@@ -124,7 +121,7 @@
 <main class="app-main">
 {% block content %}{% endblock %}
 </main>
-<script src="/static/theme.js?v=8" defer></script>
+<script src="/static/theme.js?v=9" defer></script>
 <script>
 // Nav group dropdowns
 document.addEventListener('DOMContentLoaded', function () {

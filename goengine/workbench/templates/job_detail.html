@@ -3,7 +3,7 @@
 {% block content %}
 
 {% if job.status in ('QUEUED', 'RUNNING') %}
-<meta http-equiv="refresh" content="2">
+<span data-auto-refresh="4000" hidden></span>
 {% endif %}
 
 <div class="panel">
