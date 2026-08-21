@@ -149,6 +149,107 @@ def test_sync_endpoint_idempotent_retry(client, conn, source_id, sample_pdf):
     assert record_count == 1
 
 
+def test_resync_with_new_ocr_data_recovers_a_previously_failed_document(client, conn, source_id):
+    """A real production bug: a document with no digital text layer (a
+    scan) synced once with no OCR data attached (the local agent hadn't
+    parsed it yet), landing as needs_ocr=1 with every core field NOT_FOUND.
+    Fixing the local gap and resyncing the exact same bytes -- but this
+    time with real OCR text -- must actually apply the correction, not get
+    silently swallowed by the "unchanged bytes, reuse the existing record"
+    guard that exists specifically to stop *wasteful* duplicate resyncs."""
+    import pymupdf
+
+    _, token = agent_auth.generate_key(conn, label="Laptop", created_by="admin")
+    blank_pdf = pymupdf.open()
+    blank_pdf.new_page()
+    file_bytes = blank_pdf.tobytes()
+
+    payload_no_ocr = json.dumps({
+        "source_id": source_id,
+        "source_url": "https://cms.tn.gov.in/sites/default/files/go/scan.pdf",
+        "file_name": "scan.pdf",
+        "ocr_pages": [],
+    })
+    first = client.post(
+        "/api/agent/sync/document",
+        files={"file": ("scan.pdf", file_bytes, "application/pdf")}, data={"payload": payload_no_ocr},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert first.status_code == 200
+    first_record_id = first.json()["go_record_id"]
+    first_row = conn.execute(
+        "SELECT status, needs_ocr FROM go_records r JOIN extractions e ON e.id = r.extraction_id WHERE r.id = ?",
+        (first_record_id,),
+    ).fetchone()
+    assert first_row["needs_ocr"] == 1  # confirms the bug scenario actually reproduced
+
+    payload_with_ocr = json.dumps({
+        "source_id": source_id,
+        "source_url": "https://cms.tn.gov.in/sites/default/files/go/scan.pdf",
+        "file_name": "scan.pdf",
+        "ocr_pages": [
+            {
+                "page_number": 1,
+                "text": "G.O.(Ms) No.319 Dated: 14.07.2025\nHealth and Family Welfare Department",
+                "mean_confidence": 0.9,
+            }
+        ],
+    })
+    second = client.post(
+        "/api/agent/sync/document",
+        files={"file": ("scan.pdf", file_bytes, "application/pdf")}, data={"payload": payload_with_ocr},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert second.status_code == 200
+    document_id = second.json()["document_id"]
+    second_record_id = second.json()["go_record_id"]
+    assert second_record_id != first_record_id  # a real correction, not the stale reused record
+
+    fields = {
+        r["field_name"]: r["normalized_value"]
+        for r in conn.execute("SELECT field_name, normalized_value FROM go_fields WHERE record_id = ?", (second_record_id,))
+    }
+    assert "319" in fields["go_number"]
+    assert fields["department"] == "Health and Family Welfare"
+
+    # The stale, empty-text record from the first sync must be gone --
+    # otherwise this "fix" just reintroduces the duplicate-record bug.
+    remaining = [
+        int(r["id"]) for r in conn.execute("SELECT id FROM go_records WHERE document_id = ?", (document_id,))
+    ]
+    assert remaining == [second_record_id]
+
+
+def test_resync_without_new_ocr_data_still_reuses_the_existing_record(client, conn, source_id):
+    """The guard this recovery path lives inside must still do its job:
+    resyncing a document that's already fine (or still has nothing new to
+    offer) must not re-parse it every time."""
+    _, token = agent_auth.generate_key(conn, label="Laptop", created_by="admin")
+    blank_pdf = __import__("pymupdf").open()
+    blank_pdf.new_page()
+    file_bytes = blank_pdf.tobytes()
+    payload = json.dumps({
+        "source_id": source_id,
+        "source_url": "https://cms.tn.gov.in/sites/default/files/go/scan2.pdf",
+        "file_name": "scan2.pdf",
+        "ocr_pages": [],
+    })
+    first = client.post(
+        "/api/agent/sync/document",
+        files={"file": ("scan2.pdf", file_bytes, "application/pdf")}, data={"payload": payload},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    second = client.post(
+        "/api/agent/sync/document",
+        files={"file": ("scan2.pdf", file_bytes, "application/pdf")}, data={"payload": payload},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert second.json()["go_record_id"] == first.json()["go_record_id"]
+    document_id = first.json()["document_id"]
+    count = conn.execute("SELECT COUNT(*) AS n FROM go_records WHERE document_id = ?", (document_id,)).fetchone()["n"]
+    assert count == 1
+
+
 def test_agents_ui_generate_and_revoke(client, conn):
     login_as(client, conn)
     res_add = client.post("/ops/agents/add", data={"label": "Ramesh's laptop"}, follow_redirects=False)

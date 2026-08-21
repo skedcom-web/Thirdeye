@@ -298,20 +298,47 @@ def ingest_document_bytes(
     else:
         # Byte-identical resync (e.g. a local agent retrying a sync that
         # already succeeded): this document_id has already been through
-        # extract_document/parse_document once. Re-running it would create
-        # a brand-new extractions + go_records row for the exact same
-        # content every single time -- which is exactly what repeatedly
-        # retrying a sync during a recovery does to the review queue: real
-        # duplicate "pending review" rows for one underlying PDF. Reuse
-        # whatever record already exists; only fall back to a real parse if
-        # this document somehow has none yet (an earlier parse attempt
-        # failed before ever reaching this point).
+        # extract_document/parse_document once. Re-running it would
+        # normally just create a brand-new extractions + go_records row for
+        # the exact same content -- real duplicate "pending review" rows
+        # for one underlying PDF, which is exactly what repeatedly
+        # retrying a sync during a recovery did to the review queue before
+        # this guard existed.
+        #
+        # But "same file bytes" is not the same question as "nothing new to
+        # contribute": a document that failed OCR the first time (no local
+        # agent OCR data available yet) still has needs_ocr=1 and no usable
+        # fields. If *this* sync attempt brings real precomputed OCR text
+        # where the first one didn't, that's a genuine correction, not a
+        # wasted retry -- confirmed live: resyncing a document after fixing
+        # its local OCR gap silently kept the original empty-text record
+        # otherwise, because "reuse the existing record" doesn't distinguish
+        # "already correct" from "still broken, and now fixable."
         existing = conn.execute(
-            "SELECT id FROM go_records WHERE document_id = ? ORDER BY id DESC LIMIT 1", (document_id,)
+            """
+            SELECT r.id AS record_id, r.status, e.needs_ocr
+              FROM go_records r JOIN extractions e ON e.id = r.extraction_id
+             WHERE r.document_id = ? ORDER BY r.id DESC LIMIT 1
+            """,
+            (document_id,),
         ).fetchone()
-        record_id = int(existing["id"]) if existing is not None else parse_document(
-            conn, settings, document_id, precomputed_ocr=precomputed_ocr, actor=actor
+        can_recover = (
+            existing is not None
+            and existing["status"] == "pending"
+            and existing["needs_ocr"]
+            and precomputed_ocr is not None
         )
+        if existing is None:
+            record_id = parse_document(conn, settings, document_id, precomputed_ocr=precomputed_ocr, actor=actor)
+        elif can_recover:
+            stale_record_id = int(existing["record_id"])
+            record_id = parse_document(conn, settings, document_id, precomputed_ocr=precomputed_ocr, actor=actor)
+            if record_id != stale_record_id:
+                from .operations.dedup import delete_record_and_its_extraction
+
+                delete_record_and_its_extraction(conn, stale_record_id)
+        else:
+            record_id = int(existing["record_id"])
     return document_id, record_id, is_new_version
 
 

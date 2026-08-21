@@ -80,7 +80,7 @@ def duplicate_summary(conn: sqlite3.Connection) -> dict:
     }
 
 
-def _delete_record_and_its_extraction(conn: sqlite3.Connection, record_id: int) -> None:
+def delete_record_and_its_extraction(conn: sqlite3.Connection, record_id: int) -> None:
     """Removes one go_records row and every table that hangs off it or its
     extraction, in FK-safe order. agent_sync_log is history, not something
     this touches by deleting -- its go_record_id just gets nulled out so it
@@ -128,7 +128,7 @@ def run_cleanup(conn: sqlite3.Connection, *, actor: str) -> dict:
     for g in groups:
         to_remove = [rid for rid in g.record_ids if rid != g.keep_id]
         for record_id in to_remove:
-            _delete_record_and_its_extraction(conn, record_id)
+            delete_record_and_its_extraction(conn, record_id)
         audit.record(
             conn, action="records.deduplicated", entity_type="document", entity_id=g.document_id,
             actor=actor, detail={"kept": g.keep_id, "removed": to_remove, "file_name": g.file_name},
