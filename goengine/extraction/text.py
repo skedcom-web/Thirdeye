@@ -18,7 +18,7 @@ from pathlib import Path
 from .. import audit
 from ..config import Settings
 from ..db import utcnow
-from ..repository import absolute_path
+from ..repository import absolute_path, ensure_file_on_disk
 
 # Below this many characters per page we assume a scanned image, not text.
 MIN_CHARS_PER_PAGE_FOR_TEXT = 80
@@ -264,7 +264,7 @@ def extract_document(
     if row is None:
         raise LookupError(f"no document with id {document_id}")
 
-    path = absolute_path(settings, row["stored_path"])
+    path = ensure_file_on_disk(settings, conn, document_id)
     output = extract_file(path, preferred_backend=preferred_backend, try_alternates=try_alternates)
 
     cur = conn.execute(

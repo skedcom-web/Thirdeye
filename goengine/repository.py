@@ -123,6 +123,24 @@ def read_bytes(settings: Settings, conn: sqlite3.Connection, document_id: int) -
     return path.read_bytes() if path.exists() else None
 
 
+def ensure_file_on_disk(settings: Settings, conn: sqlite3.Connection, document_id: int) -> Path:
+    """Guarantees the document PDF file exists on local disk at its expected
+    repository_dir path. If the local file is missing (e.g. after a Render
+    redeploy or reset), fetches the durable bytes from document_blobs / read_bytes
+    and writes them to local disk so text/OCR extraction tools can read it."""
+    row = conn.execute("SELECT stored_path FROM documents WHERE id = ?", (document_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"no document with id {document_id}")
+    path = absolute_path(settings, row["stored_path"])
+    if not path.exists():
+        bytes_data = read_bytes(settings, conn, document_id)
+        if bytes_data is None:
+            raise RepositoryError(f"document {document_id} bytes not found in database or disk")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(bytes_data)
+    return path
+
+
 def backfill_blobs_from_disk(settings: Settings, conn: sqlite3.Connection) -> dict:
     """One-time (repeatable) sweep: for every document with no durable blob
     yet, copy its bytes out of local disk and into document_blobs while

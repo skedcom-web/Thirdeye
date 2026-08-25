@@ -119,7 +119,7 @@ def parse_document(
             "SELECT stored_path FROM documents WHERE id = ?", (document_id,)
         ).fetchone()
         if row is not None:
-            document_path = repository.absolute_path(settings, row["stored_path"])
+            document_path = repository.ensure_file_on_disk(settings, conn, document_id)
             try:
                 ocrengine.apply_to_extraction(conn, extraction_id, document_path, actor=actor)
             except ocrengine.OcrError as exc:
