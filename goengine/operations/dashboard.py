@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from .. import review
+from .. import repository, review
 from ..certification.sources import certification_summary
 from . import publication as ops_publication
 
@@ -34,16 +34,10 @@ def operations_summary(conn: sqlite3.Connection, settings) -> dict:
     active_sources = conn.execute("SELECT COUNT(*) AS n FROM sources WHERE active = 1").fetchone()["n"]
     total_sources = conn.execute("SELECT COUNT(*) AS n FROM sources").fetchone()["n"]
 
-    # go_records is the extraction result table — cleared by reset, accurately
-    # reflects post-reset state. repository.stats() counts the write-once
-    # `documents` table (archived PDFs never deleted) which is intentionally
-    # preserved through reset and is not a useful operational KPI here.
-    go_records_total = conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"]
-
+    repo_stats = repository.stats(settings, conn)
     review_counts = review.counts_by_status(conn)
     approved_records = review_counts[review.STATUS_APPROVED]
 
-    # Registered citizens — cleared on reset, so correctly shows 0 after reset.
     registered_citizens = conn.execute(
         "SELECT COUNT(*) AS n FROM citizen_users WHERE active = 1"
     ).fetchone()["n"]
@@ -69,7 +63,7 @@ def operations_summary(conn: sqlite3.Connection, settings) -> dict:
         "certified_sources": source_cert["CERTIFIED"],
         "active_sources": active_sources,
         "total_sources": total_sources,
-        "documents_processed": go_records_total,
+        "documents_processed": repo_stats["documents"],
         "approved_records": approved_records,
         "registered_citizens": registered_citizens,
         "documents_requiring_review": review_counts["pending"],

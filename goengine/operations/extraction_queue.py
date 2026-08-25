@@ -244,7 +244,7 @@ def _queue_worker_loop(settings: Settings) -> None:
 
 def _process_queued_requests(settings: Settings, fetcher) -> None:
     from ..db import connect
-    from ..pipeline import run_all
+    from ..pipeline import run_all, run_parsing
 
     conn = connect(settings.db_path)
     try:
@@ -253,6 +253,11 @@ def _process_queued_requests(settings: Settings, fetcher) -> None:
             (STATUS_QUEUED,),
         ).fetchone()
         if candidate is None:
+            # Also auto-parse any unparsed documents in the repository
+            try:
+                run_parsing(conn, settings, limit=100)
+            except Exception:
+                pass
             return
 
         request_id = int(candidate["id"])
@@ -291,7 +296,7 @@ def _process_queued_requests(settings: Settings, fetcher) -> None:
         docs_found = docs_downloaded = docs_parsed = docs_failed = sources_completed = 0
         for sid in source_ids:
             try:
-                report = run_all(conn, settings, fetcher, only_due=False, source_id=sid, max_pages=20, limit=50)
+                report = run_all(conn, settings, fetcher, only_due=False, source_id=sid, max_pages=20, limit=1000)
                 docs_found += report.new_documents
                 docs_downloaded += report.download.succeeded
                 docs_parsed += report.parse.succeeded
@@ -305,6 +310,13 @@ def _process_queued_requests(settings: Settings, fetcher) -> None:
                 documents_found=docs_found, documents_downloaded=docs_downloaded,
                 documents_parsed=docs_parsed, documents_failed=docs_failed,
             )
+
+        # Parse all remaining unparsed documents for this request's scope
+        try:
+            parse_report = run_parsing(conn, settings, limit=1000)
+            docs_parsed += parse_report.succeeded
+        except Exception:
+            pass
 
         complete_request(conn, request_id, ok=True)
     except Exception as exc:

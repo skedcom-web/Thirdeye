@@ -10,15 +10,34 @@
       Every Government Order downloaded from an authorized source, independent of review status.
     </p>
   </div>
-  {% if current_user.has_permission('manage_sources') %}
-  <form method="post" action="/ops/documents/backfill-blobs">
-    <button class="ghost" type="submit"
-            title="Copies any document still on local disk into durable Turso storage, for documents synced before that existed.">
-      Backfill missing files into Turso
-    </button>
-  </form>
-  {% endif %}
+  <div class="action-strip" style="display:flex; gap:8px;">
+    {% if current_user.has_permission('run_certification') %}
+    <form method="post" action="/ops/documents/parse-all" style="margin:0;">
+      <button class="btn-md btn-primary" type="submit"
+              title="Parse all downloaded documents into extracted GO records for review.">
+        ⚡ Parse All Unparsed Documents
+      </button>
+    </form>
+    {% endif %}
+    {% if current_user.has_permission('manage_sources') %}
+    <form method="post" action="/ops/documents/backfill-blobs" style="margin:0;">
+      <button class="ghost" type="submit"
+              title="Copies any document still on local disk into durable Turso storage, for documents synced before that existed.">
+        Backfill missing files into Turso
+      </button>
+    </form>
+    {% endif %}
+  </div>
 </div>
+
+{% if parsed is not none %}
+<div class="panel" style="margin-bottom:16px;">
+  <p style="margin:0;">
+    <span class="pill ok">parsing complete</span>
+    Successfully extracted text &amp; metadata for {{ parsed }} document(s). Extracted records are now available in the <a href="/ops/review">Review Center</a>.
+  </p>
+</div>
+{% endif %}
 
 {% if backfilled is not none %}
 <div class="panel" style="margin-bottom:16px;">
