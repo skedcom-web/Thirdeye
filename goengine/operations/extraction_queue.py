@@ -248,10 +248,6 @@ def _process_queued_requests(settings: Settings, fetcher) -> None:
 
     conn = connect(settings.db_path)
     try:
-        # Heartbeat active agent keys so UI shows Online
-        now = utcnow()
-        conn.execute("UPDATE agent_keys SET last_used_at = ? WHERE revoked_at IS NULL", (now,))
-
         candidate = conn.execute(
             "SELECT id FROM extraction_requests WHERE status = ? ORDER BY id LIMIT 1",
             (STATUS_QUEUED,),
