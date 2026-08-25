@@ -513,8 +513,11 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
     """Phase 3.4 -- polls a Third Eye server for queued Local extraction
     requests (created from the Extraction Center's "Local Agent" mode),
     executes them against this machine's own unblocked network, and syncs
-    results back automatically. Leave this running on a machine that can
-    reach the government sites; Ctrl+C stops it after the current cycle."""
+    results back automatically.
+
+    By default, processes one queued request then exits (no persistent
+    terminal window). Pass --daemon to keep running continuously; Ctrl+C
+    stops it after the current cycle."""
     settings = _settings(args)
     server_url = args.server_url.rstrip("/")
     api_key = args.api_key or os.environ.get("THIRDEYE_AGENT_KEY")
@@ -537,10 +540,10 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
 
     auth_headers = {"Authorization": f"Bearer {api_key}"}
     fetcher = HttpFetcher()
-    if args.once:
-        print(f"Agent daemon: checking {server_url} once (--once).")
-    else:
+    if args.daemon:
         print(f"Agent daemon started. Polling {server_url} every {args.poll_interval}s. Ctrl+C to stop.")
+    else:
+        print(f"Agent: checking {server_url} (single run — use --daemon to keep running).")
     try:
         with httpx.Client(timeout=120.0) as client:
             while not stop["flag"]:
@@ -553,7 +556,7 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
                     req = None
 
                 if req is None:
-                    if args.once:
+                    if not args.daemon:
                         break
                     time.sleep(args.poll_interval)
                     continue
@@ -572,12 +575,12 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
                             )
                         except httpx.HTTPError:
                             pass
-                if args.once:
+                if not args.daemon:
                     break
     finally:
         fetcher.close()
 
-    print("Agent daemon stopped.")
+    print("Agent stopped.")
     return 0
 
 
@@ -1198,11 +1201,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--server-url", required=True, help="e.g. https://thirdeye-xyz.onrender.com")
     p.add_argument("--api-key", help="or set THIRDEYE_AGENT_KEY (preferred -- avoids shell history/saved task args)")
-    p.add_argument("--poll-interval", type=int, default=30, help="seconds between checks when the queue is empty")
-    p.add_argument("--once", action="store_true",
-                   help="process at most one queued request then exit -- for OS-level scheduling "
-                        "(Task Scheduler/cron), the blueprint's 'Local Scheduled' mode, instead of "
-                        "leaving this running continuously")
+    p.add_argument("--poll-interval", type=int, default=30, help="seconds between checks when the queue is empty (only relevant with --daemon)")
+    p.add_argument("--daemon", action="store_true",
+                   help="run continuously, polling until Ctrl+C -- by default the agent processes one "
+                        "queued request then exits automatically (no persistent terminal window)")
     p.set_defaults(func=cmd_agent_daemon)
 
     # review
