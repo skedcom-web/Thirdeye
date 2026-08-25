@@ -150,6 +150,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _bootstrap_admin_from_env(resolved)
     _bootstrap_agent_key_from_env(resolved)
 
+    from ..operations import extraction_queue
+    extraction_queue.start_auto_worker(resolved)
+
     app = FastAPI(title="Thirdeye Operations Control Center", version="0.3.1")
     app.state.settings = resolved
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

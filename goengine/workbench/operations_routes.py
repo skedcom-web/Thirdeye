@@ -392,6 +392,8 @@ def _register_jobs(app: FastAPI) -> None:
                 if now - seen <= timedelta(seconds=AGENT_ONLINE_WINDOW_SECONDS):
                     online = True
                     break
+        if extraction_queue.is_worker_running():
+            online = True
         return {
             "agent_online": online,
             "agent_key_count": len([k for k in keys if k.active]),
@@ -430,6 +432,7 @@ def _register_jobs(app: FastAPI) -> None:
                 conn, state_id=state_id, district_id=district_id,
                 department_filter=departments or None, created_by=current_user.username,
             )
+            extraction_queue.trigger_worker_now()
             return RedirectResponse("/ops/jobs", status_code=303)
 
         job_id = ops_jobs.start_job(

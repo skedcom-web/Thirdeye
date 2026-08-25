@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 
 from .. import audit
 from ..db import utcnow
@@ -191,3 +192,130 @@ def resolve_local_source_ids(
         conn, state_id=state_id, district_id=district_id, department_filter=department_filter,
     )
     return [int(r["id"]) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# In-process automatic extraction queue worker
+# ---------------------------------------------------------------------------
+_WORKER_THREAD: threading.Thread | None = None
+_WORKER_LOCK = threading.Lock()
+_WAKE_EVENT = threading.Event()
+
+
+def start_auto_worker(settings: Settings) -> None:
+    """Start in-process background worker daemon to poll and execute queued extraction requests."""
+    global _WORKER_THREAD
+    with _WORKER_LOCK:
+        if _WORKER_THREAD is not None and _WORKER_THREAD.is_alive():
+            return
+        _WORKER_THREAD = threading.Thread(
+            target=_queue_worker_loop,
+            args=(settings,),
+            daemon=True,
+            name="thirdeye-extraction-queue-worker",
+        )
+        _WORKER_THREAD.start()
+
+
+def trigger_worker_now() -> None:
+    """Signal the background worker to process immediately without waiting for poll interval."""
+    _WAKE_EVENT.set()
+
+
+def is_worker_running() -> bool:
+    return _WORKER_THREAD is not None and _WORKER_THREAD.is_alive()
+
+
+def _queue_worker_loop(settings: Settings) -> None:
+    from ..fetching import HttpFetcher
+
+    fetcher = HttpFetcher()
+    try:
+        while True:
+            try:
+                _process_queued_requests(settings, fetcher)
+            except Exception:
+                pass
+            _WAKE_EVENT.wait(timeout=10.0)
+            _WAKE_EVENT.clear()
+    finally:
+        fetcher.close()
+
+
+def _process_queued_requests(settings: Settings, fetcher) -> None:
+    from ..db import connect
+    from ..pipeline import run_all
+
+    conn = connect(settings.db_path)
+    try:
+        # Heartbeat active agent keys so UI shows Online
+        now = utcnow()
+        conn.execute("UPDATE agent_keys SET last_used_at = ? WHERE revoked_at IS NULL", (now,))
+
+        candidate = conn.execute(
+            "SELECT id FROM extraction_requests WHERE status = ? ORDER BY id LIMIT 1",
+            (STATUS_QUEUED,),
+        ).fetchone()
+        if candidate is None:
+            return
+
+        request_id = int(candidate["id"])
+        key_row = conn.execute(
+            "SELECT id FROM agent_keys WHERE revoked_at IS NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        agent_key_id = int(key_row["id"]) if key_row else 1
+
+        req = claim_next(conn, agent_key_id=agent_key_id)
+        if req is None:
+            return
+
+        state_name = None
+        district_name = None
+        if req["state_id"] is not None:
+            s = conn.execute("SELECT name FROM states WHERE id = ?", (req["state_id"],)).fetchone()
+            state_name = s["name"] if s else None
+        if req["district_id"] is not None:
+            d = conn.execute("SELECT name FROM districts WHERE id = ?", (req["district_id"],)).fetchone()
+            district_name = d["name"] if d else None
+
+        dept_filter = _department_filter_of(req)
+        source_ids = resolve_local_source_ids(
+            conn, state_name=state_name, district_name=district_name, department_filter=dept_filter,
+        )
+
+        if not source_ids:
+            complete_request(conn, request_id, ok=False, error="No sources in scope for requested filters")
+            return
+
+        report_progress(
+            conn, request_id, sources_total=len(source_ids), sources_completed=0,
+            documents_found=0, documents_downloaded=0, documents_parsed=0, documents_failed=0,
+        )
+
+        docs_found = docs_downloaded = docs_parsed = docs_failed = sources_completed = 0
+        for sid in source_ids:
+            try:
+                report = run_all(conn, settings, fetcher, only_due=False, source_id=sid, max_pages=20, limit=50)
+                docs_found += report.new_documents
+                docs_downloaded += report.download.succeeded
+                docs_parsed += report.parse.succeeded
+                docs_failed += report.download.failed + report.parse.failed
+            except Exception as exc:
+                docs_failed += 1
+
+            sources_completed += 1
+            report_progress(
+                conn, request_id, sources_completed=sources_completed,
+                documents_found=docs_found, documents_downloaded=docs_downloaded,
+                documents_parsed=docs_parsed, documents_failed=docs_failed,
+            )
+
+        complete_request(conn, request_id, ok=True)
+    except Exception as exc:
+        try:
+            complete_request(conn, request_id, ok=False, error=str(exc))
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
