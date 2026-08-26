@@ -31,6 +31,9 @@ STATUS_RUNNING = "RUNNING"
 STATUS_COMPLETED = "COMPLETED"
 STATUS_FAILED = "FAILED"
 
+KIND_EXTRACTION = "extraction"
+KIND_RESYNC_ALL = "resync_all"
+
 
 def enqueue_local_request(
     conn: sqlite3.Connection,
@@ -57,6 +60,43 @@ def enqueue_local_request(
         conn, action="extraction_request.queued", entity_type="extraction_request", entity_id=request_id,
         actor=created_by,
         detail={"state_id": state_id, "district_id": district_id, "department_filter": department_filter},
+    )
+    return request_id
+
+
+def enqueue_resync_all_request(conn: sqlite3.Connection, *, created_by: str) -> int:
+    """Asks the local agent to reset its own local sync bookkeeping and
+    re-push every document it has archived, next time it polls (at most a
+    few minutes away, on the existing scheduled task -- no manual command
+    needed). This exists because `documents.agent_synced_at` lives only in
+    the *local* agent's own database (see db.py's DOCUMENTS_AGENT_SYNC_COLUMNS
+    docstring): a server-side production reset (operations/reset.py) can't
+    reach it, so without this, every already-synced document looks synced
+    forever to the local agent even after the server-side record it pointed
+    at has been wiped and re-extracted.
+
+    Reuses an already-pending resync request instead of piling up duplicates
+    if this is called again (e.g. the button clicked twice, or a reset
+    followed shortly by a manual click) while one is still queued/running."""
+    existing = conn.execute(
+        "SELECT id FROM extraction_requests WHERE kind = ? AND status IN (?, ?, ?) ORDER BY id DESC LIMIT 1",
+        (KIND_RESYNC_ALL, STATUS_QUEUED, STATUS_CLAIMED, STATUS_RUNNING),
+    ).fetchone()
+    if existing is not None:
+        return int(existing["id"])
+
+    cur = conn.execute(
+        """
+        INSERT INTO extraction_requests
+            (kind, state_id, district_id, department_filter, status, created_by, created_at)
+        VALUES (?, NULL, NULL, NULL, ?, ?, ?)
+        """,
+        (KIND_RESYNC_ALL, STATUS_QUEUED, created_by, utcnow()),
+    )
+    request_id = int(cur.lastrowid)
+    audit.record(
+        conn, action="extraction_request.resync_all_queued", entity_type="extraction_request",
+        entity_id=request_id, actor=created_by,
     )
     return request_id
 
@@ -93,6 +133,10 @@ def _department_filter_of(row: sqlite3.Row) -> list[str] | None:
 def claim_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     """The JSON handed to the agent for a claimed request -- names, not ids
     (see module docstring)."""
+    kind = row["kind"] if "kind" in row.keys() else KIND_EXTRACTION
+    if kind == KIND_RESYNC_ALL:
+        return {"id": row["id"], "kind": kind}
+
     state_name = None
     district_name = None
     if row["state_id"] is not None:
@@ -103,6 +147,7 @@ def claim_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
         district_name = d["name"] if d else None
     return {
         "id": row["id"],
+        "kind": kind,
         "state_name": state_name,
         "district_name": district_name,
         "department_filter": _department_filter_of(row),

@@ -24,6 +24,12 @@
   <p class="muted" style="font-size:12px; margin-top:8px;">
     Reset at {{ reset_result.reset_at }}. Recorded permanently in the audit trail.
   </p>
+  <p style="margin-top:8px;">
+    <span class="pill warn">resync queued</span>
+    Your Local Extraction Agent will automatically clear its own sync history and re-push every archived
+    document next time it checks in (within a few minutes, on its existing schedule) &mdash; no command
+    needed. Track it on <a href="/ops/jobs">Extraction Center</a> under Local Agent Status.
+  </p>
 </div>
 {% endif %}
 

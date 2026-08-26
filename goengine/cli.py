@@ -509,6 +509,58 @@ def _run_claimed_request(
     )
 
 
+def _run_resync_all_request(
+    conn, settings: Settings, http_client, server_url: str, auth_headers: dict, req: dict,
+) -> None:
+    """Handles a kind='resync_all' claimed request (see
+    operations/extraction_queue.enqueue_resync_all_request). `agent_synced_at`
+    is local-only bookkeeping (db.py's DOCUMENTS_AGENT_SYNC_COLUMNS docstring)
+    -- a server-side production reset can't clear it here, so without this a
+    document this machine already pushed once looks synced forever even
+    after the server-side record it pointed at was wiped and re-extracted.
+    This clears that bookkeeping and re-pushes everything archived on this
+    machine, batch by batch (same reasoning as _run_claimed_request: report
+    progress after every batch so a long resync isn't silent for its whole
+    duration)."""
+    request_id = req["id"]
+    n = conn.execute("UPDATE documents SET agent_synced_at = NULL, agent_sync_error = NULL").rowcount
+    print(f"  resync-all: marked {n} document(s) for re-push")
+    http_client.post(
+        f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+        json={"sources_total": 1, "sources_completed": 0, "documents_found": n},
+    )
+
+    synced_total = sync_failed_total = 0
+    while True:
+        sync_results = _sync_documents(
+            conn, settings, http_client, server_url, auth_headers, limit=200,
+        )
+        if not sync_results:
+            break
+        batch_synced = len(sync_results)
+        batch_sync_failed = sum(1 for r in sync_results if r[1] == "failed")
+        synced_total += batch_synced
+        sync_failed_total += batch_sync_failed
+        print(
+            f"  resync-all batch: {batch_synced - batch_sync_failed}/{batch_synced} synced "
+            f"(running total: {synced_total})"
+        )
+        http_client.post(
+            f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+            json={"documents_downloaded": synced_total, "documents_failed": sync_failed_total},
+        )
+
+    print(f"  resync-all done: {synced_total - sync_failed_total}/{synced_total} synced")
+    http_client.post(
+        f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+        json={"sources_completed": 1},
+    )
+    http_client.post(
+        f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
+        json={"ok": True},
+    )
+
+
 def cmd_agent_daemon(args: argparse.Namespace) -> int:
     """Phase 3.4 -- polls a Third Eye server for queued Local extraction
     requests (created from the Extraction Center's "Local Agent" mode),
@@ -561,11 +613,17 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
                     time.sleep(args.poll_interval)
                     continue
 
-                print(f"Claimed request #{req['id']}: department_filter={req.get('department_filter')}")
+                if req.get("kind") == "resync_all":
+                    print(f"Claimed request #{req['id']}: resync_all")
+                else:
+                    print(f"Claimed request #{req['id']}: department_filter={req.get('department_filter')}")
                 with session(settings) as conn:
                     try:
-                        _mirror_sources_from_server(conn, client, server_url, auth_headers)
-                        _run_claimed_request(conn, settings, fetcher, client, server_url, auth_headers, req)
+                        if req.get("kind") == "resync_all":
+                            _run_resync_all_request(conn, settings, client, server_url, auth_headers, req)
+                        else:
+                            _mirror_sources_from_server(conn, client, server_url, auth_headers)
+                            _run_claimed_request(conn, settings, fetcher, client, server_url, auth_headers, req)
                     except Exception as exc:
                         print(f"! request #{req['id']} failed: {exc}")
                         try:

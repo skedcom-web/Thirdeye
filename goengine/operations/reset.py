@@ -24,6 +24,7 @@ import sqlite3
 
 from .. import audit
 from ..db import utcnow
+from . import extraction_queue
 
 
 def reset_for_production(conn: sqlite3.Connection, *, actor: str) -> dict:
@@ -100,9 +101,25 @@ def reset_for_production(conn: sqlite3.Connection, *, actor: str) -> dict:
         "WHERE publication_status != 'NOT_PUBLISHED'"
     ).rowcount
 
+    # documents.agent_synced_at is local-only bookkeeping on the local
+    # agent's own machine (db.py's DOCUMENTS_AGENT_SYNC_COLUMNS docstring) --
+    # this reset, running only against the server's database, cannot touch
+    # it. Without this, every document the local agent already pushed once
+    # looks synced forever even though the go_record/extraction it pointed
+    # at was just deleted above, so it silently never gets re-pushed after
+    # the next local re-extraction. Queuing a resync_all request here means
+    # the local agent's own scheduled daemon (polling every few minutes)
+    # clears that bookkeeping and re-pushes everything automatically, with
+    # no manual command required after this reset completes.
+    resync_request_id = extraction_queue.enqueue_resync_all_request(conn, created_by=actor)
+
     audit.record(
         conn, action="system.production_reset", entity_type="system", entity_id=None,
-        actor=actor, detail={"table_counts": counts, "districts_reset": districts_reset, "departments_reset": departments_reset},
+        actor=actor,
+        detail={
+            "table_counts": counts, "districts_reset": districts_reset,
+            "departments_reset": departments_reset, "resync_request_id": resync_request_id,
+        },
     )
 
     return {
@@ -111,5 +128,6 @@ def reset_for_production(conn: sqlite3.Connection, *, actor: str) -> dict:
         "table_counts": counts,
         "districts_reset": districts_reset,
         "departments_reset": departments_reset,
+        "resync_request_id": resync_request_id,
         "reset_at": utcnow(),
     }

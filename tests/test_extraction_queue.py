@@ -179,3 +179,67 @@ def test_extraction_center_shows_agent_online_after_recent_use(client, conn, age
     login_as(client, conn)
     res = client.get("/ops/jobs")
     assert "Online" in res.text
+
+
+# ---------------------------------------------------------------------------
+# Resync-all requests (recovering local agent sync bookkeeping after a
+# server-side reset -- see operations/reset.py and cli.py's
+# _run_resync_all_request)
+# ---------------------------------------------------------------------------
+def test_enqueue_resync_all_creates_scopeless_request(conn, agent_key):
+    key_id, _ = agent_key
+    rid = eq.enqueue_resync_all_request(conn, created_by="admin")
+    claimed = eq.claim_next(conn, agent_key_id=key_id)
+    assert claimed["id"] == rid
+
+    payload = eq.claim_payload(conn, claimed)
+    assert payload["kind"] == eq.KIND_RESYNC_ALL
+    assert "department_filter" not in payload
+
+
+def test_enqueue_resync_all_does_not_duplicate_pending_request(conn):
+    rid1 = eq.enqueue_resync_all_request(conn, created_by="admin")
+    rid2 = eq.enqueue_resync_all_request(conn, created_by="admin")
+    assert rid1 == rid2
+    assert eq.queue_size(conn) == 1
+
+
+def test_enqueue_resync_all_after_completion_creates_new_request(conn, agent_key):
+    key_id, _ = agent_key
+    rid1 = eq.enqueue_resync_all_request(conn, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.complete_request(conn, rid1, ok=True)
+
+    rid2 = eq.enqueue_resync_all_request(conn, created_by="admin")
+    assert rid2 != rid1
+
+
+def test_normal_extraction_request_defaults_to_extraction_kind(conn, agent_key):
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(
+        conn, state_id=None, district_id=None, department_filter=["health"], created_by="admin"
+    )
+    claimed = eq.claim_next(conn, agent_key_id=key_id)
+    payload = eq.claim_payload(conn, claimed)
+    assert payload["id"] == rid
+    assert payload["kind"] == eq.KIND_EXTRACTION
+    assert payload["department_filter"] == ["health"]
+
+
+def test_jobs_resync_all_route_enqueues(client, conn):
+    login_as(client, conn)
+    res = client.post("/ops/jobs/resync-all", follow_redirects=False)
+    assert res.status_code == 303
+    assert res.headers["location"] == "/ops/jobs"
+    assert eq.queue_size(conn) == 1
+    rows = eq.list_requests(conn)
+    assert rows[0]["kind"] == eq.KIND_RESYNC_ALL
+
+
+def test_production_reset_auto_queues_resync_all(conn):
+    from goengine.operations import reset as ops_reset
+
+    result = ops_reset.reset_for_production(conn, actor="admin")
+    assert result["resync_request_id"] is not None
+    rows = eq.list_requests(conn)
+    assert any(r["kind"] == eq.KIND_RESYNC_ALL for r in rows)

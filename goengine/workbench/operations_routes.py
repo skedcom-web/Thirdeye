@@ -439,6 +439,17 @@ def _register_jobs(app: FastAPI) -> None:
         )
         return RedirectResponse(f"/ops/jobs/{job_id}", status_code=303)
 
+    @app.post("/ops/jobs/resync-all")
+    def jobs_resync_all(conn: Conn, current_user: RequireCertify):
+        """Manual trigger for the same resync_all request a production reset
+        queues automatically (operations/reset.py) -- for recovering
+        documents that were already corrupted by a reset that ran before
+        that automatic queuing existed, or any other time an admin suspects
+        the local agent's sync bookkeeping is stale. Picked up by the local
+        agent's existing scheduled poll; no manual command required."""
+        extraction_queue.enqueue_resync_all_request(conn, created_by=current_user.username)
+        return RedirectResponse("/ops/jobs", status_code=303)
+
     @app.get("/ops/jobs/{job_id}", response_class=HTMLResponse)
     def job_detail(request: Request, job_id: int, conn: Conn, current_user: LoggedIn):
         job = ops_jobs.get_job(conn, job_id)

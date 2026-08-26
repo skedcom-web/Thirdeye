@@ -128,6 +128,17 @@ DOCUMENTS_AGENT_SYNC_COLUMNS: dict[str, str] = {
     "agent_sync_error": "TEXT",
 }
 
+# Distinguishes a normal scoped extraction request from a "resync_all"
+# request: the latter carries no state/district/department scope and tells
+# the local agent to reset its own local sync bookkeeping and re-push every
+# archived document, rather than crawl/download anything. See
+# operations/reset.py -- a production reset lives only on the server, so it
+# can't clear the *local* agent's agent_synced_at column; queuing this kind
+# of request is how the server asks the local machine to do that itself.
+EXTRACTION_REQUESTS_KIND_COLUMNS: dict[str, str] = {
+    "kind": "TEXT NOT NULL DEFAULT 'extraction'",
+}
+
 
 def utcnow() -> str:
     """Timestamps are ISO-8601 UTC everywhere; audit trails need one clock."""
@@ -259,6 +270,7 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_AGENT_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "ocr_runs", OCR_RUNS_AGENT_COLUMNS)
     _ensure_columns(conn, "documents", DOCUMENTS_AGENT_SYNC_COLUMNS)
+    _ensure_columns(conn, "extraction_requests", EXTRACTION_REQUESTS_KIND_COLUMNS)
     conn.executescript(SCHEMA_CITIZEN_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA_DOCUMENT_BLOBS_PATH.read_text(encoding="utf-8"))
 

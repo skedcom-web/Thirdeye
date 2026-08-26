@@ -121,7 +121,17 @@
 <div class="panel">
   <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
     <h2 style="margin:0;">💻 Local Agent Status</h2>
-    <a href="/ops/agents" class="btn-sm btn-secondary">Manage Agent Keys →</a>
+    <div style="display:flex; gap:8px; align-items:center;">
+      {% if can_run %}
+      <form method="post" action="/ops/jobs/resync-all" style="margin:0;">
+        <button class="ghost" type="submit"
+                title="If a document's server-side record was ever reset/re-extracted, the local agent may still think it already pushed that document and skip it. This clears that local bookkeeping and re-pushes everything archived on the local machine -- picked up automatically on the agent's next scheduled check-in, no command needed.">
+          🔁 Resync All (Local Agent)
+        </button>
+      </form>
+      {% endif %}
+      <a href="/ops/agents" class="btn-sm btn-secondary">Manage Agent Keys →</a>
+    </div>
   </div>
   <div class="grid cols-3" style="margin-top:16px;">
     <div class="kpi-card occ-kpi">
@@ -142,16 +152,21 @@
   {% if local_requests %}
   <table style="margin-top:16px;">
     <thead>
-      <tr><th>Request</th><th>Status</th><th>Departments</th><th>Sources</th><th>Documents</th><th>Created</th></tr>
+      <tr><th>Request</th><th>Type</th><th>Status</th><th>Departments</th><th>Sources</th><th>Documents</th><th>Created</th></tr>
     </thead>
     <tbody>
       {% for r in local_requests %}
       <tr>
         <td class="mono">#{{ r.id }}</td>
+        <td>{% if r.kind == 'resync_all' %}<span class="pill neutral">Resync All</span>{% else %}Extraction{% endif %}</td>
         <td><span class="pill {{ 'ok' if r.status == 'COMPLETED' else ('bad' if r.status == 'FAILED' else 'warn') }}">{{ r.status }}</span></td>
         <td>{{ r.department_filter or 'All' }}</td>
         <td>{{ r.sources_completed }}/{{ r.sources_total }}</td>
+        {% if r.kind == 'resync_all' %}
+        <td>{{ r.documents_downloaded }} synced, {{ r.documents_failed }} failed</td>
+        {% else %}
         <td>{{ r.documents_downloaded }} downloaded, {{ r.documents_parsed }} parsed</td>
+        {% endif %}
         <td class="mono" style="font-size:12px;">{{ r.created_at }}</td>
       </tr>
       {% endfor %}
