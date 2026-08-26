@@ -430,7 +430,6 @@ def _register_jobs(app: FastAPI) -> None:
                 conn, state_id=state_id, district_id=district_id,
                 department_filter=departments or None, created_by=current_user.username,
             )
-            extraction_queue.trigger_worker_now()
             return RedirectResponse("/ops/jobs", status_code=303)
 
         job_id = ops_jobs.start_job(
@@ -510,7 +509,6 @@ def _register_documents(app: FastAPI) -> None:
                 "selected_language": language or "",
                 "selected_status": status or "",
                 "current_user": current_user,
-                "parsed": request.query_params.get("parsed"),
                 "backfilled": request.query_params.get("backfilled"),
                 "backfill_missing": request.query_params.get("backfill_missing"),
             },
@@ -528,13 +526,6 @@ def _register_documents(app: FastAPI) -> None:
             f"/ops/documents?backfilled={len(result['backfilled'])}&backfill_missing={len(result['missing_on_disk'])}",
             status_code=303,
         )
-
-    @app.post("/ops/documents/parse-all")
-    def documents_parse_all(conn: Conn, config: Config, current_user: RequireCertify):
-        """Parse all unparsed documents in the repository into go_records."""
-        from ..pipeline import run_parsing
-        report = run_parsing(conn, config, limit=1000)
-        return RedirectResponse(f"/ops/documents?parsed={report.succeeded}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
