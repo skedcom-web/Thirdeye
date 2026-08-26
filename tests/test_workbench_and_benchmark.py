@@ -94,6 +94,57 @@ def test_reject_requires_a_reason_over_http(client, conn):
     assert review.get_summary(conn, record_id).status == "pending"
 
 
+def test_bulk_approve_via_http_approves_all_selected(client, conn):
+    record_ids = [int(r["id"]) for r in conn.execute("SELECT id FROM go_records ORDER BY id").fetchall()]
+    assert len(record_ids) >= 2  # the sample fixture ships 3 GOs
+
+    response = client.post(
+        "/records/bulk-approve",
+        data={"record_ids": record_ids, "queue": "extraction"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "bulk_approved=" + str(len(record_ids)) in response.headers["location"]
+
+    for record_id in record_ids:
+        assert review.get_summary(conn, record_id).status == "approved"
+
+    published_ids = {r["record_id"] for r in client.get("/api/verified").json()}
+    assert published_ids == set(record_ids)
+
+
+def test_bulk_approve_skips_record_with_missing_core_field(client, conn):
+    ids = [int(r["id"]) for r in conn.execute("SELECT id FROM go_records ORDER BY id").fetchall()]
+    good_id, broken_id = ids[0], ids[1]
+
+    # Simulate a record with no go_number left standing -- exactly what
+    # review.approve() refuses without an explicit override.
+    conn.execute(
+        "DELETE FROM go_fields WHERE record_id = ? AND field_name = 'go_number'",
+        (broken_id,),
+    )
+
+    response = client.post(
+        "/records/bulk-approve",
+        data={"record_ids": [good_id, broken_id], "queue": "extraction"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "bulk_approved=1" in response.headers["location"]
+    assert "bulk_skipped=1" in response.headers["location"]
+
+    assert review.get_summary(conn, good_id).status == "approved"
+    assert review.get_summary(conn, broken_id).status == "pending"
+
+
+def test_bulk_approve_with_no_selection_is_a_noop(client, conn):
+    response = client.post(
+        "/records/bulk-approve", data={"queue": "extraction"}, follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "bulk_approved=0" in response.headers["location"]
+
+
 def test_missing_record_is_404(client):
     assert client.get("/records/9999").status_code == 404
 

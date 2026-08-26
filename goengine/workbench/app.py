@@ -662,6 +662,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return RedirectResponse("/workbench", status_code=303)
 
+    @app.post("/records/bulk-approve")
+    def post_bulk_approve(
+        conn: Conn,
+        current_user: RequireReview,
+        record_ids: Annotated[list[int], Form()] = [],
+        queue: Annotated[str, Form()] = "extraction",
+        department: Annotated[str | None, Form()] = None,
+    ):
+        """Approves several selected records from the Review Center table in
+        one action. Each record still goes through the exact same
+        review.approve() check as a single approval -- a record missing a
+        core field is skipped, not silently force-approved, since that
+        safeguard is the entire point of Phase 1's review gate. Skipped
+        records stay pending for individual attention; nothing here bypasses
+        that override."""
+        approved = 0
+        skipped: list[tuple[int, str]] = []
+        for record_id in record_ids:
+            try:
+                review.approve(conn, record_id, reviewer=current_user.username)
+                approved += 1
+            except (review.ReviewError, LookupError) as exc:
+                skipped.append((record_id, str(exc)))
+
+        qs = f"queue={queue}"
+        if department:
+            qs += f"&department={department}"
+        qs += f"&bulk_approved={approved}&bulk_skipped={len(skipped)}"
+        return RedirectResponse(f"/ops/review?{qs}", status_code=303)
+
     @app.post("/records/{record_id}/reject")
     def post_reject(
         record_id: int,

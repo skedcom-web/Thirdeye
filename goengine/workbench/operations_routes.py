@@ -564,6 +564,8 @@ def _register_review(app: FastAPI) -> None:
                 "open_escalations": ops_review.open_escalations(conn),
                 "current_user": current_user,
                 "can_escalate": current_user.has_permission("escalate_records"),
+                "bulk_approved": request.query_params.get("bulk_approved"),
+                "bulk_skipped": request.query_params.get("bulk_skipped"),
             },
         )
 

@@ -70,6 +70,19 @@
   </a>
 </div>
 
+{# ═══ Bulk-approve result banner ═════════════════════════════════════ #}
+{% if bulk_approved is not none %}
+<div class="panel" style="margin-bottom:16px;">
+  <p style="margin:0;">
+    <span class="pill ok">bulk approve complete</span>
+    Approved {{ bulk_approved }} record(s).
+    {% if bulk_skipped and bulk_skipped != '0' %}
+    {{ bulk_skipped }} skipped (missing a required field -- open those individually to correct and approve).
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
 {# ═══ Active review queue table ═════════════════════════════════════ #}
 <div class="panel">
   <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:4px;">
@@ -82,31 +95,80 @@
       {% endif %}
     </h2>
     <div class="muted" style="font-size:12px;">
-      Use Approve / Reject / Escalate / Correct on each record
+      Use Approve / Reject / Escalate / Correct on each record, or select several and approve together
     </div>
   </div>
 
   {% if records %}
-  <table>
-    <thead>
-      <tr>
-        <th>Record</th>
-        <th>Document</th>
-        <th>Source</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in records %}
-      <tr>
-        <td class="mono">#{{ r.id }}</td>
-        <td class="mono">{{ r.file_name }}</td>
-        <td>{{ r.source_name }}</td>
-        <td><a href="/records/{{ r.id }}" id="review-record-{{ r.id }}-btn">Review →</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <form method="post" action="/records/bulk-approve" id="bulk-approve-form">
+    <input type="hidden" name="queue" value="{{ selected_queue }}">
+    <input type="hidden" name="department" value="{{ selected_department }}">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+      <button class="btn-sm btn-primary" type="submit" id="bulk-approve-btn" disabled>
+        ✅ Approve Selected (<span id="bulk-approve-count">0</span>)
+      </button>
+      <span class="muted" style="font-size:12px;">
+        Records missing a required field are skipped automatically and stay pending for individual review.
+      </span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:32px;"><input type="checkbox" id="bulk-approve-select-all" title="Select all"></th>
+          <th>Record</th>
+          <th>Document</th>
+          <th>Source</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+        <tr>
+          <td><input type="checkbox" class="bulk-approve-row" name="record_ids" value="{{ r.id }}"></td>
+          <td class="mono">#{{ r.id }}</td>
+          <td class="mono">{{ r.file_name }}</td>
+          <td>{{ r.source_name }}</td>
+          <td><a href="/records/{{ r.id }}" id="review-record-{{ r.id }}-btn">Review →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
+  <script>
+    (function () {
+      var form = document.getElementById("bulk-approve-form");
+      if (!form) return;
+      var selectAll = document.getElementById("bulk-approve-select-all");
+      var rowBoxes = form.querySelectorAll(".bulk-approve-row");
+      var button = document.getElementById("bulk-approve-btn");
+      var countLabel = document.getElementById("bulk-approve-count");
+
+      function refresh() {
+        var checked = form.querySelectorAll(".bulk-approve-row:checked").length;
+        countLabel.textContent = checked;
+        button.disabled = checked === 0;
+        selectAll.checked = checked === rowBoxes.length && rowBoxes.length > 0;
+        selectAll.indeterminate = checked > 0 && checked < rowBoxes.length;
+      }
+
+      selectAll.addEventListener("change", function () {
+        rowBoxes.forEach(function (box) { box.checked = selectAll.checked; });
+        refresh();
+      });
+      rowBoxes.forEach(function (box) { box.addEventListener("change", refresh); });
+
+      form.addEventListener("submit", function (e) {
+        var checked = form.querySelectorAll(".bulk-approve-row:checked").length;
+        if (checked === 0) {
+          e.preventDefault();
+          return;
+        }
+        if (!confirm("Approve " + checked + " selected record(s)?")) {
+          e.preventDefault();
+        }
+      });
+    })();
+  </script>
   {% else %}
   <div class="occ-empty-state">
     <div class="occ-empty-icon" aria-hidden="true">✅</div>
