@@ -85,13 +85,46 @@ def test_correct_via_http(client, conn):
 
 
 def test_reject_requires_a_reason_over_http(client, conn):
-    """Refused either by FastAPI's own validation or by review.reject --
-    which one depends on whether the client sends the empty field at all."""
+    """A wholly empty form field is rejected by FastAPI's own Form()
+    validation before the route ever runs (a framework quirk, not this
+    route's doing) -- that stays a plain 422."""
     record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
-    response = client.post(f"/records/{record_id}/reject", data={"reason": ""})
+    response = client.post(f"/records/{record_id}/reject", data={"reason": ""}, follow_redirects=False)
 
-    assert response.status_code in (400, 422)
+    assert response.status_code == 422
     assert review.get_summary(conn, record_id).status == "pending"
+
+
+def test_reject_with_whitespace_only_reason_shows_friendly_error(client, conn):
+    """A reason that's present but blank after stripping is exactly what
+    review.reject() itself refuses -- this exercises that path (as opposed
+    to FastAPI's own Form() validation above) and confirms it now sends the
+    reviewer back to the record page with a readable banner instead of a
+    raw JSON error (see _record_error_redirect)."""
+    record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
+    response = client.post(f"/records/{record_id}/reject", data={"reason": "   "}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/records/{record_id}?error=")
+    assert review.get_summary(conn, record_id).status == "pending"
+
+
+def test_approve_with_missing_core_field_shows_friendly_error(client, conn):
+    """Regression test for the raw-JSON-error bug: approving a record still
+    missing a core field must land back on the record page with a readable
+    banner, not FastAPI's default JSON error rendering."""
+    record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
+    conn.execute("DELETE FROM go_fields WHERE record_id = ? AND field_name = 'go_number'", (record_id,))
+
+    response = client.post(f"/records/{record_id}/approve", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/records/{record_id}?error=cannot%20approve%20with%20missing%20core%20fields%3A%20go_number%20--%20correct%20them%20first%2C%20or%20approve%20with%20the%20override"
+    assert review.get_summary(conn, record_id).status == "pending"
+
+    followed = client.get(response.headers["location"])
+    assert followed.status_code == 200
+    assert "could not save" in followed.text
+    assert "cannot approve with missing core fields: go_number" in followed.text
 
 
 def test_bulk_approve_via_http_approves_all_selected(client, conn):

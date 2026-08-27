@@ -239,6 +239,13 @@ code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; f
 .pill.bad { background: var(--bad-soft); color: var(--bad); }
 .pill.neutral { background: var(--neutral-soft); color: var(--neutral-ink); }
 
+.spinner {
+  display: inline-block; width: 13px; height: 13px; vertical-align: -2px;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: spinner-spin .6s linear infinite; opacity: .8;
+}
+@keyframes spinner-spin { to { transform: rotate(360deg); } }
+
 .conf { font-weight: 600; }
 .conf.high { color: var(--ok); } .conf.mid { color: var(--warn); } .conf.low { color: var(--bad); }
 .evidence { color: var(--muted); font-size: 12px; font-style: italic; border-left: 3px solid var(--panel-border); padding-left: 8px; margin-top: 4px; }

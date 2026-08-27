@@ -107,8 +107,11 @@
       <button class="btn-sm btn-primary" type="submit" id="bulk-approve-btn" disabled>
         ✅ Approve Selected (<span id="bulk-approve-count">0</span>)
       </button>
-      <span class="muted" style="font-size:12px;">
+      <span class="muted" style="font-size:12px;" id="bulk-approve-hint">
         Records missing a required field are skipped automatically and stay pending for individual review.
+      </span>
+      <span id="bulk-approve-status" style="display:none; font-size:13px; font-weight:600; color:var(--accent);">
+        <span class="spinner" aria-hidden="true"></span> <span id="bulk-approve-status-text"></span>
       </span>
     </div>
     <table>
@@ -142,6 +145,9 @@
       var rowBoxes = form.querySelectorAll(".bulk-approve-row");
       var button = document.getElementById("bulk-approve-btn");
       var countLabel = document.getElementById("bulk-approve-count");
+      var hint = document.getElementById("bulk-approve-hint");
+      var status = document.getElementById("bulk-approve-status");
+      var statusText = document.getElementById("bulk-approve-status-text");
 
       function refresh() {
         var checked = form.querySelectorAll(".bulk-approve-row:checked").length;
@@ -165,7 +171,28 @@
         }
         if (!confirm("Approve " + checked + " selected record(s)?")) {
           e.preventDefault();
+          return;
         }
+        // The server processes every selected record before it can redirect
+        // back here, so the only feedback during that gap used to be the
+        // browser's own tab spinner -- easy to miss and gives no sense of
+        // what's actually happening. This makes the wait explicit and
+        // blocks a second click from firing a duplicate submission.
+        //
+        // The row checkboxes are deliberately left alone: a disabled
+        // checkbox is dropped from the submitted form data, so disabling
+        // them here (before the browser has finished collecting this same
+        // submission's data) would silently send zero record_ids. Greying
+        // the table out is a purely visual cue instead.
+        button.disabled = true;
+        selectAll.disabled = true;
+        form.querySelector("table").style.opacity = "0.6";
+        form.querySelector("table").style.pointerEvents = "none";
+        hint.style.display = "none";
+        statusText.textContent = "Approving " + checked + " record(s)… please wait, this page will refresh automatically.";
+        status.style.display = "inline-flex";
+        status.style.alignItems = "center";
+        status.style.gap = "6px";
       });
     })();
   </script>

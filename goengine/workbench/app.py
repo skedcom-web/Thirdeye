@@ -52,6 +52,16 @@ from .deps import (
 )
 
 
+def _record_error_redirect(record_id: int, message: str) -> RedirectResponse:
+    """A rejected decision (missing core field, empty reason, etc.) is an
+    expected, correctable outcome -- not a server error -- so it belongs
+    back on the record page as a readable banner, not a raw JSON 400 the
+    browser renders as a blank page with no way back."""
+    from urllib.parse import quote
+
+    return RedirectResponse(f"/records/{record_id}?error={quote(message)}", status_code=303)
+
+
 def _post_login_destination(user: auth.User) -> str:
     """Where a role lands after authenticating with no specific `next` in
     hand -- Phase 3.1's role routing. `/` is the public landing page, so it
@@ -555,7 +565,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Review one record
     # -----------------------------------------------------------------------
     @app.get("/records/{record_id}", response_class=HTMLResponse)
-    def record_detail(request: Request, record_id: int, conn: Conn, current_user: LoggedIn):
+    def record_detail(
+        request: Request, record_id: int, conn: Conn, current_user: LoggedIn, error: str | None = None,
+    ):
         from ..operations import review as ops_review
 
         try:
@@ -589,6 +601,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "can_review": current_user.has_permission(auth.PERM_REVIEW_RECORDS),
                 "can_escalate": current_user.has_permission(auth.PERM_ESCALATE_RECORDS),
                 "escalations": ops_review.escalations_for_record(conn, record_id),
+                "error": error,
             },
         )
 
@@ -641,8 +654,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 conn, record_id, field_name, new_value.strip(),
                 reviewer=current_user.username, source_page=source_page, note=note,
             )
-        except (review.ReviewError, LookupError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except review.ReviewError as exc:
+            return _record_error_redirect(record_id, str(exc))
         return RedirectResponse(f"/records/{record_id}", status_code=303)
 
     @app.post("/records/{record_id}/approve")
@@ -658,8 +673,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 conn, record_id, reviewer=current_user.username, note=note,
                 allow_missing_fields=bool(override),
             )
-        except (review.ReviewError, LookupError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except review.ReviewError as exc:
+            # A failed validation (e.g. a core field still missing) is a
+            # normal, expected outcome of clicking Approve here -- not a
+            # server error, so it belongs back on the record page as a
+            # readable banner the reviewer can act on, not a raw JSON 400.
+            return _record_error_redirect(record_id, str(exc))
         return RedirectResponse("/workbench", status_code=303)
 
     @app.post("/records/bulk-approve")
@@ -701,8 +722,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         try:
             review.reject(conn, record_id, reviewer=current_user.username, reason=reason.strip())
-        except (review.ReviewError, LookupError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except review.ReviewError as exc:
+            return _record_error_redirect(record_id, str(exc))
         return RedirectResponse("/workbench", status_code=303)
 
     @app.post("/records/{record_id}/escalate")
@@ -716,8 +739,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         try:
             ops_review.escalate(conn, record_id, escalated_by=current_user.username, reason=reason.strip())
-        except (ops_review.OperationsError, LookupError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ops_review.OperationsError as exc:
+            return _record_error_redirect(record_id, str(exc))
         return RedirectResponse(f"/records/{record_id}", status_code=303)
 
     # -----------------------------------------------------------------------

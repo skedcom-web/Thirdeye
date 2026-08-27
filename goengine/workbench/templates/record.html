@@ -2,6 +2,12 @@
 {% block title %}Record #{{ record.record_id }} &middot; Thirdeye{% endblock %}
 {% block content %}
 
+{% if error %}
+<div class="panel" style="margin-bottom:16px; border-left: 5px solid var(--bad);">
+  <p style="margin:0;"><span class="pill bad">could not save</span> {{ error }}</p>
+</div>
+{% endif %}
+
 <div class="panel">
   <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap;">
     <h2 style="margin:0;">Record #{{ record.record_id }}</h2>
