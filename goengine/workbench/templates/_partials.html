@@ -105,6 +105,33 @@
 </header>
 {% endmacro %}
 
+{# Prev/Next pager for any list capped to a page at a time. `qs` is a
+   pre-built query string of every OTHER active filter (queue, department,
+   search, etc) -- built server-side with urllib.parse.urlencode so values
+   are escaped correctly -- with `&page=N` appended here. Renders nothing
+   for a single page, so it's safe to drop into a template unconditionally. #}
+{% macro pagination(base_path, qs, page, total_pages, total_items, page_size) %}
+{% if total_pages > 1 %}
+<div style="display:flex; align-items:center; gap:12px; margin-top:16px; flex-wrap:wrap;">
+  {% if page > 1 %}
+  <a class="btn-sm btn-secondary" href="{{ base_path }}?{{ qs }}&page={{ page - 1 }}">← Previous</a>
+  {% else %}
+  <span class="btn-sm btn-secondary" style="opacity:.4; pointer-events:none;" aria-disabled="true">← Previous</span>
+  {% endif %}
+  {% set range_start = (page - 1) * page_size + 1 %}
+  {% set range_end = [page * page_size, total_items]|min %}
+  <span class="muted" style="font-size:13px;">
+    {{ range_start }}&ndash;{{ range_end }} of {{ total_items }}
+  </span>
+  {% if page < total_pages %}
+  <a class="btn-sm btn-secondary" href="{{ base_path }}?{{ qs }}&page={{ page + 1 }}">Next →</a>
+  {% else %}
+  <span class="btn-sm btn-secondary" style="opacity:.4; pointer-events:none;" aria-disabled="true">Next →</span>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
 {% macro progress_ring(done, total, label, size=84) %}
 {% set r = (size / 2) - 8 %}
 {% set c = 2 * 3.14159265 * r %}

@@ -20,7 +20,10 @@
     <tr><th style="width:150px;">Source URL</th>
         <td class="mono"><a href="{{ record.source_url }}" rel="noreferrer noopener nofollow">{{ record.source_url }}</a></td></tr>
     <tr><th>SHA256</th><td class="mono">{{ record.sha256 }}
-        <a href="/documents/{{ record.document_id }}/verify" style="margin-left:8px;">verify integrity</a></td></tr>
+        <button type="button" class="ghost" id="verify-integrity-btn"
+                data-verify-url="/documents/{{ record.document_id }}/verify"
+                style="margin-left:8px; font-size:inherit;">verify integrity</button>
+        <span id="verify-integrity-result" style="margin-left:8px;"></span></td></tr>
     <tr><th>Text extraction</th>
         <td>{{ record.page_count }} pages, confidence {{ record.extraction_confidence|pct }}</td></tr>
   </table>
@@ -184,5 +187,35 @@
     {% endfor %}
   </table>
 </div>
+
+<script>
+  (function () {
+    var btn = document.getElementById("verify-integrity-btn");
+    if (!btn) return;
+    var result = document.getElementById("verify-integrity-result");
+
+    // Was previously a plain <a href> straight to a JSON API route -- the
+    // browser rendered the raw {"ok": true, ...} response as a blank page
+    // with nothing to click back to. This calls the same endpoint via
+    // fetch() and shows the result inline instead of ever navigating away.
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      result.innerHTML = '<span class="spinner" aria-hidden="true"></span> checking…';
+      fetch(btn.getAttribute("data-verify-url"), { method: "GET" })
+        .then(function (resp) { return resp.json().then(function (body) { return { status: resp.status, body: body }; }); })
+        .then(function (r) {
+          if (r.status === 200 && r.body.ok) {
+            result.innerHTML = '<span class="pill ok">verified</span> ' + (r.body.message || "matches the archived hash");
+          } else {
+            result.innerHTML = '<span class="pill bad">failed</span> ' + (r.body.message || r.body.detail || "integrity check failed");
+          }
+        })
+        .catch(function () {
+          result.innerHTML = '<span class="pill bad">error</span> could not reach the server -- try again';
+        })
+        .finally(function () { btn.disabled = false; });
+    });
+  })();
+</script>
 
 {% endblock %}

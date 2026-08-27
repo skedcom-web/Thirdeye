@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -493,21 +494,42 @@ def _register_jobs(app: FastAPI) -> None:
 # the same tables the review workbench and dashboard already use.
 # ---------------------------------------------------------------------------
 def _register_documents(app: FastAPI) -> None:
+    DOCUMENTS_PAGE_SIZE = 50
+
     @app.get("/ops/documents", response_class=HTMLResponse)
     def documents_list(
         request: Request, conn: Conn, current_user: LoggedIn,
         source_id: str | None = None, q: str | None = None, department: str | None = None,
         year: str | None = None, language: str | None = None, status: str | None = None,
+        page: int = 1,
     ):
         source_id_int = int(source_id) if source_id else None
         year_int = int(year) if year else None
+        page = max(page, 1)
+        filters = dict(
+            source_id=source_id_int, search=q, department=department,
+            year=year_int, language=language, status=status,
+        )
+        total = repository.count_documents(conn, **filters)
+        total_pages = max((total + DOCUMENTS_PAGE_SIZE - 1) // DOCUMENTS_PAGE_SIZE, 1)
+        page = min(page, total_pages)
+        qs = urlencode({
+            k: v for k, v in {
+                "source_id": source_id_int, "q": q, "department": department,
+                "year": year_int, "language": language, "status": status,
+            }.items() if v
+        })
         return templates.TemplateResponse(
             request, "documents.html",
             {
                 "documents": repository.list_documents(
-                    conn, source_id=source_id_int, search=q, department=department,
-                    year=year_int, language=language, status=status,
+                    conn, **filters, limit=DOCUMENTS_PAGE_SIZE, offset=(page - 1) * DOCUMENTS_PAGE_SIZE,
                 ),
+                "total_documents": total,
+                "page": page,
+                "total_pages": total_pages,
+                "page_size": DOCUMENTS_PAGE_SIZE,
+                "pagination_qs": qs,
                 "sources": registry.list_sources(conn),
                 "departments": repository.list_document_departments(conn),
                 "years": repository.list_document_years(conn),
@@ -543,24 +565,40 @@ def _register_documents(app: FastAPI) -> None:
 # Module 7: Review Workbench (typed queues + escalation)
 # ---------------------------------------------------------------------------
 def _register_review(app: FastAPI) -> None:
+    REVIEW_PAGE_SIZE = 50
+
     @app.get("/ops/review", response_class=HTMLResponse)
     def review_hub(
         request: Request, conn: Conn, current_user: LoggedIn,
-        queue: str = ops_review.QUEUE_EXTRACTION, department: str | None = None,
+        queue: str = ops_review.QUEUE_EXTRACTION, department: str | None = None, page: int = 1,
     ):
         if queue not in (ops_review.QUEUE_EXTRACTION, ops_review.QUEUE_OCR, ops_review.QUEUE_METADATA, ops_review.QUEUE_FAILURE):
             raise HTTPException(status_code=400, detail="unknown queue type")
         department = department or None
         if department is not None and department not in REVIEW_FILTER_BUCKETS:
             raise HTTPException(status_code=400, detail="unknown department")
+
+        counts = ops_review.queue_counts(conn, department=department)
+        total = counts[queue]
+        total_pages = max((total + REVIEW_PAGE_SIZE - 1) // REVIEW_PAGE_SIZE, 1)
+        page = min(max(page, 1), total_pages)
+        qs = urlencode({"queue": queue, **({"department": department} if department else {})})
+
         return templates.TemplateResponse(
             request, "review_hub.html",
             {
-                "counts": ops_review.queue_counts(conn, department=department),
+                "counts": counts,
                 "selected_queue": queue,
                 "selected_department": department or "",
                 "departments": REVIEW_FILTER_BUCKETS,
-                "records": ops_review.queue_by_type(conn, queue, department=department, limit=50),
+                "records": ops_review.queue_by_type(
+                    conn, queue, department=department, limit=REVIEW_PAGE_SIZE,
+                    offset=(page - 1) * REVIEW_PAGE_SIZE,
+                ),
+                "page": page,
+                "total_pages": total_pages,
+                "page_size": REVIEW_PAGE_SIZE,
+                "pagination_qs": qs,
                 "open_escalations": ops_review.open_escalations(conn),
                 "current_user": current_user,
                 "can_escalate": current_user.has_permission("escalate_records"),

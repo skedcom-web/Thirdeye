@@ -219,27 +219,18 @@ def version_history(conn: sqlite3.Connection, discovered_id: int) -> list[sqlite
     ).fetchall()
 
 
-def list_documents(
-    conn: sqlite3.Connection,
+def _documents_where(
     *,
-    source_id: int | None = None,
-    search: str | None = None,
-    department: str | None = None,
-    year: int | None = None,
-    language: str | None = None,
-    status: str | None = None,
-    limit: int = 500,
-) -> list[sqlite3.Row]:
-    """Every downloaded file, newest first, with enough context (source,
-    department, parse/review status, GO number if extracted) for an admin
-    to find and download a specific document without a command line.
-
-    `year` filters on the download date, not a parsed GO date -- GO dates
-    live as free-text evidence in `go_fields` in whatever format the source
-    document used, not a queryable column, so downloaded-year is the
-    reliable one. `status` matches either the review outcome (approved/
-    rejected/pending) or, for anything not yet reviewed, the discovery
-    lifecycle stage (downloaded/parsed/etc) -- whichever the record has."""
+    source_id: int | None,
+    search: str | None,
+    department: str | None,
+    year: int | None,
+    language: str | None,
+    status: str | None,
+) -> tuple[str, list[object]]:
+    """Shared by list_documents/count_documents so the two can never drift
+    out of sync -- a filter that narrows the list but not the count (or vice
+    versa) would silently break pagination."""
     clauses: list[str] = []
     params: list[object] = []
     if source_id is not None:
@@ -262,7 +253,39 @@ def list_documents(
         clauses.append("COALESCE(r.status, dd.status) = ?")
         params.append(status)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.append(limit)
+    return where, params
+
+
+def list_documents(
+    conn: sqlite3.Connection,
+    *,
+    source_id: int | None = None,
+    search: str | None = None,
+    department: str | None = None,
+    year: int | None = None,
+    language: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    """One page of downloaded files, newest first, with enough context
+    (source, department, parse/review status, GO number if extracted) for an
+    admin to find and download a specific document without a command line.
+    Paginated (see count_documents for the total) -- a library with hundreds
+    of documents silently truncated at a fixed limit, with no way to reach
+    the rest, is exactly the bug this replaces.
+
+    `year` filters on the download date, not a parsed GO date -- GO dates
+    live as free-text evidence in `go_fields` in whatever format the source
+    document used, not a queryable column, so downloaded-year is the
+    reliable one. `status` matches either the review outcome (approved/
+    rejected/pending) or, for anything not yet reviewed, the discovery
+    lifecycle stage (downloaded/parsed/etc) -- whichever the record has."""
+    where, params = _documents_where(
+        source_id=source_id, search=search, department=department,
+        year=year, language=language, status=status,
+    )
+    params = [*params, limit, offset]
     return conn.execute(
         f"""
         SELECT
@@ -292,10 +315,46 @@ def list_documents(
           LEFT JOIN document_categories dc ON dc.document_id = d.id
          {where}
          ORDER BY d.downloaded_at DESC
-         LIMIT ?
+         LIMIT ? OFFSET ?
         """,
         params,
     ).fetchall()
+
+
+def count_documents(
+    conn: sqlite3.Connection,
+    *,
+    source_id: int | None = None,
+    search: str | None = None,
+    department: str | None = None,
+    year: int | None = None,
+    language: str | None = None,
+    status: str | None = None,
+) -> int:
+    """Total documents matching the same filters as list_documents, for
+    computing page counts."""
+    where, params = _documents_where(
+        source_id=source_id, search=search, department=department,
+        year=year, language=language, status=status,
+    )
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n
+          FROM documents d
+          JOIN sources s ON s.id = d.source_id
+          LEFT JOIN discovered_documents dd ON dd.id = d.discovered_id
+          LEFT JOIN extractions e ON e.document_id = d.id
+          LEFT JOIN go_records r ON r.extraction_id = e.id
+          LEFT JOIN go_fields go_number
+                 ON go_number.record_id = r.id
+                AND go_number.field_name = 'go_number'
+                AND go_number.superseded_by IS NULL
+          LEFT JOIN document_categories dc ON dc.document_id = d.id
+         {where}
+        """,
+        params,
+    ).fetchone()
+    return int(row["n"])
 
 
 def list_document_departments(conn: sqlite3.Connection) -> list[str]:

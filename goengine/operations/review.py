@@ -102,13 +102,17 @@ LOW_CONFIDENCE_THRESHOLD = 0.7
 
 
 def queue_by_type(
-    conn: sqlite3.Connection, queue_type: str, *, department: str | None = None, limit: int = 100,
+    conn: sqlite3.Connection, queue_type: str, *,
+    department: str | None = None, limit: int = 100, offset: int = 0,
 ) -> list[sqlite3.Row]:
-    """The existing pending-review queue, filtered/tagged by what kind of
+    """One page of the pending-review queue, filtered/tagged by what kind of
     attention it most likely needs -- reusing Phase 1/2 data, not a new
     parallel queue table. `department` narrows to one of categorize.py's
     department buckets (health/education/public_works/rural_development/
-    other), the same classification publish_department() gates on."""
+    other), the same classification publish_department() gates on.
+    Paginated (see queue_counts for the total per queue) -- a queue of
+    hundreds capped at a fixed limit with no way to reach the rest is
+    exactly the bug this replaces."""
     dept_join = "LEFT JOIN document_categories dc ON dc.document_id = d.id"
     dept_clause = " AND dc.department_bucket = ?" if department else ""
     dept_params = [department] if department else []
@@ -124,9 +128,9 @@ def queue_by_type(
               {dept_join}
              WHERE r.status = 'pending' AND e.needs_ocr = 1{dept_clause}
              ORDER BY r.id
-             LIMIT ?
+             LIMIT ? OFFSET ?
             """,
-            (*dept_params, limit),
+            (*dept_params, limit, offset),
         ).fetchall()
 
     if queue_type == QUEUE_FAILURE:
@@ -140,9 +144,9 @@ def queue_by_type(
               {dept_join}
              WHERE r.status = 'pending'{dept_clause}
              ORDER BY r.id
-             LIMIT ?
+             LIMIT ? OFFSET ?
             """,
-            (*dept_params, limit),
+            (*dept_params, limit, offset),
         ).fetchall()
 
     if queue_type == QUEUE_METADATA:
@@ -162,9 +166,9 @@ def queue_by_type(
              GROUP BY r.id
             HAVING MIN(gf.confidence) < ?
              ORDER BY min_field_confidence
-             LIMIT ?
+             LIMIT ? OFFSET ?
             """,
-            (*dept_params, LOW_CONFIDENCE_THRESHOLD, limit),
+            (*dept_params, LOW_CONFIDENCE_THRESHOLD, limit, offset),
         ).fetchall()
 
     # QUEUE_EXTRACTION: default -- everything pending, worst text-layer first.
@@ -178,9 +182,9 @@ def queue_by_type(
           {dept_join}
          WHERE r.status = 'pending'{dept_clause}
          ORDER BY e.confidence ASC
-         LIMIT ?
+         LIMIT ? OFFSET ?
         """,
-        (*dept_params, limit),
+        (*dept_params, limit, offset),
     ).fetchall()
 
 

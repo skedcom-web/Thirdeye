@@ -42,6 +42,30 @@ def test_downloaded_bytes_are_identical_to_source(conn, settings, fetcher, sourc
         assert repository.absolute_path(settings, row["stored_path"]).read_bytes() == original[name]
 
 
+def test_list_documents_paginates_without_gaps_or_overlap(conn, settings, fetcher, source_id, sample_pdfs):
+    """Regression test for the Document Library silently truncating at a
+    fixed limit with no way to reach the rest: count_documents() must agree
+    with list_documents(), and consecutive pages must partition the full
+    set with no duplicate or missing rows."""
+    _download_all(conn, settings, fetcher)
+    total = repository.count_documents(conn)
+    assert total == len(sample_pdfs)
+
+    page1 = repository.list_documents(conn, limit=2, offset=0)
+    page2 = repository.list_documents(conn, limit=2, offset=2)
+    assert len(page1) == 2
+    assert len(page1) + len(page2) == total
+    ids_page1 = {d["document_id"] for d in page1}
+    ids_page2 = {d["document_id"] for d in page2}
+    assert ids_page1.isdisjoint(ids_page2)
+
+
+def test_count_documents_respects_filters(conn, settings, fetcher, source_id, sample_pdfs):
+    _download_all(conn, settings, fetcher)
+    assert repository.count_documents(conn, source_id=source_id) == len(sample_pdfs)
+    assert repository.count_documents(conn, source_id=source_id + 1000) == 0
+
+
 def test_documents_cannot_be_overwritten(conn, settings, fetcher, source_id):
     _download_all(conn, settings, fetcher)
     document_id = conn.execute("SELECT MIN(id) AS id FROM documents").fetchone()["id"]

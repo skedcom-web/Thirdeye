@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_partials.html" as p %}
 {% block title %}Document Library · Third Eye{% endblock %}
 {% block content %}
 
@@ -95,7 +96,7 @@
 <div class="panel">
   <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:4px;">
     <h2 style="margin:0;">📁 Downloaded documents</h2>
-    <span class="muted" style="font-size:12px;">{{ documents|length }} shown, most recent first</span>
+    <span class="muted" style="font-size:12px;">{{ total_documents }} total, most recent first</span>
   </div>
 
   {% if documents %}
@@ -145,6 +146,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {{ p.pagination("/ops/documents", pagination_qs, page, total_pages, total_documents, page_size) }}
   {% else %}
   <div class="occ-empty-state">
     <div class="occ-empty-icon" aria-hidden="true">📁</div>

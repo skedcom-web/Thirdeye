@@ -75,6 +75,21 @@ def test_ocr_queue_only_contains_records_needing_ocr(conn, parsed_documents):
     assert len(ops_review.queue_by_type(conn, ops_review.QUEUE_EXTRACTION)) == len(all_records)
 
 
+def test_extraction_queue_paginates(conn, parsed_documents):
+    """Regression test: a queue capped at a fixed limit with no offset
+    silently hides everything past that limit and there's no way to reach
+    it. queue_by_type's offset param is what /ops/review's Previous/Next
+    controls are built on."""
+    all_records = ops_review.queue_by_type(conn, ops_review.QUEUE_EXTRACTION, limit=1000)
+    assert len(all_records) >= 2
+
+    page1 = ops_review.queue_by_type(conn, ops_review.QUEUE_EXTRACTION, limit=2, offset=0)
+    page2 = ops_review.queue_by_type(conn, ops_review.QUEUE_EXTRACTION, limit=2, offset=2)
+    assert len(page1) == 2
+    assert {r["id"] for r in page1}.isdisjoint({r["id"] for r in page2})
+    assert {r["id"] for r in page1} | {r["id"] for r in page2} == {r["id"] for r in all_records[:4]}
+
+
 def test_failure_queue_reflects_recorded_failures(conn, parsed_documents):
     from goengine.certification import golden
     from goengine.certification.benchmark import run_certification_benchmark

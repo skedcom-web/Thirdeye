@@ -60,6 +60,35 @@ def test_integrity_endpoint(client, conn):
     assert response.json()["ok"] is True
 
 
+def test_record_page_verify_button_calls_api_not_a_plain_link(client, conn):
+    """Regression test: 'verify integrity' used to be a plain <a href> to a
+    JSON API route, so clicking it navigated the whole browser to a raw
+    {"ok": true, ...} page with no way back. It must now be a button that
+    stays on the record page and calls the API via JS instead."""
+    record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
+    document_id = int(conn.execute(
+        "SELECT document_id FROM go_records WHERE id = ?", (record_id,)
+    ).fetchone()["document_id"])
+    response = client.get(f"/records/{record_id}")
+
+    assert response.status_code == 200
+    assert f'href="/documents/{document_id}/verify"' not in response.text
+    assert f'data-verify-url="/documents/{document_id}/verify"' in response.text
+    assert 'id="verify-integrity-btn"' in response.text
+
+
+def test_documents_list_page_out_of_range_is_clamped_not_an_error(client, conn):
+    response = client.get("/ops/documents?page=999")
+    assert response.status_code == 200
+    assert "Downloaded documents" in response.text
+
+
+def test_review_hub_page_out_of_range_is_clamped_not_an_error(client, conn):
+    response = client.get("/ops/review?queue=extraction&page=999")
+    assert response.status_code == 200
+    assert "Pending Review Queue" in response.text
+
+
 def test_approve_via_http_publishes(client, conn):
     record_id = int(conn.execute("SELECT MIN(id) AS id FROM go_records").fetchone()["id"])
     response = client.post(
