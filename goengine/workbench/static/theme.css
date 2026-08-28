@@ -318,23 +318,26 @@ pre.pagetext {
 }
 .theme-toggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 
-/* Theme pill (public pages): three icon buttons in one rounded group,
-   matching a real reference product's header control. The old dropdown
-   picker above it in this file's history was still more UI than the
-   reference actually shows -- three icons, no menu, is genuinely simpler
-   and matches what was asked for. */
+/* Theme pill (public pages): a labeled segmented control -- icon + text
+   per segment, the active one filled with the brand gradient -- rather
+   than three bare icon buttons. Matches the bolder, more confident header
+   controls of a modern SaaS product instead of reading as an afterthought
+   next to the Login button beside it. */
 .theme-pill {
   display: flex; align-items: center; gap: 2px; background: var(--neutral-soft);
   border-radius: 999px; padding: 4px; flex-shrink: 0;
 }
 .theme-pill button {
-  display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border-radius: 50%; background: transparent; border: 0;
-  color: var(--muted); cursor: pointer; transition: background .15s ease, color .15s ease;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 14px; border-radius: 999px; background: transparent; border: 0;
+  color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; font-weight: 600;
+  white-space: nowrap; transition: background .2s ease, color .2s ease, box-shadow .2s ease;
 }
 .theme-pill button:hover { color: var(--ink); }
-.theme-pill button[aria-pressed="true"] { background: var(--bg-elevated); color: var(--accent); box-shadow: var(--shadow); }
-
+.theme-pill button[aria-pressed="true"] {
+  background: var(--accent-grad); color: var(--accent-ink);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+}
 /* ---------------------------------------------------------------------- */
 /* Marketing / landing components                                          */
 /* ---------------------------------------------------------------------- */
@@ -359,22 +362,55 @@ pre.pagetext {
   background: currentColor; border-radius: 2px; transition: transform .2s ease, opacity .2s ease;
 }
 header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--header-ink); }
-.site-header .header-end { display: flex; align-items: center; gap: 16px; margin-left: auto; }
-.btn-nav-cta { padding: 8px 16px; font-size: 13px; }
-@media (max-width: 860px) {
-  .site-header nav, header.app-header nav { display: none; }
-  .nav-toggle { display: inline-flex; }
+.site-header .header-end { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+/* Header CTA buttons: full pill shape + the brand gradient + a resting
+   glow, instead of a flat rounded-rect fill -- reads as a deliberate,
+   modern primary action rather than a default button dropped in the
+   header. .btn-lg already adds a lift + bigger shadow on hover; this
+   layers a colored glow on top of that so the effect scales with the
+   button's own accent color instead of a neutral gray shadow. */
+a.btn-nav-cta, button.btn-nav-cta {
+  /* Element+class beats .btn-lg's plain single-class rule (defined later
+     in this file) regardless of source order -- confirmed live that a
+     bare .btn-nav-cta selector here was silently losing that cascade
+     fight and keeping .btn-lg's rectangular 10px radius. */
+  padding: 10px 20px; font-size: 13px; border-radius: 999px; font-weight: 600;
+}
+a.btn-primary.btn-nav-cta {
+  background: var(--accent-grad); box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+a.btn-primary.btn-nav-cta:hover { opacity: 1; box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 55%, transparent); }
+a.btn-secondary.btn-nav-cta { background: var(--bg-elevated); border: 1px solid var(--panel-border); }
+/* The plain-text "Admin" link that sits beside the Login button in the
+   signed-out header used to be bare text floating next to a solid button
+   -- visually unpaired. Giving it a matching ghost-pill treatment makes
+   the two read as one deliberate, secondary/primary button pair. */
+.header-end > a.nav-link {
+  padding: 9px 16px; border-radius: 999px; border: 1px solid var(--panel-border);
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.header-end > a.nav-link:hover { background: var(--neutral-soft); border-color: var(--muted); color: var(--ink); }
+.nav-toggle { display: none; }
+/* Public header (.site-header) and the admin shell (header.app-header) get
+   their OWN independent hamburger thresholds -- they were sharing one
+   breakpoint, but the public header's content genuinely needs much more
+   room (measured empirically: brand + 6 nav links + the labeled theme
+   pill + Admin/Login pills need ~1331px on one row -- 1160px was found to
+   still overflow by testing the actual boundary, not by estimating; 1400px
+   leaves real margin above that). Sharing that wider threshold with the
+   admin shell would have made admin staff see their nav collapse into a
+   hamburger on perfectly ordinary 1200-1400px laptop screens, an unrelated
+   regression -- the admin header's own content was never measured to need
+   that much room, so it keeps its original, unrelated 860px threshold. */
+@media (max-width: 1400px) {
+  .site-header nav { display: none; }
+  .site-header .nav-toggle { display: inline-flex; }
   .site-header.nav-open nav {
     display: flex; position: absolute; top: 100%; left: 0; right: 0; flex-direction: column;
     align-items: flex-start; background: var(--bg-elevated); padding: 16px 24px;
     border-bottom: 1px solid var(--panel-border); gap: 14px; max-height: calc(100vh - 60px); overflow-y: auto; z-index: 49;
   }
   .site-header.nav-open .theme-pill { flex-wrap: wrap; }
-  header.app-header.nav-open nav {
-    display: flex; position: absolute; top: 100%; left: 0; right: 0; flex-direction: column;
-    align-items: flex-start; margin-left: 0; background: var(--header-bg); padding: 16px 20px;
-    border-bottom: 1px solid var(--panel-border); gap: 14px; max-height: calc(100vh - 60px); overflow-y: auto; z-index: 39;
-  }
   /* Theme picker + login/admin actions used to sit inline in the header bar
      next to the brand and hamburger button -- on a phone-width screen that
      content (3 theme buttons + a CTA button) simply doesn't fit and pushed
@@ -387,6 +423,15 @@ header.app-header .nav-toggle { color: var(--header-ink); border-color: var(--he
   .site-header .header-end {
     flex-basis: 100%; order: 3; margin-left: 0;
     justify-content: center; flex-wrap: wrap; row-gap: 10px;
+  }
+}
+@media (max-width: 860px) {
+  header.app-header nav { display: none; }
+  header.app-header .nav-toggle { display: inline-flex; }
+  header.app-header.nav-open nav {
+    display: flex; position: absolute; top: 100%; left: 0; right: 0; flex-direction: column;
+    align-items: flex-start; margin-left: 0; background: var(--header-bg); padding: 16px 20px;
+    border-bottom: 1px solid var(--panel-border); gap: 14px; max-height: calc(100vh - 60px); overflow-y: auto; z-index: 39;
   }
 }
 
