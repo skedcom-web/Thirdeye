@@ -81,7 +81,12 @@
 {% endif %}
 <header class="site-header" id="top">
   <a class="brand" href="/">{{ mark(30, 'headMark') }} Third Eye</a>
-  <nav aria-label="Main navigation">
+  <button class="nav-toggle" data-nav-toggle aria-label="Open navigation" aria-expanded="false" aria-controls="main-nav">
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+  </button>
+  <nav id="main-nav" aria-label="Main navigation">
     <a href="/" class="nav-link">Home</a>
     <a href="/my-area" class="nav-link">My Area</a>
     <a href="/#explore" class="nav-link">Explore</a>

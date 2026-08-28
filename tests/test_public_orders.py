@@ -34,6 +34,31 @@ def test_orders_list_requires_no_login(public_client):
     assert "Government Orders" in response.text
 
 
+@pytest.mark.parametrize("path", ["/orders", "/my-area", "/districts", "/taluks", "/villages"])
+def test_public_pages_have_a_working_mobile_nav_toggle(public_client, path):
+    """Regression test: _partials.html's shared public_header() macro used
+    to render the nav links with no way to reveal them on a phone-width
+    screen at all -- theme.css hides <nav> below 860px and relies entirely
+    on a `[data-nav-toggle]` button to reveal it (see theme.js's
+    wireMobileNav), but the macro never rendered that button. Every page
+    built on the macro must carry it, plus the `id="main-nav"` the button's
+    aria-controls points at."""
+    response = public_client.get(path)
+    assert response.status_code == 200
+    assert "data-nav-toggle" in response.text
+    assert 'id="main-nav"' in response.text
+    assert 'aria-controls="main-nav"' in response.text
+
+
+def test_landing_page_has_a_working_mobile_nav_toggle(public_client):
+    # landing.html keeps its own header markup (not the shared macro) --
+    # same requirement, checked separately since it's a different template.
+    response = public_client.get("/")
+    assert response.status_code == 200
+    assert "data-nav-toggle" in response.text
+    assert 'id="main-nav"' in response.text
+
+
 def test_empty_state_when_nothing_approved(public_client):
     response = public_client.get("/orders")
     assert response.status_code == 200
