@@ -91,6 +91,25 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
+def _parse_amount(value: str | None) -> float | None:
+    """Defensive numeric parse -- skip, never guess, on anything that
+    doesn't cleanly parse as a number. `budget` is normally a clean
+    unit-multiplied decimal (extraction/metadata.py::extract_budget), but a
+    reviewer can freely overwrite any field via Correct with arbitrary text
+    -- a real production record has "NA" here, meaning "not applicable,"
+    which a bare float() crashed on (confirmed via the actual traceback).
+    The SQL-side aggregates elsewhere in this module use CAST(... AS REAL),
+    which SQLite/Turso already silently resolves to 0 for non-numeric text
+    -- this is the one place doing the conversion in Python instead, so it
+    needs its own guard."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def format_inr(amount: float) -> str:
     """Indian Lakh/Crore formatting matching the blueprint's own example
     ("₹5.6 Crore") -- citizens read large government figures in
@@ -307,7 +326,7 @@ def timeline_feed(
                 "department": row["department"],
                 "department_label": DEPARTMENT_LABELS.get(row["department_bucket"], "Other"),
                 "subject": row["subject"],
-                "budget": float(row["budget"]) if row["budget"] else None,
+                "budget": _parse_amount(row["budget"]),
                 "go_date": parsed,
             }
         )

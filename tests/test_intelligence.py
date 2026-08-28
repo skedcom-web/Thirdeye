@@ -194,6 +194,24 @@ def test_timeline_feed_district_scoped(conn, parsed_documents):
     assert len(entries) == 1
 
 
+def test_timeline_feed_survives_a_non_numeric_budget_value(conn, parsed_documents):
+    """Regression test for a real production crash: a reviewer had
+    corrected a record's budget field to the free-text "NA" (not a
+    number), and timeline_feed's bare float() blew up on it with
+    ValueError, taking down the homepage. budget must degrade to None for
+    that record instead of crashing the whole feed."""
+    ids = _approve_all(conn)
+    conn.execute(
+        "UPDATE go_fields SET normalized_value = 'NA' WHERE record_id = ? AND field_name = 'budget' AND superseded_by IS NULL",
+        (ids[0],),
+    )
+
+    entries = intelligence.timeline_feed(conn)  # must not raise
+    assert len(entries) == len(ids)
+    entry = next(e for e in entries if e["record_id"] == ids[0])
+    assert entry["budget"] is None
+
+
 def test_timeline_feed_empty_when_nothing_approved(conn, parsed_documents):
     assert intelligence.timeline_feed(conn) == []
 
