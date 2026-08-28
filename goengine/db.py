@@ -19,6 +19,7 @@ SCHEMA_NETWORK_TESTS_PATH = PACKAGE_DIR / "schema_network_tests.sql"
 SCHEMA_AGENT_PATH = PACKAGE_DIR / "schema_agent.sql"
 SCHEMA_CITIZEN_PATH = PACKAGE_DIR / "schema_citizen.sql"
 SCHEMA_DOCUMENT_BLOBS_PATH = PACKAGE_DIR / "schema_document_blobs.sql"
+SCHEMA_ENGAGEMENT_PATH = PACKAGE_DIR / "schema_engagement.sql"
 
 # Columns added to the pre-existing `sources` table for Phase 1 certification.
 # SQLite's ALTER TABLE has no "ADD COLUMN IF NOT EXISTS", so this is applied
@@ -273,6 +274,7 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     _ensure_columns(conn, "extraction_requests", EXTRACTION_REQUESTS_KIND_COLUMNS)
     conn.executescript(SCHEMA_CITIZEN_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA_DOCUMENT_BLOBS_PATH.read_text(encoding="utf-8"))
+    conn.executescript(SCHEMA_ENGAGEMENT_PATH.read_text(encoding="utf-8"))
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

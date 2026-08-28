@@ -27,6 +27,7 @@
 
   <nav id="main-nav" aria-label="Main navigation">
     <a href="#home" class="nav-link">Home</a>
+    <a href="/my-area" class="nav-link">My Area</a>
     <a href="#explore" class="nav-link">Explore</a>
     <a href="/orders" class="nav-link">Districts</a>
     <a href="/taluks" class="nav-link">Taluks</a>
@@ -148,6 +149,28 @@
     </div>
   </div>
 </section>
+
+{% if recent_actions %}
+<!-- ═══════════════════════ SECTION 2c: RECENT GOVERNMENT ACTIONS ═══════════════════════ -->
+<section class="section tight" id="recent-actions" aria-labelledby="recent-actions-heading">
+  <div class="section-kicker" aria-hidden="true">Just In</div>
+  <h2 id="recent-actions-heading" class="section-title reveal">Recent Government Actions</h2>
+  <p class="section-sub">The latest Government Orders verified and published on Third Eye.</p>
+  <div class="card-grid reveal reveal-stagger" role="list" aria-label="Recent Government Orders">
+    {% for a in recent_actions %}
+    <a class="feature-card" role="listitem" href="/orders/{{ a.record_id }}">
+      <div class="orders-card-meta" style="margin-bottom:8px;">
+        <span class="pill neutral">{{ a.department_label }}</span>
+        <span class="muted" style="font-size:13px;">{{ a.go_date.strftime('%d %b %Y') }}</span>
+      </div>
+      {% if a.subject %}<p style="margin:0 0 8px; font-weight:600;">{{ a.subject[:140] }}{% if a.subject|length > 140 %}…{% endif %}</p>{% endif %}
+      {% if a.budget %}<p class="muted" style="margin:0; font-size:13px;">{{ a.budget|inr }}</p>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  <p style="margin-top:20px;"><a href="/my-area">See the full timeline in My Area →</a></p>
+</section>
+{% endif %}
 
 <!-- ═══════════════════════ SECTION 3: WHY THIRD EYE EXISTS ═══════════════════════ -->
 <section class="section" id="why" aria-labelledby="why-heading">

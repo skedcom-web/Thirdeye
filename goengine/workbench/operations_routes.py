@@ -29,6 +29,7 @@ from ..operations import departments as ops_departments
 from ..operations import email as ops_email
 from ..operations import geography
 from ..operations import dashboard as ops_dashboard
+from ..operations import engagement as ops_engagement
 from ..operations import health as ops_health
 from ..operations import jobs as ops_jobs
 from ..operations import publication as ops_publication
@@ -65,6 +66,7 @@ def register(app: FastAPI) -> None:
     _register_review(app)
     _register_publication(app)
     _register_dashboard(app)
+    _register_engagement(app)
     _register_health(app)
     _register_users(app)
     _register_agents(app)
@@ -737,6 +739,54 @@ def _register_dashboard(app: FastAPI) -> None:
                 "current_user": current_user,
             },
         )
+
+
+# ---------------------------------------------------------------------------
+# Third Eye 4.1.1 -- Citizen Experience Validation: engagement analytics
+# ---------------------------------------------------------------------------
+def _register_engagement(app: FastAPI) -> None:
+    @app.get("/ops/engagement", response_class=HTMLResponse)
+    def engagement_report(
+        request: Request, conn: Conn, current_user: LoggedIn, days: int = 30,
+        purged: str | None = None,
+    ):
+        days = days if days in (7, 30, 90) else 30
+        top_records = ops_engagement.top_viewed_records(conn, days=days, limit=10)
+        return templates.TemplateResponse(
+            request, "engagement.html",
+            {
+                "current_user": current_user,
+                "can_purge": current_user.has_permission("manage_sources"),
+                "selected_days": days,
+                "session_metrics": ops_engagement.session_metrics(conn, days=days),
+                "total_downloads": ops_engagement.total_downloads(conn, days=days),
+                "district_popularity": ops_engagement.district_popularity(conn, days=days),
+                "category_popularity": ops_engagement.category_popularity(conn, days=days),
+                "timeline_vs_search": ops_engagement.timeline_vs_search(conn, days=days),
+                "average_timeline_depth": ops_engagement.average_timeline_depth(conn, days=days),
+                "feature_usage": ops_engagement.feature_usage(conn, days=days),
+                "top_records": top_records,
+                "most_viewed": top_records[0] if top_records else None,
+                "purged": purged,
+            },
+        )
+
+    @app.post("/ops/engagement/purge")
+    def engagement_purge(conn: Conn, current_user: LoggedIn, confirm: Annotated[str | None, Form()] = None):
+        """Removes engagement_events older than 12 months. Same
+        confirmation-checkbox pattern as /ops/review/duplicates/cleanup --
+        deliberate, audited, and manual, never automatic. Touches only the
+        one table (see engagement.purge_old_events's docstring)."""
+        if not current_user.has_permission("manage_sources"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        if confirm != "yes":
+            raise HTTPException(status_code=400, detail="confirmation required")
+        removed = ops_engagement.purge_old_events(conn, months=12)
+        audit.record(
+            conn, action="engagement.purged", entity_type="system", entity_id=None,
+            actor=current_user.username, detail={"rows_removed": removed},
+        )
+        return RedirectResponse(f"/ops/engagement?purged={removed}", status_code=303)
 
 
 # ---------------------------------------------------------------------------

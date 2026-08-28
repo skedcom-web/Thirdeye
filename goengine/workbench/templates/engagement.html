@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Engagement Analytics · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Engagement Analytics</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      How citizens actually use Third Eye — real, first-party, anonymous data only. No maps,
+      no AI ranking, no inferred scores anywhere on this page.
+    </p>
+  </div>
+  <div class="action-strip">
+    {% for d in (7, 30, 90) %}
+    <a class="btn-sm {{ 'btn-primary' if selected_days == d else 'btn-secondary' }}" href="/ops/engagement?days={{ d }}">Last {{ d }} days</a>
+    {% endfor %}
+  </div>
+</div>
+
+{% if purged is not none %}
+<div class="panel" style="margin-bottom:16px;">
+  <p style="margin:0;"><span class="pill ok">purge complete</span> Removed {{ purged }} analytics event(s) older than 12 months.</p>
+</div>
+{% endif %}
+
+{# ═══ Privacy & Data Practices ═══════════════════════════════════════ #}
+<div class="panel" style="margin-bottom:20px; border-left:4px solid var(--accent);">
+  <h3 style="margin-top:0;">🔒 Privacy &amp; Data Practices</h3>
+  <ul class="plain-list" style="margin:0; font-size:13px; color:var(--muted);">
+    <li>First-party analytics only — nothing here is sent to or shared with any third party.</li>
+    <li>No personal information is collected. Visitors are identified only by an anonymous, randomly generated id.</li>
+    <li>This data is used solely to improve the citizen experience of this platform.</li>
+    <li>Staff/admin activity is excluded — every number below reflects citizen traffic only.</li>
+  </ul>
+</div>
+
+{# ═══ KPI row ═════════════════════════════════════════════════════════ #}
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">👥</div></div>
+    <div class="kpi-n">{{ session_metrics.total_sessions }}</div>
+    <div class="kpi-l">Total Sessions</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">📄</div></div>
+    <div class="kpi-n">{{ '%.1f'|format(session_metrics.avg_pages_per_session) }}</div>
+    <div class="kpi-l">Avg Pages / Session</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">⏱</div></div>
+    <div class="kpi-n">{{ (session_metrics.avg_duration_seconds / 60)|round(1) }}m</div>
+    <div class="kpi-l">Avg Session Duration</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🔁</div></div>
+    <div class="kpi-n">{{ (session_metrics.return_visitor_rate * 100)|round|int }}%</div>
+    <div class="kpi-l">Return Visitor Rate</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🎯</div></div>
+    <div class="kpi-n">{{ (session_metrics.dashboard_to_go_conversion * 100)|round|int }}%</div>
+    <div class="kpi-l">Dashboard → GO Conversion</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">⬇</div></div>
+    <div class="kpi-n">{{ total_downloads }}</div>
+    <div class="kpi-l">Total Downloads</div>
+  </div>
+  {% if most_viewed %}
+  <div class="kpi-card occ-kpi" style="grid-column:span 2;">
+    <div class="kpi-top"><div class="kpi-icon">⭐</div></div>
+    <div class="kpi-n" style="font-size:18px;">{{ most_viewed.go_number or ('Record #' ~ most_viewed.record_id) }}</div>
+    <div class="kpi-l">Most Viewed Government Action — {{ most_viewed.department or 'Unknown department' }} · {{ most_viewed.views }} view{{ 's' if most_viewed.views != 1 else '' }}</div>
+  </div>
+  {% endif %}
+</div>
+
+{# ═══ Q1/Q2: District & category popularity ══════════════════════════ #}
+<div class="split" style="align-items:start;">
+  <div class="panel">
+    <h2>📍 Districts by views</h2>
+    <p class="muted" style="font-size:13px;">Sorted most → least viewed. Answers: which districts are viewed most/least?</p>
+    {% if district_popularity %}
+    <table>
+      <thead><tr><th>District</th><th>Views</th></tr></thead>
+      <tbody>
+        {% for d in district_popularity %}
+        <tr><td>{{ d.district }}</td><td class="mono">{{ d.views }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No district-scoped visits recorded in this window yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>🗂 Categories by clicks</h2>
+    <p class="muted" style="font-size:13px;">Sorted most → least engaged. Answers: which categories are viewed most/least?</p>
+    <table>
+      <thead><tr><th>Category</th><th>Clicks</th></tr></thead>
+      <tbody>
+        {% for c in category_popularity|sort(attribute='clicks', reverse=true) %}
+        <tr><td>{{ c.icon }} {{ c.label }}</td><td class="mono {{ 'muted' if c.clicks == 0 else '' }}">{{ c.clicks }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ═══ Q3: Timeline vs Search ══════════════════════════════════════════ #}
+<div class="panel" style="margin-top:20px;">
+  <h2>🔀 Timeline vs. Search</h2>
+  <p class="muted" style="font-size:13px;">Answers: do citizens prefer browsing the Timeline or searching directly?</p>
+  <div style="display:flex; gap:32px;">
+    <div><div style="font-size:28px; font-weight:800;">{{ timeline_vs_search.timeline_clicks }}</div><div class="muted" style="font-size:12px;">Timeline item clicks</div></div>
+    <div><div style="font-size:28px; font-weight:800;">{{ timeline_vs_search.searches }}</div><div class="muted" style="font-size:12px;">Searches (typed query, not a category click-through)</div></div>
+    <div><div style="font-size:28px; font-weight:800;">{{ '%.2f'|format(average_timeline_depth) }}</div><div class="muted" style="font-size:12px;">Avg. timeline items clicked per My Area session</div></div>
+  </div>
+</div>
+
+{# ═══ Q5/Q6: Feature usage ════════════════════════════════════════════ #}
+<div class="panel" style="margin-top:20px;">
+  <h2>📊 Feature usage</h2>
+  <p class="muted" style="font-size:13px;">Sorted most → least used. Top rows answer "which pages create engagement"; the bottom rows answer "which features are rarely used."</p>
+  {% if feature_usage %}
+  <table>
+    <thead><tr><th>Feature</th><th>Count</th></tr></thead>
+    <tbody>
+      {% for f in feature_usage %}
+      <tr {% if loop.index > (feature_usage|length - 2) and feature_usage|length > 2 %}style="opacity:.6;"{% endif %}>
+        <td>{{ f.event_type.replace('_', ' ')|title }}</td>
+        <td class="mono">{{ f.count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No engagement recorded in this window yet.</p>
+  {% endif %}
+</div>
+
+{# ═══ Top Government Actions Viewed ═══════════════════════════════════ #}
+<div class="panel" style="margin-top:20px;">
+  <h2>🏆 Top Government Actions Viewed</h2>
+  <p class="muted" style="font-size:13px;">Real go_detail_view counts only — no inferred popularity score, no AI ranking.</p>
+  {% if top_records %}
+  <table>
+    <thead><tr><th>GO Number</th><th>Department</th><th>Subject</th><th>Views</th><th></th></tr></thead>
+    <tbody>
+      {% for r in top_records %}
+      <tr>
+        <td class="mono">{{ r.go_number or '—' }}</td>
+        <td>{{ r.department or '—' }}</td>
+        <td>{{ (r.subject or '')[:90] }}{% if r.subject and r.subject|length > 90 %}…{% endif %}</td>
+        <td class="mono">{{ r.views }}</td>
+        <td><a href="/orders/{{ r.record_id }}">View →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No Government Order views recorded in this window yet.</p>
+  {% endif %}
+</div>
+
+{# ═══ Retention ═══════════════════════════════════════════════════════ #}
+{% if can_purge %}
+<div class="panel" style="margin-top:20px; border-left:4px solid var(--warn);">
+  <h2>🧹 Data retention</h2>
+  <p class="muted" style="font-size:13px;">
+    Engagement analytics are retained for 12 months. This only ever deletes rows from the
+    analytics event log — it never touches Government Order records, the audit trail,
+    publication history, or citizen accounts.
+  </p>
+  <form method="post" action="/ops/engagement/purge">
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+      <input type="checkbox" name="confirm" value="yes" required>
+      Purge analytics events older than 12 months now.
+    </label>
+    <button class="danger" type="submit" style="margin-top:12px;">Purge Old Analytics</button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}

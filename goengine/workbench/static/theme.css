@@ -33,6 +33,12 @@
   --warn-soft: #fef3c7;
   --bad: #b91c1c;
   --bad-soft: #fee2e2;
+  /* One additional semantic hue -- "info"/blue -- for the Financial
+     Intelligence department-bucket chart (My Area Dashboard): education's
+     bucket color, matching .cat-edu exactly so the same blue means the
+     same thing everywhere on the site. */
+  --info: #0369a1;
+  --info-soft: #e0f2fe;
   --neutral-soft: #eeedf6;
   --neutral-ink: #35394a;
   --header-bg: #12161c;
@@ -75,6 +81,8 @@
   --warn-soft: #3a2a08;
   --bad: #f87171;
   --bad-soft: #3a1414;
+  --info: #38bdf8;
+  --info-soft: #0c2a4a;
   --neutral-soft: #1e2330;
   --neutral-ink: #c3cad9;
   --header-bg: #05070b;
@@ -114,6 +122,8 @@
   --warn-soft: rgba(180, 83, 9, .16);
   --bad: #c0263c;
   --bad-soft: rgba(192, 38, 60, .16);
+  --info: #2563eb;
+  --info-soft: rgba(37, 99, 235, .16);
   --neutral-soft: rgba(23, 27, 46, .07);
   --neutral-ink: #33394d;
   --header-bg: rgba(255, 255, 255, .32);

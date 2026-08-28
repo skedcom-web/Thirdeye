@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>District Intelligence — Third Eye</title>
+<meta name="description" content="Compare Tamil Nadu districts by approved government funding and initiatives — backed by original Government Orders.">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=11">
+{% from "_partials.html" import mark, theme_init_script, public_header %}
+{{ theme_init_script() }}
+</head>
+<body>
+
+{{ public_header(current_user=current_user, current_citizen=current_citizen) }}
+
+<section class="section tight" aria-labelledby="districts-heading">
+  <div class="section-kicker" aria-hidden="true">District Intelligence</div>
+  <h1 id="districts-heading" class="section-title">Compare districts</h1>
+  <p class="section-sub">
+    Ranked by approved Government Orders only — a district with no rows below simply has no
+    approved orders in Third Eye yet, not zero government activity.
+  </p>
+
+  <div style="display:flex; gap:10px; margin-bottom:20px;">
+    <a class="btn-sm {{ 'btn-primary' if selected_sort == 'funds' else 'btn-secondary' }}" href="/districts?sort=funds">Sort by Funds</a>
+    <a class="btn-sm {{ 'btn-primary' if selected_sort == 'projects' else 'btn-secondary' }}" href="/districts?sort=projects">Sort by Initiatives</a>
+  </div>
+
+  {% if rankings %}
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:48px;">#</th>
+          <th>District</th>
+          <th>Total Funds Approved</th>
+          <th>Government Initiatives</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rankings %}
+        <tr>
+          <td class="mono">{{ loop.index }}</td>
+          <td style="font-weight:600;">{{ r.district }}</td>
+          <td>{{ r.total_funds|inr }}</td>
+          <td>{{ r.project_count }}</td>
+          <td><a href="/my-area?district={{ r.district }}">View →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="panel orders-empty">
+    <p style="font-size:18px; font-weight:600; margin:0 0 8px;">No districts with approved government actions yet.</p>
+    <p class="muted" style="margin:0;">
+      <a href="/orders">Browse all verified Government Orders →</a>
+    </p>
+  </div>
+  {% endif %}
+</section>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-brand">
+    {{ mark(22, 'footMark') }}
+    <strong>Third Eye</strong>
+  </div>
+  <p class="footer-tagline">The Citizen's Third Eye — Making government information accessible to everyone.</p>
+  <nav class="footer-nav" aria-label="Footer navigation">
+    <a href="/">Home</a>
+    <a href="/orders">Government Orders</a>
+    <a href="/login">Administrator Sign In</a>
+  </nav>
+  <p class="footer-copy">© 2026 Third Eye. Built on official Tamil Nadu government records.</p>
+</footer>
+
+<script src="/static/theme.js?v=11" defer></script>
+</body>
+</html>

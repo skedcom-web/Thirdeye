@@ -18,7 +18,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import audit, public, registry, repository, review
+from .. import audit, intelligence, public, registry, repository, review
 from ..certification import calibration as calib
 from ..certification import categorize
 from ..certification import failures as failure_intel
@@ -32,6 +32,7 @@ from ..extraction.text import load_pages
 from ..fetching import FetchError
 from ..operations import auth
 from ..operations import citizen as ops_citizen
+from ..operations import engagement as ops_engagement
 from ..operations import departments as ops_departments
 from .deps import (
     CITIZEN_SESSION_COOKIE,
@@ -47,6 +48,8 @@ from .deps import (
     RequireReview,
     SESSION_COOKIE,
     STATIC_DIR,
+    VisitorCookieMiddleware,
+    VisitorId,
     get_fetcher,
     templates,
 )
@@ -163,6 +166,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Thirdeye Operations Control Center", version="0.3.1")
     app.state.settings = resolved
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.add_middleware(VisitorCookieMiddleware)
 
     # -----------------------------------------------------------------------
     # Module 11 -- Auth: first-run setup, login, logout
@@ -248,7 +252,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def landing(request: Request, conn: Conn, config: Config, current_user: CurrentUser, current_citizen: CurrentCitizen):
         return templates.TemplateResponse(
             request, "landing.html",
-            {"current_user": current_user, "current_citizen": current_citizen, "stats": _landing_stats(conn, config)},
+            {
+                "current_user": current_user,
+                "current_citizen": current_citizen,
+                "stats": _landing_stats(conn, config),
+                # Feature 1 (4.1.1): Homepage Intelligence Preview -- reuses
+                # the same real, newest-first, already-approved-only feed
+                # My Area's Timeline Intelligence is built on; no new query.
+                "recent_actions": intelligence.timeline_feed(conn, limit=5),
+            },
         )
 
     @app.get("/admin")
@@ -279,9 +291,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         conn: Conn,
         current_user: CurrentUser,
         current_citizen: CurrentCitizen,
+        visitor_id: VisitorId,
         department: str | None = None,
         district: str | None = None,
         q: str | None = None,
+        cat: str | None = None,
         page: int = 1,
     ):
         page = max(page, 1)
@@ -294,6 +308,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             limit=limit,
             offset=(page - 1) * limit,
         )
+        if current_user is None:
+            # A `cat=` click-through from My Area's category cards pre-fills
+            # `q` with a keyword -- that's category engagement, not the
+            # citizen typing a search, so it must not also count as
+            # "Search Usage" (query_used stays False for it).
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_ORDERS_VIEW,
+                path="/orders", district=district or None, query_used=bool(q) and not cat,
+            )
+            if cat:
+                ops_engagement.log_event(
+                    conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_CATEGORY_CLICK,
+                    path="/orders", district=district or None, category=cat,
+                )
         return templates.TemplateResponse(
             request,
             "orders_list.html",
@@ -312,13 +340,95 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/my-area", response_class=HTMLResponse)
+    def my_area(
+        request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
+        visitor_id: VisitorId, district: str | None = None,
+    ):
+        """Third Eye 4.0 Phase 1: My Area Dashboard + District Intelligence
+        (as this district's scorecard) + Financial Intelligence + Timeline
+        Intelligence, all computed from real approved go_records -- see
+        goengine/intelligence.py's module docstring for the trust boundary
+        and what's deliberately NOT fabricated (project status, locations
+        finer than district, generated summaries)."""
+        district = district or None
+        summary = intelligence.area_summary(conn, district=district)
+        timeline = intelligence.timeline_feed(conn, district=district, limit=30) if summary else []
+        finance = intelligence.financial_breakdown(conn, district=district) if summary else None
+
+        if current_user is None:
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_MY_AREA_VIEW,
+                path="/my-area", district=district,
+            )
+            # Timeline/Financial Intelligence are sections *within* this one
+            # page (4.0's own IA decision), not separate routes -- these are
+            # only logged when the section actually had real content to
+            # show, so they're a genuine signal, not just "= my_area_view".
+            if timeline:
+                ops_engagement.log_event(
+                    conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_TIMELINE_VIEW,
+                    path="/my-area", district=district,
+                )
+            if finance:
+                ops_engagement.log_event(
+                    conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_FINANCIAL_VIEW,
+                    path="/my-area", district=district,
+                )
+
+        return templates.TemplateResponse(
+            request, "my_area.html",
+            {
+                "current_user": current_user,
+                "current_citizen": current_citizen,
+                "districts": public.filter_options(conn)["districts"],
+                "selected_district": district or "",
+                "summary": summary,
+                "categories": intelligence.citizen_category_counts(conn, district=district) if summary else [],
+                "finance": finance,
+                "timeline": timeline,
+                "empty_message": intelligence.EMPTY_STATE_MESSAGE,
+            },
+        )
+
+    @app.get("/districts", response_class=HTMLResponse)
+    def districts_ranking(
+        request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
+        visitor_id: VisitorId, sort: str = "funds",
+    ):
+        sort = sort if sort in ("funds", "projects") else "funds"
+        if current_user is None:
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_DISTRICTS_VIEW, path="/districts",
+            )
+        return templates.TemplateResponse(
+            request, "districts_ranking.html",
+            {
+                "current_user": current_user,
+                "current_citizen": current_citizen,
+                "rankings": intelligence.district_ranking(conn, sort=sort),
+                "selected_sort": sort,
+            },
+        )
+
     @app.get("/orders/{record_id}", response_class=HTMLResponse)
     def public_order_detail(
         request: Request, record_id: int, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
+        visitor_id: VisitorId, ref: str | None = None,
     ):
         record = public.get(conn, record_id)
         if record is None:
             raise HTTPException(status_code=404, detail="no such Government Order")
+        if current_user is None:
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_GO_DETAIL_VIEW,
+                path=f"/orders/{record_id}", district=record.district, record_id=record_id,
+            )
+            if ref == "timeline":
+                ops_engagement.log_event(
+                    conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_TIMELINE_CLICK,
+                    path=f"/orders/{record_id}", district=record.district, record_id=record_id,
+                )
         return templates.TemplateResponse(
             request,
             "orders_detail.html",
@@ -488,7 +598,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return current_user, current_citizen
 
     @app.get("/orders/{record_id}/download/pdf")
-    def download_pdf(record_id: int, request: Request, conn: Conn, config: Config, current_user: CurrentUser, current_citizen: CurrentCitizen):
+    def download_pdf(record_id: int, request: Request, conn: Conn, config: Config, current_user: CurrentUser, current_citizen: CurrentCitizen, visitor_id: VisitorId):
         current_user, current_citizen = _require_any_login(request, current_user, current_citizen)
         located = public.document_id_for(conn, record_id)
         if located is None:
@@ -502,6 +612,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             citizen_id=current_citizen.id if current_citizen else None,
             staff_user_id=current_user.id if current_user else None,
         )
+        if current_user is None:
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_DOWNLOAD,
+                path=f"/orders/{record_id}/download/pdf", record_id=record_id,
+            )
         safe_name = file_name.replace('"', "")
         return Response(
             content=payload, media_type="application/pdf",
@@ -509,7 +624,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/orders/{record_id}/download/text")
-    def download_text(record_id: int, request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen):
+    def download_text(record_id: int, request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen, visitor_id: VisitorId):
         current_user, current_citizen = _require_any_login(request, current_user, current_citizen)
         text = public.get_full_text(conn, record_id)
         if text is None:
@@ -519,13 +634,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             citizen_id=current_citizen.id if current_citizen else None,
             staff_user_id=current_user.id if current_user else None,
         )
+        if current_user is None:
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_DOWNLOAD,
+                path=f"/orders/{record_id}/download/text", record_id=record_id,
+            )
         return Response(
             content=text, media_type="text/plain",
             headers={"content-disposition": f'attachment; filename="go-{record_id}-extracted-text.txt"'},
         )
 
     @app.get("/orders/{record_id}/download/metadata")
-    def download_metadata(record_id: int, request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen):
+    def download_metadata(record_id: int, request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen, visitor_id: VisitorId):
         current_user, current_citizen = _require_any_login(request, current_user, current_citizen)
         record = public.get(conn, record_id)
         if record is None:
@@ -535,6 +655,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             citizen_id=current_citizen.id if current_citizen else None,
             staff_user_id=current_user.id if current_user else None,
         )
+        if current_user is None:
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_DOWNLOAD,
+                path=f"/orders/{record_id}/download/metadata", record_id=record_id,
+            )
         payload = json.dumps(asdict(record), indent=2, ensure_ascii=False)
         return Response(
             content=payload, media_type="application/json",

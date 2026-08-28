@@ -15,12 +15,15 @@ Phase 1 (see git history), which is why this file exists.
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Annotated, Callable, Iterator
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from .. import intelligence
 from ..config import Settings
 from ..db import connect
 from ..fetching import Fetcher, HttpFetcher
@@ -36,8 +39,46 @@ SESSION_COOKIE = "thirdeye_session"
 # -- no route-by-route sweep needed to keep the two audiences apart.
 CITIZEN_SESSION_COOKIE = "thirdeye_citizen_session"
 
+# Third Eye 4.1.1 -- Citizen Experience Validation Edition. An anonymous,
+# first-party, no-PII visitor identifier for engagement analytics (see
+# operations/engagement.py) -- a random id, never linked to a citizen
+# account, never shared with a third party.
+#
+# A dependency alone cannot set this: FastAPI only copies a dependency's
+# Response mutations into the *final* response when the route itself
+# returns no Response object of its own. Every route here returns a
+# TemplateResponse, so a plain `Depends()` silently drops the cookie
+# (confirmed empirically before writing this). Middleware is the correct
+# fix -- it wraps the actual outgoing response regardless of its type: it
+# resolves/generates the id up front (stashed on request.state so the
+# route's own dependency can read it during the same request) and only
+# sets the cookie on the way out if it was missing on the way in.
+VISITOR_COOKIE = "thirdeye_visitor_id"
+_VISITOR_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
+
+
+class VisitorCookieMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        existing = request.cookies.get(VISITOR_COOKIE)
+        request.state.visitor_id = existing or str(uuid.uuid4())
+        response = await call_next(request)
+        if existing is None:
+            response.set_cookie(
+                VISITOR_COOKIE, request.state.visitor_id,
+                max_age=_VISITOR_COOKIE_MAX_AGE, httponly=True, samesite="lax",
+            )
+        return response
+
+
+def get_visitor_id(request: Request) -> str:
+    return request.state.visitor_id
+
+
+VisitorId = Annotated[str, Depends(get_visitor_id)]
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["pct"] = lambda value: f"{float(value) * 100:.1f}%"
+templates.env.filters["inr"] = intelligence.format_inr
 
 
 def get_settings(request: Request) -> Settings:

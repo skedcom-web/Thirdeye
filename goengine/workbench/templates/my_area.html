@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Area — Third Eye</title>
+<meta name="description" content="See what the government has approved, funded, and published for your district — backed by original Government Orders.">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=11">
+{% from "_partials.html" import mark, theme_init_script, public_header %}
+{{ theme_init_script() }}
+</head>
+<body>
+
+{{ public_header(current_user=current_user, current_citizen=current_citizen) }}
+
+{% set bucket_color = {
+  "health": "var(--bad)",
+  "education": "var(--info)",
+  "public_works": "var(--warn)",
+  "rural_development": "var(--ok)",
+  "other": "var(--muted)",
+} %}
+
+<section class="section tight" aria-labelledby="my-area-heading">
+  <div class="section-kicker" aria-hidden="true">My Area</div>
+  <h1 id="my-area-heading" class="section-title">
+    {% if selected_district %}What's happening in {{ selected_district }}{% else %}What's happening across Tamil Nadu{% endif %}
+  </h1>
+  <p class="section-sub">
+    Every figure below comes only from Government Orders reviewed and approved by Third Eye —
+    nothing here is estimated or inferred.
+  </p>
+
+  <form method="get" action="/my-area" class="panel orders-filter-bar" style="max-width:420px;">
+    <div style="flex:1;">
+      <label class="field-label" for="ma-district">District</label>
+      <select name="district" id="ma-district" onchange="this.form.submit()">
+        <option value="">All of Tamil Nadu</option>
+        {% for d in districts %}
+        <option value="{{ d }}" {% if selected_district == d %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn-lg btn-secondary">View</button>
+  </form>
+
+  {% if not summary %}
+  <div class="panel orders-empty" style="margin-top:24px;">
+    <p style="font-size:18px; font-weight:600; margin:0 0 8px;">{{ empty_message }}</p>
+    <p class="muted" style="margin:0;">
+      <a href="/orders">Browse all verified Government Orders →</a>
+    </p>
+  </div>
+  {% else %}
+
+  <!-- Development Summary -->
+  <div class="metric-row reveal reveal-stagger" style="margin-top:28px;">
+    <div class="glass-card" role="group" aria-label="Total funds approved">
+      <div class="metric-n">{{ summary.total_funds|inr }}</div>
+      <div class="metric-l">💰 Total Funds Approved</div>
+    </div>
+    <div class="glass-card" role="group" aria-label="Government initiatives">
+      <div class="metric-n">{{ summary.government_initiatives }}</div>
+      <div class="metric-l">📋 Government Initiatives</div>
+    </div>
+    <div class="glass-card" role="group" aria-label="Departments involved">
+      <div class="metric-n">{{ summary.departments_involved }}</div>
+      <div class="metric-l">🏛 Departments Involved</div>
+    </div>
+    <div class="glass-card" role="group" aria-label="Schemes available">
+      <div class="metric-n">{{ summary.schemes_available }}</div>
+      <div class="metric-l">🎯 Schemes Available</div>
+    </div>
+    <div class="glass-card" role="group" aria-label="New government orders this month">
+      <div class="metric-n">{{ summary.new_gos_this_month }}</div>
+      <div class="metric-l">🆕 New GOs This Month</div>
+    </div>
+    {% if summary.latest_action_date %}
+    <div class="glass-card" role="group" aria-label="Latest government action">
+      <div class="metric-n" style="font-size:22px;">{{ summary.latest_action_date.strftime('%d %b %Y') }}</div>
+      <div class="metric-l">🕒 Latest Government Action</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Citizen KPIs -->
+  {% if categories %}
+  <h2 class="section-title reveal" style="margin-top:48px; font-size:22px;">By category</h2>
+  <p class="section-sub" style="font-size:13px; margin-bottom:20px;">
+    Based on a keyword match against each order's subject — click through to see the actual orders behind each count.
+  </p>
+  <div class="card-grid reveal reveal-stagger" role="list" aria-label="Government Orders by category">
+    {% for c in categories %}
+    <a class="feature-card" role="listitem" href="/orders?{% if selected_district %}district={{ selected_district }}&{% endif %}q={{ c.key_example }}&cat={{ c.key }}">
+      <div class="icon emoji cat-{{ c.key }}" aria-hidden="true">{{ c.icon }}</div>
+      <h3>{{ c.label }}</h3>
+      <p>{{ c.count }} government order{{ 's' if c.count != 1 else '' }} mentioning {{ c.label|lower }}</p>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Financial Intelligence -->
+  <h2 class="section-title reveal" style="margin-top:48px; font-size:22px;">Financial Intelligence</h2>
+  {% if not finance %}
+  <p class="muted">No budget figures have been extracted for these orders yet.</p>
+  {% else %}
+  <div class="split" style="margin-top:16px; align-items:start;">
+    <div class="panel">
+      <h3 style="margin-top:0;">Spend by department</h3>
+      {% set total_spend = finance.by_department|sum(attribute='total') %}
+      <div style="display:flex; gap:24px; align-items:center; flex-wrap:wrap;">
+        <svg width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Budget breakdown by department">
+          <circle cx="80" cy="80" r="62" fill="none" stroke="var(--panel-border)" stroke-width="26"/>
+          {% set ns = namespace(offset=0) %}
+          {% for d in finance.by_department %}
+          {% set frac = (d.total / total_spend) if total_spend else 0 %}
+          {% set circumference = 2 * 3.14159265 * 62 %}
+          {% set gap = 3 %}
+          {% set seg_len = (circumference * frac) - gap if frac > 0 else 0 %}
+          <circle cx="80" cy="80" r="62" fill="none" stroke="{{ bucket_color.get(d.bucket, 'var(--muted)') }}"
+                  stroke-width="26" stroke-dasharray="{{ seg_len }} {{ circumference }}"
+                  stroke-dashoffset="{{ -ns.offset }}" transform="rotate(-90 80 80)"/>
+          {% set ns.offset = ns.offset + (circumference * frac) %}
+          {% endfor %}
+        </svg>
+        <div style="min-width:200px;">
+          {% for d in finance.by_department %}
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px;">
+            <span style="width:11px; height:11px; border-radius:3px; background:{{ bucket_color.get(d.bucket, 'var(--muted)') }}; flex-shrink:0;" aria-hidden="true"></span>
+            <span style="flex:1;">{{ d.label }}</span>
+            <strong>{{ d.total|inr }}</strong>
+            <span class="muted">({{ ((d.total / total_spend * 100) if total_spend else 0)|round|int }}%)</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    {% if finance.monthly_trend %}
+    <div class="panel">
+      <h3 style="margin-top:0;">Monthly spend trend</h3>
+      {% set max_month = finance.monthly_trend|map(attribute='total')|max %}
+      <div style="display:flex; align-items:flex-end; gap:12px; height:140px; padding-top:12px;">
+        {% for m in finance.monthly_trend %}
+        <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end;">
+          <span class="mono" style="font-size:11px;">{{ m.total|inr }}</span>
+          <div style="width:100%; max-width:36px; border-radius:4px 4px 0 0; background:var(--accent);
+                      height:{{ ((m.total / max_month * 100) if max_month else 0)|round|int }}%; min-height:3px;"
+               role="img" aria-label="{{ m.month }}: {{ m.total|inr }}"></div>
+          <span class="muted" style="font-size:11px;">{{ m.month }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Timeline Intelligence -->
+  <h2 class="section-title reveal" style="margin-top:48px; font-size:22px;">Timeline</h2>
+  {% if not timeline %}
+  <p class="muted">No dated government orders available to build a timeline yet.</p>
+  {% else %}
+  <div class="timeline reveal reveal-stagger" role="list" aria-label="Recent government actions, most recent first">
+    {% set ns2 = namespace(month='') %}
+    {% for t in timeline %}
+    {% set month_label = t.go_date.strftime('%B %Y') %}
+    {% if month_label != ns2.month %}
+    <div style="width:100%; margin:20px 0 4px; font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted);">{{ month_label }}</div>
+    {% set ns2.month = month_label %}
+    {% endif %}
+    <a class="panel" role="listitem" href="/orders/{{ t.record_id }}?ref=timeline" style="display:block; text-decoration:none; color:inherit; margin-bottom:10px;">
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:13px;">
+        <span class="pill neutral">{{ t.department_label }}</span>
+        {% if t.department %}<span class="muted">{{ t.department }}</span>{% endif %}
+        <span class="muted" style="margin-left:auto;">{{ t.go_date.strftime('%d %b %Y') }}</span>
+      </div>
+      {% if t.subject %}
+      <p style="margin:8px 0 0; font-weight:500;">{{ t.subject[:160] }}{% if t.subject|length > 160 %}…{% endif %}</p>
+      {% endif %}
+      {% if t.budget %}
+      <p class="muted" style="margin:4px 0 0; font-size:13px;">{{ t.budget|inr }}</p>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <p style="margin-top:32px;"><a href="/districts">Compare all districts →</a></p>
+  {% endif %}
+</section>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-brand">
+    {{ mark(22, 'footMark') }}
+    <strong>Third Eye</strong>
+  </div>
+  <p class="footer-tagline">The Citizen's Third Eye — Making government information accessible to everyone.</p>
+  <nav class="footer-nav" aria-label="Footer navigation">
+    <a href="/">Home</a>
+    <a href="/orders">Government Orders</a>
+    <a href="/login">Administrator Sign In</a>
+  </nav>
+  <p class="footer-copy">© 2026 Third Eye. Built on official Tamil Nadu government records.</p>
+</footer>
+
+<script src="/static/theme.js?v=11" defer></script>
+</body>
+</html>
