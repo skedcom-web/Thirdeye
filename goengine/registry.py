@@ -254,6 +254,18 @@ def list_sources(conn: sqlite3.Connection, *, active_only: bool = False) -> list
     return [_row_to_source(r) for r in conn.execute(sql).fetchall()]
 
 
+def list_departments(conn: sqlite3.Connection) -> list[str]:
+    """Distinct department names across active sources -- the data source
+    for the Extraction Center's department multi-select. Real department
+    names (e.g. "Health and Family Welfare"), not the 4-value content bucket
+    from certification/categorize.py, which classifies document content and
+    has nothing to do with which sources a crawl covers."""
+    rows = conn.execute(
+        "SELECT DISTINCT department FROM sources WHERE active = 1 ORDER BY department"
+    ).fetchall()
+    return [r["department"] for r in rows]
+
+
 def _row_to_source(row: sqlite3.Row) -> Source:
     return Source(
         id=int(row["id"]),
@@ -293,6 +305,13 @@ def _row_to_source(row: sqlite3.Row) -> Source:
 # Welfare -- unclear without asking TN government directly), and "Fisheries"
 # is not a separate department on the live site -- it is combined with
 # Animal Husbandry under one department, seeded as that one entry.
+#
+# Next-phase blueprint: full department coverage. The remaining 18
+# departments on the live directory were re-scraped and their dep_ids
+# verified directly against tn.gov.in/godept_list.php on 2026-08-31 (same
+# method as above -- read off the live site, never guessed). "Adi Dravidar
+# Welfare" still doesn't appear under that name; "Social Justice Department"
+# is a distinct, separately-verified entry, not assumed to be its successor.
 # ---------------------------------------------------------------------------
 def _year_param() -> str:
     """Base64-encode the current year the way tn.gov.in's own links do."""
@@ -354,6 +373,25 @@ SEED_SOURCES: tuple[dict[str, str], ...] = (
     {"name": "Animal Husbandry and Fisheries Department", "department": "Animal Husbandry, Dairying, Fisheries and Fishermen Welfare", "dep_id": "Mw=="},
     {"name": "Energy Department", "department": "Energy", "dep_id": "Nw=="},
     {"name": "Cooperation Department", "department": "Co-operation, Food and Consumer Protection", "dep_id": "NQ=="},
+    # --- Tier 2: newly onboarded (verified 2026-08-31) -----------------
+    {"name": "Social Justice Department", "department": "Social Justice", "dep_id": "MQ=="},
+    {"name": "Artificial Intelligence, IT and Digital Services Department", "department": "Artificial Intelligence, Information Technology and Digital Services", "dep_id": "MTc="},
+    {"name": "BC, MBC and Minorities Welfare Department", "department": "BC, MBC and Minorities Welfare", "dep_id": "NA=="},
+    {"name": "Commercial Taxes Department", "department": "Commercial Taxes, Registration and Religious Endowments", "dep_id": "Ng=="},
+    {"name": "Handlooms and Textiles Department", "department": "Handlooms, Handicrafts, Textiles and Khadi", "dep_id": "MTA="},
+    {"name": "Higher Education Department", "department": "Higher Education", "dep_id": "MTI="},
+    {"name": "Home Department", "department": "Home, Prohibition and Excise", "dep_id": "MTQ="},
+    {"name": "Human Resources Management Department", "department": "Human Resources Management", "dep_id": "MjI="},
+    {"name": "Law Department", "department": "Law", "dep_id": "MTk="},
+    {"name": "MSME Department", "department": "Micro, Small and Medium Enterprises", "dep_id": "Mjk="},
+    {"name": "Natural Resources Department", "department": "Natural Resources", "dep_id": "NDU="},
+    {"name": "Planning and Development Department", "department": "Planning and Development", "dep_id": "MjM="},
+    {"name": "Public Department", "department": "Public", "dep_id": "MjQ="},
+    {"name": "Public (Elections) Department", "department": "Public (Elections)", "dep_id": "Mzg="},
+    {"name": "Special Programme Implementation Department", "department": "Special Programme Implementation", "dep_id": "NDE="},
+    {"name": "Tamil Development and Information Department", "department": "Tamil Dev. and Information", "dep_id": "MzE="},
+    {"name": "Differently Abled Welfare Department", "department": "Welfare of Differently Abled Persons", "dep_id": "MzU="},
+    {"name": "Youth Welfare and Sports Development Department", "department": "Youth Welfare and Sports Development", "dep_id": "MzQ="},
 )
 
 

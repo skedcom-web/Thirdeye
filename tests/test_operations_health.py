@@ -91,14 +91,19 @@ def test_certification_failures_appear_in_recent_list(conn, settings, fetcher):
     assert any(a["type"] == ops_health.ALERT_CERTIFICATION_FAILURE for a in result["alerts"])
 
 
-def test_queue_depth_reflects_active_jobs(conn, settings, fetcher, source_id):
-    from goengine.operations import jobs as ops_jobs
+def test_queue_depth_reflects_pending_local_extraction_requests(conn, settings, source_id):
+    from goengine.operations import extraction_queue
 
     assert ops_health.system_health(conn, settings)["processing_queue_depth"] == 0
-    ops_jobs.run_job_sync(settings, created_by="admin", fetcher_factory=lambda: fetcher)
-    # run_job_sync blocks until completion, so it's no longer "active" by the
-    # time we check -- this proves the metric reflects live state, not a count
-    # of jobs ever created.
+    extraction_queue.enqueue_local_request(
+        conn, state_id=None, district_id=None, department_filter=None, created_by="admin",
+    )
+    assert ops_health.system_health(conn, settings)["processing_queue_depth"] == 1
+
+    row = conn.execute("SELECT id FROM extraction_requests ORDER BY id DESC LIMIT 1").fetchone()
+    extraction_queue.complete_request(conn, int(row["id"]), ok=True)
+    # A completed request is no longer QUEUED/CLAIMED -- proves the metric
+    # reflects live pending state, not a count of requests ever created.
     assert ops_health.system_health(conn, settings)["processing_queue_depth"] == 0
 
 

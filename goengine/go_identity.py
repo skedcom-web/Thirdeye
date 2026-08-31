@@ -35,13 +35,18 @@ from datetime import date
 # sources.department -> short code. Keyed on the clean, canonical name
 # already stored per source in the registry (registry.py's SEED_SOURCES),
 # not on the noisier OCR'd `department` go_field -- avoids fuzzy matching
-# entirely. Covers today's 20 configured departments; anything else (the 3
+# entirely. Covers all 38 configured departments; anything else (the 3
 # non-department sources: GO Portal, Government Portal, Gazette) falls back
 # to a generic prefix in _department_code(), still uniqueness-checked the
 # same way.
+#
+# "School Education" -> "EDU" (not the original "SE") to match the Next
+# Phase Blueprint's own named example table. Renaming an already-persisted
+# code needs a one-time migration for existing records -- see
+# migrate_department_code() and its call from db.py::init_db().
 DEPARTMENT_ABBREVIATIONS: dict[str, str] = {
     "Health and Family Welfare": "HFW",
-    "School Education": "SE",
+    "School Education": "EDU",
     "Rural Development and Panchayat Raj": "RD",
     "Public Works": "PWD",
     "Agriculture and Farmers Welfare": "AGR",
@@ -60,6 +65,25 @@ DEPARTMENT_ABBREVIATIONS: dict[str, str] = {
     "Animal Husbandry, Dairying, Fisheries and Fishermen Welfare": "AHF",
     "Energy": "ENE",
     "Co-operation, Food and Consumer Protection": "COOP",
+    # Onboarded in the Next Phase Blueprint's department expansion (Part B).
+    "Social Justice": "SJ",
+    "Artificial Intelligence, Information Technology and Digital Services": "AIITD",
+    "BC, MBC and Minorities Welfare": "BCMBC",
+    "Commercial Taxes, Registration and Religious Endowments": "CTAX",
+    "Handlooms, Handicrafts, Textiles and Khadi": "HHTK",
+    "Higher Education": "HED",
+    "Home, Prohibition and Excise": "HOME",
+    "Human Resources Management": "HRM",
+    "Law": "LAW",
+    "Micro, Small and Medium Enterprises": "MSME",
+    "Natural Resources": "NRD",
+    "Planning and Development": "PLAN",
+    "Public": "PUB",
+    "Public (Elections)": "ELEC",
+    "Special Programme Implementation": "SPI",
+    "Tamil Dev. and Information": "TDI",
+    "Welfare of Differently Abled Persons": "WDAP",
+    "Youth Welfare and Sports Development": "YWSD",
 }
 
 _GENERIC_DEPARTMENT_CODE = "GO"
@@ -141,7 +165,7 @@ def compute_identity(conn: sqlite3.Connection, record_id: int) -> None:
             """
             UPDATE go_records
                SET go_number_raw = ?, go_number_numeric = NULL, go_year = NULL,
-                   go_identifier = NULL, canonical_go_id = NULL
+                   go_identifier = NULL, canonical_go_id = NULL, go_url_slug = NULL
              WHERE id = ?
             """,
             (row["go_number_raw"], record_id),
@@ -164,24 +188,57 @@ def compute_identity(conn: sqlite3.Connection, record_id: int) -> None:
     if collision is not None:
         canonical = f"{canonical}-R{record_id}"
 
+    # Permanent GO URL slug (/go/{slug}): canonical_go_id is already
+    # guaranteed unique above, so deriving the slug from it (rather than
+    # building a second, separately-unique value) means the URL inherits
+    # that same guarantee for free, collision suffix included.
+    url_slug = canonical.replace("/", "-")
+
     conn.execute(
         """
         UPDATE go_records
            SET go_number_raw = ?, go_number_numeric = ?, go_year = ?,
-               go_identifier = ?, canonical_go_id = ?
+               go_identifier = ?, canonical_go_id = ?, go_url_slug = ?
          WHERE id = ?
         """,
-        (row["go_number_raw"], number, year, identifier, canonical, record_id),
+        (row["go_number_raw"], number, year, identifier, canonical, url_slug, record_id),
     )
 
 
 def backfill_all(conn: sqlite3.Connection) -> int:
-    """Computes identity for every existing record that doesn't have one
-    yet -- the blueprint's "backward compatibility" requirement. Idempotent:
-    a record already carrying a go_identifier is left untouched, so this is
-    safe to call on every application boot (see db.py::init_db) without
-    ever redoing work on a redeploy."""
-    rows = conn.execute("SELECT id FROM go_records WHERE go_identifier IS NULL").fetchall()
+    """Computes identity for every existing record missing a piece of it --
+    the blueprint's "backward compatibility" requirement. Checks
+    go_url_slug too, not just go_identifier: a record computed by an older
+    version of this module (before go_url_slug existed) already has a
+    non-NULL go_identifier, so a NULL-go_identifier-only check would leave
+    its slug permanently missing. Idempotent either way -- a record with
+    genuinely no valid go_number/go_date just recomputes to NULL again --
+    so this is safe to call on every application boot (see db.py::init_db)
+    without ever redoing real work on a redeploy."""
+    rows = conn.execute(
+        "SELECT id FROM go_records WHERE go_identifier IS NULL OR go_url_slug IS NULL"
+    ).fetchall()
+    for row in rows:
+        compute_identity(conn, int(row["id"]))
+    return len(rows)
+
+
+def migrate_department_code(conn: sqlite3.Connection, department: str) -> int:
+    """Recomputes identity for every go_records row whose source department
+    is `department`, unconditionally (not just where NULL, unlike
+    backfill_all) -- for when DEPARTMENT_ABBREVIATIONS' code for a
+    department changes and already-persisted canonical_go_id/go_url_slug
+    values need to pick up the new code, not just future records. Idempotent
+    (recomputing with an unchanged code is a no-op), so safe to call on
+    every boot alongside backfill_all()."""
+    rows = conn.execute(
+        """
+        SELECT r.id FROM go_records r
+          JOIN sources s ON s.id = r.source_id
+         WHERE s.department = ?
+        """,
+        (department,),
+    ).fetchall()
     for row in rows:
         compute_identity(conn, int(row["id"]))
     return len(rows)

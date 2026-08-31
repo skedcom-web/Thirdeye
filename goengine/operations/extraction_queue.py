@@ -1,11 +1,10 @@
 """Phase 3.4 -- Local extraction request queue.
 
-The Extraction Center's "Run Extraction" form has two modes: Cloud (runs
-immediately on this server via operations/jobs.py -- unchanged) and Local
-(this server can't reach the blocked government sites, so it can only
-record the request; a local agent daemon, see cli.py's `agent-daemon`
-command, polls for it, executes it on its own unblocked network, and
-reports back). This module is the queue itself: enqueue, claim, report
+The Extraction Center's "Run Extraction" form always runs via the Local
+Agent: this server can't reach the blocked government sites, so it only
+records the request; a local agent daemon (see cli.py's `agent-daemon`
+command) polls for it, executes it on its own unblocked network, and
+reports back. This module is the queue itself: enqueue, claim, report
 progress, complete.
 
 `state_id`/`district_id` are the server's own geography table PKs and are
@@ -20,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 
 from .. import audit
 from ..db import utcnow
@@ -236,4 +236,92 @@ def resolve_local_source_ids(
         conn, state_id=state_id, district_id=district_id, department_filter=department_filter,
     )
     return [int(r["id"]) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.5, Initiative 4 -- Agent Operations Center
+#
+# Every field the blueprint asks for is already derivable from
+# extraction_requests alone -- no new tracking needed, just richer queries
+# over the same table _agent_status() already reads.
+# ---------------------------------------------------------------------------
+def agent_operations_status(conn: sqlite3.Connection) -> dict:
+    current = conn.execute(
+        "SELECT * FROM extraction_requests WHERE status IN (?, ?) ORDER BY id DESC LIMIT 1",
+        (STATUS_CLAIMED, STATUS_RUNNING),
+    ).fetchone()
+    last_started = conn.execute(
+        "SELECT started_at FROM extraction_requests WHERE started_at IS NOT NULL ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    last_completed = conn.execute(
+        "SELECT finished_at FROM extraction_requests WHERE status = ? ORDER BY finished_at DESC LIMIT 1",
+        (STATUS_COMPLETED,),
+    ).fetchone()
+    last_failed = conn.execute(
+        "SELECT error FROM extraction_requests WHERE status = ? ORDER BY finished_at DESC LIMIT 1",
+        (STATUS_FAILED,),
+    ).fetchone()
+    return {
+        "running": current is not None,
+        "current_extraction": {
+            "request_id": int(current["id"]),
+            "kind": current["kind"] if "kind" in current.keys() else KIND_EXTRACTION,
+            "department_filter": _department_filter_of(current),
+        } if current is not None else None,
+        "last_run_at": last_started["started_at"] if last_started else None,
+        "last_completed_at": last_completed["finished_at"] if last_completed else None,
+        "last_error": last_failed["error"] if last_failed else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.5, Initiative 5 -- Extraction Run History
+# ---------------------------------------------------------------------------
+def run_history_row(conn: sqlite3.Connection, request_row: sqlite3.Row) -> dict:
+    """Adds Duration and Documents Published to an existing
+    extraction_requests row, for jobs.html's Local Agent Status table.
+
+    Documents Published has no direct FK to which go_records later got
+    approved, so it's defined and computed live (never stored): go_records
+    whose document was downloaded inside this run's [started_at,
+    finished_at] window, from a source in this run's own scope, and
+    *currently* approved -- always reflects today's review state, never a
+    stale count frozen at completion time. Meaningless for a resync_all
+    request (it doesn't crawl anything new), so left None for those."""
+    started_at = request_row["started_at"]
+    finished_at = request_row["finished_at"]
+
+    duration_seconds = None
+    if started_at and finished_at:
+        try:
+            duration_seconds = (
+                datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)
+            ).total_seconds()
+        except ValueError:
+            duration_seconds = None
+
+    kind = request_row["kind"] if "kind" in request_row.keys() else KIND_EXTRACTION
+    documents_published = None
+    if kind != KIND_RESYNC_ALL and started_at and finished_at:
+        source_ids = [
+            int(r["id"]) for r in ops_jobs.sources_in_scope(
+                conn, state_id=request_row["state_id"], district_id=request_row["district_id"],
+                department_filter=_department_filter_of(request_row),
+            )
+        ]
+        if source_ids:
+            placeholders = ",".join("?" for _ in source_ids)
+            documents_published = conn.execute(
+                f"""
+                SELECT COUNT(*) AS n FROM go_records r
+                  JOIN documents d ON d.id = r.document_id
+                 WHERE r.status = 'approved' AND d.source_id IN ({placeholders})
+                   AND d.downloaded_at >= ? AND d.downloaded_at <= ?
+                """,
+                [*source_ids, started_at, finished_at],
+            ).fetchone()["n"]
+        else:
+            documents_published = 0
+
+    return {"duration_seconds": duration_seconds, "documents_published": documents_published}
 

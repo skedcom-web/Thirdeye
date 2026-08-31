@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Extraction Quality · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Extraction Quality</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      How well extraction and review are actually performing, computed fresh from current data.
+    </p>
+  </div>
+  <div class="action-strip">
+    <a href="/ops/metadata-workbench" class="btn-lg btn-secondary occ-btn">🛠 Missing Metadata Workbench</a>
+  </div>
+</div>
+
+<h2 style="margin-bottom:8px;">Department Coverage</h2>
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🏛</div></div>
+    <div class="kpi-n">{{ department_kpis.configured }}</div>
+    <div class="kpi-l">Departments Configured</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--ok);">✅</div></div>
+    <div class="kpi-n">{{ department_kpis.extracted }}/{{ department_kpis.configured }}</div>
+    <div class="kpi-l">Departments Successfully Extracted</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:{{ 'var(--bad)' if department_kpis.requiring_attention else 'var(--ok)' }};">⚠</div></div>
+    <div class="kpi-n">{{ department_kpis.requiring_attention }}</div>
+    <div class="kpi-l">Departments Requiring Attention</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🕐</div></div>
+    <div class="kpi-n" style="font-size:16px;">{{ department_kpis.last_successful_extraction or 'Never' }}</div>
+    <div class="kpi-l">Last Successful Extraction</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Department Health</h2>
+  <p class="muted" style="margin-bottom:12px;">
+    One row per configured department. "No Data" means no Government Order has been extracted from that
+    department yet -- run the Local Agent against it to populate this row with real, verified data.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Department</th><th>Total GOs</th><th>Latest GO</th><th>Last Extraction</th><th>Quality Score</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for row in department_health %}
+      <tr>
+        <td>{{ row.department }}</td>
+        <td>{{ row.total_gos }}</td>
+        <td>{{ row.latest_go or '—' }}</td>
+        <td class="mono" style="font-size:12px;">{{ row.last_extraction_date or '—' }}</td>
+        <td>{{ row.quality_score if row.quality_score is not none else '—' }}</td>
+        <td>
+          <span class="pill {{ {'Excellent': 'ok', 'Good': 'ok', 'Needs Review': 'warn', 'Poor': 'bad', 'No Data': 'neutral'}[row.status] }}">
+            {{ row.status }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 style="margin-bottom:8px;">Extraction & Review Quality</h2>
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--ok);">✅</div></div>
+    <div class="kpi-n">{{ quality.extraction_success.rate }}%</div>
+    <div class="kpi-l">Extraction Success Rate</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">
+      {{ quality.extraction_success.successful }}/{{ quality.extraction_success.total }} records with every core field present
+    </div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--info);">🔬</div></div>
+    <div class="kpi-n">{{ quality.ocr_recovery.rate }}%</div>
+    <div class="kpi-l">OCR Recovery Rate</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">
+      {{ quality.ocr_recovery.recovered }}/{{ quality.ocr_recovery.total }} OCR'd documents recovered usable metadata
+    </div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--warn);">✏</div></div>
+    <div class="kpi-n">{{ quality.review_corrections.total }}</div>
+    <div class="kpi-l">Review Corrections</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">
+      {{ quality.review_corrections.recent_count }} in the last {{ quality.review_corrections.recent_days }} days
+    </div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🏛</div></div>
+    <div class="kpi-n">{{ quality.department_coverage.covered }}/{{ quality.department_coverage.total }}</div>
+    <div class="kpi-l">Department Coverage</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">
+      {{ quality.department_coverage.rate }}% of configured departments have a published Government Order
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Missing Metadata by Field</h2>
+  <p class="muted" style="margin-bottom:12px;">
+    How many extracted Government Order records are missing each field. Core fields block approval by default;
+    optional fields don't, but a high miss rate is still worth a look.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Type</th><th>Missing</th><th>Rate</th></tr>
+    </thead>
+    <tbody>
+      {% for row in quality.missing_metadata %}
+      <tr>
+        <td>{{ row.field_name.replace('_', ' ')|title }}</td>
+        <td><span class="pill {{ 'neutral' if row.is_core else 'ok' }}">{{ 'Core' if row.is_core else 'Optional' }}</span></td>
+        <td {% if row.missing and row.is_core %}style="color:var(--bad); font-weight:700;"{% endif %}>{{ row.missing }}</td>
+        <td>{{ row.rate }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Review Corrections by Field</h2>
+  {% if quality.review_corrections.by_field %}
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Corrections</th></tr>
+    </thead>
+    <tbody>
+      {% for row in quality.review_corrections.by_field %}
+      <tr>
+        <td>{{ row.field_name.replace('_', ' ')|title }}</td>
+        <td>{{ row.count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0;">No reviewer corrections recorded yet.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

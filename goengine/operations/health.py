@@ -13,7 +13,7 @@ import sqlite3
 
 from .. import repository
 from ..extraction import ocr
-from . import jobs as ops_jobs
+from . import extraction_queue
 
 # 5 GB default -- a reasonable ceiling for a single-machine POC repository.
 # Override via Settings/environment if a deployment needs a different limit.
@@ -153,7 +153,7 @@ def system_health(conn: sqlite3.Connection, settings) -> dict:
     failures = recent_certification_failures(conn, limit=10)
     ocr_status = ocr_health(conn)
     storage = storage_health(settings, conn)
-    queue_depth = ops_jobs.active_job_count(conn)
+    queue_depth = extraction_queue.queue_size(conn)
 
     alerts: list[dict] = []
     if availability["down"]:

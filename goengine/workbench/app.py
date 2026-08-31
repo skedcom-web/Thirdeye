@@ -18,7 +18,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import audit, intelligence, public, registry, repository, review
+from .. import audit, intelligence, pipeline, public, registry, repository, review
 from ..certification import calibration as calib
 from ..certification import categorize
 from ..certification import failures as failure_intel
@@ -411,14 +411,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
-    @app.get("/orders/{record_id}", response_class=HTMLResponse)
-    def public_order_detail(
-        request: Request, record_id: int, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
-        visitor_id: VisitorId, ref: str | None = None,
+    def _order_detail_response(
+        request: Request, record, record_id: int, conn: sqlite3.Connection,
+        current_user, current_citizen, visitor_id: str, ref: str | None,
     ):
-        record = public.get(conn, record_id)
-        if record is None:
-            raise HTTPException(status_code=404, detail="no such Government Order")
+        """Shared by /orders/{record_id} and /go/{slug} -- both resolve to a
+        PublicRecord differently but render the identical page."""
         if current_user is None:
             ops_engagement.log_event(
                 conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_GO_DETAIL_VIEW,
@@ -440,6 +438,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "optional_fields": meta.OPTIONAL_FIELDS,
                 "is_saved": ops_citizen.is_saved(conn, current_citizen.id, record_id) if current_citizen else False,
             },
+        )
+
+    @app.get("/orders/{record_id}", response_class=HTMLResponse)
+    def public_order_detail(
+        request: Request, record_id: int, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
+        visitor_id: VisitorId, ref: str | None = None,
+    ):
+        record = public.get(conn, record_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        return _order_detail_response(request, record, record_id, conn, current_user, current_citizen, visitor_id, ref)
+
+    @app.get("/go/{slug}", response_class=HTMLResponse)
+    def public_order_detail_by_slug(
+        request: Request, slug: str, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
+        visitor_id: VisitorId, ref: str | None = None,
+    ):
+        """Permanent, shareable GO URL -- e.g. /go/HFW-MS-GO41-2022 -- built
+        from the record's already-unique canonical_go_id (see
+        goengine/go_identity.py). /orders/{record_id} keeps working exactly
+        as before; this is an additional, preferred link, not a replacement."""
+        record = public.get_by_slug(conn, slug)
+        if record is None:
+            raise HTTPException(status_code=404, detail="no such Government Order")
+        return _order_detail_response(
+            request, record, record.record_id, conn, current_user, current_citizen, visitor_id, ref,
         )
 
     @app.get("/orders/{record_id}/pdf")
@@ -784,6 +808,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except review.ReviewError as exc:
             return _record_error_redirect(record_id, str(exc))
         return RedirectResponse(f"/records/{record_id}", status_code=303)
+
+    @app.post("/records/{record_id}/reprocess")
+    def post_reprocess(record_id: int, conn: Conn, config: Config, current_user: RequireReview):
+        """Re-runs text+OCR+metadata extraction for this record's already-
+        archived document (pipeline.parse_document -- the same function the
+        bulk CLI --reparse flag already uses), producing a fresh pending
+        go_records row rather than mutating the old one, per the write-once
+        pattern the rest of this schema follows. The old record is left
+        exactly as it was; the reviewer lands on the new one."""
+        row = conn.execute("SELECT document_id FROM go_records WHERE id = ?", (record_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="no such record")
+        new_record_id = pipeline.parse_document(
+            conn, config, int(row["document_id"]), actor=current_user.username,
+        )
+        return RedirectResponse(f"/records/{new_record_id}", status_code=303)
 
     @app.post("/records/{record_id}/approve")
     def post_approve(

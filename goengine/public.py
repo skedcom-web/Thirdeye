@@ -38,6 +38,21 @@ _GO_IDENTIFIER_QUERY_RE = re.compile(
     r"^GO\s*(?P<number>\d{1,5})\s*(?:/\s*(?P<year>(?:19|20)\d{2}))?$", re.IGNORECASE
 )
 
+# Phase 3.5 Initiative 8 -- Search Excellence. "HFW GO41" / "HFW GO41/2022":
+# a department code (go_identity.DEPARTMENT_ABBREVIATIONS' values) followed
+# by a GO identifier. Matches on canonical_go_id's own code prefix -- no
+# reverse lookup of the abbreviation table needed, and no risk of it drifting
+# out of sync with go_identity.py, since canonical_go_id is computed from
+# that exact table already.
+_DEPARTMENT_CODE_GO_QUERY_RE = re.compile(
+    r"^(?P<code>[A-Za-z]{2,6})\s+GO\s*(?P<number>\d{1,5})\s*(?:/\s*(?P<year>(?:19|20)\d{2}))?$", re.IGNORECASE
+)
+
+# A bare 4-digit year ("2022") filters on go_year directly instead of
+# falling through to a LIKE, which could false-positive on an unrelated
+# 4-digit run of digits inside a subject line.
+_YEAR_QUERY_RE = re.compile(r"^(?:19|20)\d{2}$")
+
 
 @dataclass
 class PublicRecord:
@@ -45,6 +60,7 @@ class PublicRecord:
     document_id: int
     go_number: str | None
     go_identifier: str | None
+    go_url_slug: str | None
     go_date: str | None
     department: str | None
     district: str | None
@@ -88,6 +104,7 @@ def _build_record(conn: sqlite3.Connection, row: sqlite3.Row) -> PublicRecord:
         document_id=int(row["document_id"]),
         go_number=val("go_number"),
         go_identifier=row["go_identifier"],
+        go_url_slug=row["go_url_slug"],
         go_date=val("go_date"),
         department=val("department"),
         district=val("district"),
@@ -120,20 +137,40 @@ def _filters(
         )
         params.append(district)
     if q:
-        go_match = _GO_IDENTIFIER_QUERY_RE.match(q.strip())
-        if go_match:
+        q_stripped = q.strip()
+        dept_code_match = _DEPARTMENT_CODE_GO_QUERY_RE.match(q_stripped)
+        go_match = _GO_IDENTIFIER_QUERY_RE.match(q_stripped)
+        year_match = _YEAR_QUERY_RE.match(q_stripped)
+
+        if dept_code_match:
+            where.append("r.go_number_numeric = ? AND r.canonical_go_id LIKE ?")
+            params.append(int(dept_code_match.group("number")))
+            params.append(f"{dept_code_match.group('code').upper()}-%")
+            if dept_code_match.group("year"):
+                where.append("r.go_year = ?")
+                params.append(int(dept_code_match.group("year")))
+        elif go_match:
             where.append("r.go_number_numeric = ?")
             params.append(int(go_match.group("number")))
             if go_match.group("year"):
                 where.append("r.go_year = ?")
                 params.append(int(go_match.group("year")))
+        elif year_match:
+            where.append("r.go_year = ?")
+            params.append(int(q_stripped))
         else:
+            # Free-text fallback, OR'd with an exact (case-insensitive)
+            # department name match -- "Health and Family Welfare" typed
+            # verbatim finds that department's GOs even though it never
+            # appears in go_number/subject text.
             where.append(
-                "EXISTS (SELECT 1 FROM go_fields f WHERE f.record_id = r.id "
+                "(EXISTS (SELECT 1 FROM go_fields f WHERE f.record_id = r.id "
                 "AND f.field_name IN ('go_number', 'subject') AND f.superseded_by IS NULL "
-                "AND f.normalized_value LIKE ?)"
+                "AND f.normalized_value LIKE ?) "
+                "OR EXISTS (SELECT 1 FROM sources src WHERE src.id = r.source_id AND LOWER(src.department) = LOWER(?)))"
             )
-            params.append(f"%{q}%")
+            params.append(f"%{q_stripped}%")
+            params.append(q_stripped)
     return joins, " AND ".join(where), params
 
 
@@ -156,7 +193,7 @@ def search(
 
     rows = conn.execute(
         f"""
-        SELECT r.id, r.document_id, r.go_identifier, d.source_url, d.file_name, d.sha256, e.page_count
+        SELECT r.id, r.document_id, r.go_identifier, r.go_url_slug, d.source_url, d.file_name, d.sha256, e.page_count
           FROM go_records r
           JOIN documents d ON d.id = r.document_id
           JOIN extractions e ON e.id = r.extraction_id
@@ -174,13 +211,32 @@ def search(
 def get(conn: sqlite3.Connection, record_id: int) -> PublicRecord | None:
     row = conn.execute(
         """
-        SELECT r.id, r.document_id, r.go_identifier, d.source_url, d.file_name, d.sha256, e.page_count
+        SELECT r.id, r.document_id, r.go_identifier, r.go_url_slug, d.source_url, d.file_name, d.sha256, e.page_count
           FROM go_records r
           JOIN documents d ON d.id = r.document_id
           JOIN extractions e ON e.id = r.extraction_id
          WHERE r.id = ? AND r.status = ?
         """,
         (record_id, STATUS_APPROVED),
+    ).fetchone()
+    if row is None:
+        return None
+    return _build_record(conn, row)
+
+
+def get_by_slug(conn: sqlite3.Connection, slug: str) -> PublicRecord | None:
+    """Resolves the permanent GO URL (/go/{slug}) to its record. Same
+    approved-only gating as get() -- a pending/rejected record's slug must
+    never resolve, even if a citizen happens to guess it."""
+    row = conn.execute(
+        """
+        SELECT r.id, r.document_id, r.go_identifier, r.go_url_slug, d.source_url, d.file_name, d.sha256, e.page_count
+          FROM go_records r
+          JOIN documents d ON d.id = r.document_id
+          JOIN extractions e ON e.id = r.extraction_id
+         WHERE r.go_url_slug = ? AND r.status = ?
+        """,
+        (slug, STATUS_APPROVED),
     ).fetchone()
     if row is None:
         return None

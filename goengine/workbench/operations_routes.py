@@ -31,8 +31,8 @@ from ..operations import geography
 from ..operations import dashboard as ops_dashboard
 from ..operations import engagement as ops_engagement
 from ..operations import health as ops_health
-from ..operations import jobs as ops_jobs
 from ..operations import publication as ops_publication
+from ..operations import quality as ops_quality
 from ..operations import reset as ops_reset
 from ..operations import review as ops_review
 from ..operations import sources as ops_sources
@@ -395,11 +395,15 @@ def _register_jobs(app: FastAPI) -> None:
                 if now - seen <= timedelta(seconds=AGENT_ONLINE_WINDOW_SECONDS):
                     online = True
                     break
+        local_requests = extraction_queue.list_requests(conn, limit=10)
         return {
             "agent_online": online,
             "agent_key_count": len([k for k in keys if k.active]),
             "queue_size": extraction_queue.queue_size(conn),
-            "local_requests": extraction_queue.list_requests(conn, limit=10),
+            "local_requests": [
+                {**dict(r), **extraction_queue.run_history_row(conn, r)} for r in local_requests
+            ],
+            "agent_ops": extraction_queue.agent_operations_status(conn),
         }
 
     @app.get("/ops/jobs", response_class=HTMLResponse)
@@ -407,20 +411,17 @@ def _register_jobs(app: FastAPI) -> None:
         return templates.TemplateResponse(
             request, "jobs.html",
             {
-                "jobs": ops_jobs.list_jobs(conn),
                 "states": geography.list_states(conn),
                 "current_user": current_user,
                 "can_run": current_user.has_permission("run_certification"),
-                "buckets": ALL_BUCKETS,
+                "departments": registry.list_departments(conn),
                 **_agent_status(conn),
             },
         )
 
     @app.post("/ops/jobs/start")
     def jobs_start(
-        request: Request, conn: Conn, config: Config, current_user: RequireCertify,
-        fetcher_factory: FetcherFactory,
-        mode: Annotated[str, Form()] = "cloud",
+        request: Request, conn: Conn, current_user: RequireCertify,
         state_id: Annotated[int | None, Form()] = None,
         district_id: Annotated[int | None, Form()] = None,
         departments: Annotated[list[str] | None, Form()] = None,
@@ -428,19 +429,11 @@ def _register_jobs(app: FastAPI) -> None:
         if state_id is not None and not current_user.can_act_on_state(state_id):
             raise HTTPException(status_code=403, detail="not authorized for this state")
 
-        if mode == "local":
-            extraction_queue.enqueue_local_request(
-                conn, state_id=state_id, district_id=district_id,
-                department_filter=departments or None, created_by=current_user.username,
-            )
-            return RedirectResponse("/ops/jobs", status_code=303)
-
-        job_id = ops_jobs.start_job(
-            config, state_id=state_id, district_id=district_id,
+        extraction_queue.enqueue_local_request(
+            conn, state_id=state_id, district_id=district_id,
             department_filter=departments or None, created_by=current_user.username,
-            fetcher_factory=fetcher_factory,
         )
-        return RedirectResponse(f"/ops/jobs/{job_id}", status_code=303)
+        return RedirectResponse("/ops/jobs", status_code=303)
 
     @app.post("/ops/jobs/resync-all")
     def jobs_resync_all(conn: Conn, current_user: RequireCertify):
@@ -452,42 +445,6 @@ def _register_jobs(app: FastAPI) -> None:
         agent's existing scheduled poll; no manual command required."""
         extraction_queue.enqueue_resync_all_request(conn, created_by=current_user.username)
         return RedirectResponse("/ops/jobs", status_code=303)
-
-    @app.get("/ops/jobs/{job_id}", response_class=HTMLResponse)
-    def job_detail(request: Request, job_id: int, conn: Conn, current_user: LoggedIn):
-        job = ops_jobs.get_job(conn, job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
-        
-        runs = []
-        if job["started_at"]:
-            end_time = job["finished_at"] or utcnow()
-            runs = conn.execute(
-                """
-                SELECT c.*, s.name AS source_name
-                  FROM crawl_runs c
-                  JOIN sources s ON s.id = c.source_id
-                 WHERE c.started_at >= ? AND c.started_at <= ?
-                 ORDER BY c.id
-                """,
-                (job["started_at"], end_time)
-            ).fetchall()
-
-        return templates.TemplateResponse(
-            request, "job_detail.html",
-            {
-                "job": job,
-                "runs": runs,
-                "current_user": current_user,
-            }
-        )
-
-    @app.get("/api/jobs/{job_id}")
-    def job_status_api(job_id: int, conn: Conn, current_user: LoggedIn):
-        job = ops_jobs.get_job(conn, job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
-        return JSONResponse(dict(job))
 
 
 # ---------------------------------------------------------------------------
@@ -739,6 +696,34 @@ def _register_dashboard(app: FastAPI) -> None:
                 "current_user": current_user,
             },
         )
+
+    @app.get("/ops/quality", response_class=HTMLResponse)
+    def extraction_quality(request: Request, conn: Conn, config: Config, current_user: LoggedIn):
+        health = ops_quality.department_health(conn, config)
+        return templates.TemplateResponse(
+            request, "ops_quality.html",
+            {
+                "quality": ops_quality.quality_summary(conn),
+                "department_health": health,
+                "department_kpis": ops_quality.department_coverage_kpis(conn, registry.list_departments(conn), health),
+                "current_user": current_user,
+            },
+        )
+
+    @app.get("/ops/metadata-workbench", response_class=HTMLResponse)
+    def metadata_workbench(
+        request: Request, conn: Conn, config: Config, current_user: LoggedIn, department: str | None = None,
+    ):
+        return templates.TemplateResponse(
+            request, "ops_metadata_workbench.html",
+            {
+                "queue": ops_quality.missing_metadata_queue(conn, config, department=department or None),
+                "departments": registry.list_departments(conn),
+                "selected_department": department or "",
+                "current_user": current_user,
+            },
+        )
+
 
 
 # ---------------------------------------------------------------------------

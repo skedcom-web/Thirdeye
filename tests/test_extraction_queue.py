@@ -78,8 +78,10 @@ def test_resolve_local_source_ids_by_department(conn, source_id):
     ids = eq.resolve_local_source_ids(conn, state_name=None, district_name=None, department_filter=None)
     assert source_id in ids
 
-    ids_health = eq.resolve_local_source_ids(conn, state_name=None, district_name=None, department_filter=["health"])
-    assert source_id not in ids_health  # the fixture source's department doesn't bucket into health
+    ids_health = eq.resolve_local_source_ids(
+        conn, state_name=None, district_name=None, department_filter=["Health and Family Welfare"],
+    )
+    assert source_id not in ids_health  # the fixture source's department is "All Departments", not this
 
 
 def test_resolve_local_source_ids_unknown_state_name_returns_empty(conn, source_id):
@@ -145,25 +147,28 @@ def test_queue_endpoints_require_auth(client, conn, agent_key):
 
 
 # ---------------------------------------------------------------------------
-# Extraction Center UI: mode selector -> enqueue instead of cloud job
+# Extraction Center UI: always enqueues a local request now -- cloud
+# extraction was removed entirely (Render's network is blocked at the TCP
+# level by TN government hosts, so it could never succeed in production).
 # ---------------------------------------------------------------------------
-def test_jobs_start_local_mode_enqueues_instead_of_running(client, conn):
+def test_jobs_start_enqueues_a_local_request(client, conn):
     login_as(client, conn)
-    res = client.post("/ops/jobs/start", data={"mode": "local", "departments": ["health"]}, follow_redirects=False)
+    res = client.post(
+        "/ops/jobs/start", data={"departments": ["Health and Family Welfare"]}, follow_redirects=False,
+    )
     assert res.status_code == 303
     assert res.headers["location"] == "/ops/jobs"
     assert eq.queue_size(conn) == 1
 
-    from goengine.operations import jobs as ops_jobs
-    assert ops_jobs.list_jobs(conn) == []  # no cloud job was started
 
-
-def test_jobs_start_cloud_mode_unchanged(client, conn):
+def test_jobs_start_ignores_a_stray_mode_field(client, conn):
+    """No `mode` form field exists anymore -- posting one (e.g. a stale
+    client/bookmarked form) must not resurrect the removed cloud path."""
     login_as(client, conn)
     res = client.post("/ops/jobs/start", data={"mode": "cloud"}, follow_redirects=False)
     assert res.status_code == 303
-    assert res.headers["location"].startswith("/ops/jobs/")
-    assert res.headers["location"] != "/ops/jobs"
+    assert res.headers["location"] == "/ops/jobs"  # always the local-queue redirect now
+    assert eq.queue_size(conn) == 1
 
 
 def test_extraction_center_shows_agent_offline_by_default(client, conn):
@@ -243,3 +248,131 @@ def test_production_reset_auto_queues_resync_all(conn):
     assert result["resync_request_id"] is not None
     rows = eq.list_requests(conn)
     assert any(r["kind"] == eq.KIND_RESYNC_ALL for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.5 Initiative 4 -- Agent Operations Center
+# ---------------------------------------------------------------------------
+def test_agent_operations_status_with_no_requests(conn):
+    status = eq.agent_operations_status(conn)
+    assert status == {
+        "running": False, "current_extraction": None,
+        "last_run_at": None, "last_completed_at": None, "last_error": None,
+    }
+
+
+def test_agent_operations_status_reports_a_claimed_request_as_running(conn, agent_key):
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(
+        conn, state_id=None, district_id=None, department_filter=["Health and Family Welfare"], created_by="admin",
+    )
+    eq.claim_next(conn, agent_key_id=key_id)
+
+    status = eq.agent_operations_status(conn)
+    assert status["running"] is True
+    assert status["current_extraction"]["request_id"] == rid
+    assert status["current_extraction"]["department_filter"] == ["Health and Family Welfare"]
+
+
+def test_agent_operations_status_reports_running_while_in_progress(conn, agent_key):
+    key_id, _ = agent_key
+    eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    rid = eq.claim_next(conn, agent_key_id=key_id)["id"]
+    eq.report_progress(conn, rid, sources_total=2, sources_completed=1)
+
+    status = eq.agent_operations_status(conn)
+    assert status["running"] is True
+    assert eq.get_request(conn, rid)["status"] == eq.STATUS_RUNNING
+
+
+def test_agent_operations_status_tracks_last_run_completion_and_error(conn, agent_key):
+    key_id, _ = agent_key
+
+    first = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.report_progress(conn, first, sources_total=1, sources_completed=1)
+    eq.complete_request(conn, first, ok=True)
+
+    status_after_success = eq.agent_operations_status(conn)
+    assert status_after_success["running"] is False
+    assert status_after_success["last_completed_at"] is not None
+    assert status_after_success["last_error"] is None
+
+    second = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.complete_request(conn, second, ok=False, error="no local sources matched")
+
+    status_after_failure = eq.agent_operations_status(conn)
+    assert status_after_failure["last_error"] == "no local sources matched"
+    assert status_after_failure["last_run_at"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.5 Initiative 5 -- Extraction Run History
+# ---------------------------------------------------------------------------
+def test_run_history_row_computes_duration(conn):
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    conn.execute(
+        "UPDATE extraction_requests SET started_at = ?, finished_at = ? WHERE id = ?",
+        ("2026-01-01T00:00:00+00:00", "2026-01-01T00:05:30+00:00", rid),
+    )
+    result = eq.run_history_row(conn, eq.get_request(conn, rid))
+    assert result["duration_seconds"] == 330.0
+
+
+def test_run_history_row_duration_is_none_before_the_run_finishes(conn):
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    result = eq.run_history_row(conn, eq.get_request(conn, rid))
+    assert result["duration_seconds"] is None
+    assert result["documents_published"] is None
+
+
+def test_run_history_row_documents_published_is_none_for_resync_all(conn):
+    rid = eq.enqueue_resync_all_request(conn, created_by="admin")
+    conn.execute(
+        "UPDATE extraction_requests SET started_at = ?, finished_at = ? WHERE id = ?",
+        ("2026-01-01T00:00:00+00:00", "2026-01-01T00:05:00+00:00", rid),
+    )
+    result = eq.run_history_row(conn, eq.get_request(conn, rid))
+    assert result["documents_published"] is None
+
+
+def test_run_history_row_counts_only_approved_documents_in_window_and_scope(conn, settings, fetcher, source_id):
+    from goengine import review
+    from goengine.pipeline import run_all
+
+    run_all(conn, settings, fetcher, only_due=False)
+    record_ids = [int(r["id"]) for r in conn.execute("SELECT id FROM go_records ORDER BY id").fetchall()]
+    review.approve(conn, record_ids[0], reviewer="admin")
+    # record_ids[1] and [2] stay pending -- must not count as "published".
+
+    window = conn.execute("SELECT MIN(downloaded_at) AS start, MAX(downloaded_at) AS end FROM documents").fetchone()
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    conn.execute(
+        "UPDATE extraction_requests SET started_at = ?, finished_at = ? WHERE id = ?",
+        (window["start"], window["end"], rid),
+    )
+    result = eq.run_history_row(conn, eq.get_request(conn, rid))
+    assert result["documents_published"] == 1
+
+
+def test_run_history_row_excludes_documents_outside_the_run_scope(conn, settings, fetcher, source_id):
+    from goengine import review
+    from goengine.pipeline import run_all
+
+    run_all(conn, settings, fetcher, only_due=False)
+    record_ids = [int(r["id"]) for r in conn.execute("SELECT id FROM go_records ORDER BY id").fetchall()]
+    review.approve(conn, record_ids[0], reviewer="admin")
+
+    window = conn.execute("SELECT MIN(downloaded_at) AS start, MAX(downloaded_at) AS end FROM documents").fetchone()
+    # source_id's department is "All Departments" -- a filter naming a real,
+    # different department must exclude it entirely.
+    rid = eq.enqueue_local_request(
+        conn, state_id=None, district_id=None, department_filter=["Health and Family Welfare"], created_by="admin",
+    )
+    conn.execute(
+        "UPDATE extraction_requests SET started_at = ?, finished_at = ? WHERE id = ?",
+        (window["start"], window["end"], rid),
+    )
+    result = eq.run_history_row(conn, eq.get_request(conn, rid))
+    assert result["documents_published"] == 0

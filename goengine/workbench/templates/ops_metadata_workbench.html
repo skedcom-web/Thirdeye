@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Missing Metadata Workbench · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Missing Metadata Workbench</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Pending records missing a core field or their PDF -- approved and rejected records are already decided
+      and don't appear here.
+    </p>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:20px;">
+  <form method="get" action="/ops/metadata-workbench" style="display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
+    <div class="extract-form-group">
+      <label class="field-label" for="wb-dept">Department</label>
+      <select name="department" id="wb-dept" onchange="this.form.submit()">
+        <option value="">All departments</option>
+        {% for d in departments %}
+        <option value="{{ d }}" {% if selected_department == d %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+{% if queue %}
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Record</th><th>Department</th><th>Source Document</th><th>Missing</th><th style="width:280px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in queue %}
+      <tr>
+        <td>
+          <a href="/records/{{ row.record_id }}"><strong>{{ row.go_identifier or ('Record #' ~ row.record_id) }}</strong></a>
+        </td>
+        <td>{{ row.department }}</td>
+        <td class="mono" style="font-size:12px;">{{ row.file_name }}</td>
+        <td>
+          {% for field_name in row.missing_fields %}
+          <span class="pill bad" style="margin:2px;">{{ field_name.replace('_', ' ')|title }}</span>
+          {% endfor %}
+          {% if row.missing_pdf %}<span class="pill bad" style="margin:2px;">PDF</span>{% endif %}
+        </td>
+        <td>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <a href="/records/{{ row.record_id }}" class="btn-sm btn-secondary">Review / Correct</a>
+            <form method="post" action="/records/{{ row.record_id }}/reprocess" style="margin:0;">
+              <button type="submit" class="btn-sm btn-secondary"
+                      title="Re-runs text/OCR/metadata extraction on this document's original file, producing a fresh record for review -- the old one is left untouched.">
+                🔁 Reprocess
+              </button>
+            </form>
+            {% if row.missing_fields %}
+            <form method="post" action="/records/{{ row.record_id }}/approve" style="margin:0;">
+              <input type="hidden" name="override" value="1">
+              <button type="submit" class="btn-sm btn-secondary" title="Approves despite the missing core field(s) above.">
+                Approve Anyway
+              </button>
+            </form>
+            {% else %}
+            <form method="post" action="/records/{{ row.record_id }}/approve" style="margin:0;">
+              <button type="submit" class="btn-sm btn-secondary">Approve</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="occ-empty-state">
+  <div class="occ-empty-icon" aria-hidden="true">✅</div>
+  <p>Nothing missing metadata right now{% if selected_department %} in {{ selected_department }}{% endif %}.</p>
+</div>
+{% endif %}
+
+{% endblock %}

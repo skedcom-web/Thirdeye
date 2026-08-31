@@ -150,7 +150,17 @@ GO_RECORDS_IDENTITY_COLUMNS: dict[str, str] = {
     "go_year": "INTEGER",
     "go_identifier": "TEXT",
     "canonical_go_id": "TEXT",
+    # Permanent GO URL slug (/go/{slug}) -- canonical_go_id with "/" replaced
+    # by "-", so it inherits that column's own uniqueness guarantee.
+    "go_url_slug": "TEXT",
 }
+
+# Departments whose DEPARTMENT_ABBREVIATIONS code changed after records were
+# already computed with the old one -- go_identity.migrate_department_code
+# recomputes identity for every record under that department so the change
+# takes effect immediately, not just for future records. "School Education"
+# moved "SE" -> "EDU" to match the Next Phase Blueprint's own example table.
+GO_IDENTITY_DEPARTMENT_CODE_MIGRATIONS: tuple[str, ...] = ("School Education",)
 
 
 def utcnow() -> str:
@@ -288,16 +298,28 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_DOCUMENT_BLOBS_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA_ENGAGEMENT_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "go_records", GO_RECORDS_IDENTITY_COLUMNS)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_go_records_url_slug ON go_records(go_url_slug)")
 
     from . import go_identity
 
     go_identity.backfill_all(conn)
+    for department in GO_IDENTITY_DEPARTMENT_CODE_MIGRATIONS:
+        go_identity.migrate_department_code(conn, department)
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:
         states_count = conn.execute("SELECT COUNT(*) AS n FROM states").fetchone()["n"]
         if states_count == 0:
             _seed_tamil_nadu(conn)
+
+        # registry.seed() is idempotent by source name, so calling it on
+        # every boot (not just the first) is what lets a department added to
+        # SEED_SOURCES after the database was already seeded actually reach
+        # an already-running deployment -- without this, a newly-added
+        # department source would silently never appear until a full reset.
+        from . import registry
+
+        registry.seed(conn)
 
     return conn
 

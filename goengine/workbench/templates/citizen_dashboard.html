@@ -27,7 +27,7 @@
       <div class="dashboard-list">
         {% for d in recent_downloads %}
         <div class="dashboard-list-item">
-          <a href="/orders/{{ d.record_id }}"><strong>{{ d.go_identifier or d.go_number or ('Record #' ~ d.record_id) }}</strong></a>
+          <a href="{{ '/go/' ~ d.go_url_slug if d.go_url_slug else '/orders/' ~ d.record_id }}"><strong>{{ d.go_identifier or d.go_number or ('Record #' ~ d.record_id) }}</strong></a>
           <span class="muted" style="font-size:12.5px;">{{ d.format|upper }} &middot; {{ d.downloaded_at }}</span>
         </div>
         {% endfor %}
@@ -43,7 +43,7 @@
       <div class="dashboard-list">
         {% for r in saved_records %}
         <div class="dashboard-list-item">
-          <a href="/orders/{{ r.record_id }}"><strong>{{ r.go_identifier or r.go_number or ('Record #' ~ r.record_id) }}</strong></a>
+          <a href="{{ '/go/' ~ r.go_url_slug if r.go_url_slug else '/orders/' ~ r.record_id }}"><strong>{{ r.go_identifier or r.go_number or ('Record #' ~ r.record_id) }}</strong></a>
           <span class="muted" style="font-size:12.5px;">{{ r.department }}</span>
         </div>
         {% endfor %}

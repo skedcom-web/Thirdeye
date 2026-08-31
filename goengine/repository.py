@@ -123,6 +123,20 @@ def read_bytes(settings: Settings, conn: sqlite3.Connection, document_id: int) -
     return path.read_bytes() if path.exists() else None
 
 
+def is_available(settings: Settings, conn: sqlite3.Connection, document_id: int) -> bool:
+    """Cheap existence check for the GO Quality Scoring Engine's "PDF
+    Availability" criterion -- same two-tier logic as read_bytes() (durable
+    blob first, local disk fallback) but never reads the payload into
+    memory, since a department health-table pass may check many documents."""
+    has_blob = conn.execute(
+        "SELECT 1 FROM document_blobs WHERE document_id = ?", (document_id,)
+    ).fetchone() is not None
+    if has_blob:
+        return True
+    row = conn.execute("SELECT stored_path FROM documents WHERE id = ?", (document_id,)).fetchone()
+    return row is not None and absolute_path(settings, row["stored_path"]).exists()
+
+
 def ensure_file_on_disk(settings: Settings, conn: sqlite3.Connection, document_id: int) -> Path:
     """Guarantees the document PDF file exists on local disk at its expected
     repository_dir path. If the local file is missing (e.g. after a Render

@@ -206,6 +206,72 @@ def test_compute_identity_is_idempotent(conn):
     assert row["canonical_go_id"] == "HFW-MS-GO41/2022"
 
 
+def test_compute_identity_sets_a_url_safe_slug_derived_from_canonical_go_id(conn):
+    record_id = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2022-06-01"
+    )
+    go_identity.compute_identity(conn, record_id)
+
+    row = conn.execute("SELECT canonical_go_id, go_url_slug FROM go_records WHERE id = ?", (record_id,)).fetchone()
+    assert row["go_url_slug"] == "HFW-MS-GO41-2022"
+    assert "/" not in row["go_url_slug"]
+
+
+def test_compute_identity_slug_stays_unique_through_a_collision(conn):
+    first = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2022-06-01"
+    )
+    second = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2022-11-30"
+    )
+    go_identity.compute_identity(conn, first)
+    go_identity.compute_identity(conn, second)
+
+    slug_first = conn.execute("SELECT go_url_slug FROM go_records WHERE id = ?", (first,)).fetchone()["go_url_slug"]
+    slug_second = conn.execute("SELECT go_url_slug FROM go_records WHERE id = ?", (second,)).fetchone()["go_url_slug"]
+    assert slug_first != slug_second
+    assert slug_second == f"HFW-MS-GO41-2022-R{second}"
+
+
+def test_new_departments_have_abbreviations_with_no_collisions(conn):
+    codes = list(go_identity.DEPARTMENT_ABBREVIATIONS.values())
+    assert len(codes) == len(set(codes)), "duplicate department abbreviation codes"
+    assert go_identity.DEPARTMENT_ABBREVIATIONS["Law"] == "LAW"
+    assert go_identity.DEPARTMENT_ABBREVIATIONS["School Education"] == "EDU"
+
+
+# ---------------------------------------------------------------------------
+# migrate_department_code
+# ---------------------------------------------------------------------------
+def test_migrate_department_code_recomputes_every_record_under_that_department(conn):
+    record_id = _insert_record(
+        conn, department="School Education", go_number="G.O.(Ms) No.7", go_date="2021-04-01"
+    )
+    # Simulate the pre-rename state: identity computed under the old "SE" code.
+    conn.execute(
+        "UPDATE go_records SET canonical_go_id = ?, go_url_slug = ? WHERE id = ?",
+        ("SE-MS-GO7/2021", "SE-MS-GO7-2021", record_id),
+    )
+
+    touched = go_identity.migrate_department_code(conn, "School Education")
+    assert touched == 1
+
+    row = conn.execute("SELECT canonical_go_id, go_url_slug FROM go_records WHERE id = ?", (record_id,)).fetchone()
+    assert row["canonical_go_id"] == "EDU-MS-GO7/2021"
+    assert row["go_url_slug"] == "EDU-MS-GO7-2021"
+
+
+def test_migrate_department_code_ignores_other_departments(conn):
+    record_id = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2022-06-01"
+    )
+    touched = go_identity.migrate_department_code(conn, "School Education")
+    assert touched == 0
+
+    row = conn.execute("SELECT canonical_go_id FROM go_records WHERE id = ?", (record_id,)).fetchone()
+    assert row["canonical_go_id"] is None  # never touched, since compute_identity was never called
+
+
 # ---------------------------------------------------------------------------
 # backfill_all
 # ---------------------------------------------------------------------------
@@ -226,6 +292,25 @@ def test_backfill_all_populates_every_record_missing_an_identifier(conn):
     assert conn.execute(
         "SELECT go_identifier FROM go_records WHERE id = ?", (second,)
     ).fetchone()["go_identifier"] == "GO7/2021"
+
+
+def test_backfill_all_fills_in_a_slug_missing_from_an_older_computation(conn):
+    """Regression: a record computed before go_url_slug existed already has
+    a non-NULL go_identifier, so a naive `WHERE go_identifier IS NULL` check
+    would never revisit it and its slug would stay permanently missing."""
+    record_id = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2022-06-01"
+    )
+    conn.execute(
+        "UPDATE go_records SET go_identifier = ?, canonical_go_id = ?, go_url_slug = NULL WHERE id = ?",
+        ("GO41/2022", "HFW-MS-GO41/2022", record_id),
+    )
+
+    touched = go_identity.backfill_all(conn)
+    assert touched == 1
+
+    row = conn.execute("SELECT go_url_slug FROM go_records WHERE id = ?", (record_id,)).fetchone()
+    assert row["go_url_slug"] == "HFW-MS-GO41-2022"
 
 
 def test_backfill_all_is_a_no_op_the_second_time(conn):

@@ -28,6 +28,7 @@ from .discovery.adapters import available as available_adapters
 from .extraction.metadata import ALL_FIELDS
 from .fetching import HttpFetcher, OfflineFetcher
 from .operations import extraction_queue, geography
+from .operations import jobs as ops_jobs
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -592,10 +593,18 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
 
     auth_headers = {"Authorization": f"Bearer {api_key}"}
     fetcher = HttpFetcher()
+    idle_exit_after = args.idle_exit_after
     if args.daemon:
-        print(f"Agent daemon started. Polling {server_url} every {args.poll_interval}s. Ctrl+C to stop.")
+        if idle_exit_after > 0:
+            print(
+                f"Agent daemon started. Polling {server_url} every {args.poll_interval}s; "
+                f"exits automatically after {idle_exit_after} consecutive empty checks. Ctrl+C to stop sooner."
+            )
+        else:
+            print(f"Agent daemon started. Polling {server_url} every {args.poll_interval}s. Ctrl+C to stop.")
     else:
         print(f"Agent: checking {server_url} (single run — use --daemon to keep running).")
+    consecutive_empty_polls = 0
     try:
         with httpx.Client(timeout=120.0) as client:
             while not stop["flag"]:
@@ -610,9 +619,14 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
                 if req is None:
                     if not args.daemon:
                         break
+                    consecutive_empty_polls += 1
+                    if idle_exit_after > 0 and consecutive_empty_polls >= idle_exit_after:
+                        print(f"Queue drained after {consecutive_empty_polls} consecutive empty checks -- exiting.")
+                        break
                     time.sleep(args.poll_interval)
                     continue
 
+                consecutive_empty_polls = 0
                 if req.get("kind") == "resync_all":
                     print(f"Claimed request #{req['id']}: resync_all")
                 else:
@@ -624,6 +638,7 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
                         else:
                             _mirror_sources_from_server(conn, client, server_url, auth_headers)
                             _run_claimed_request(conn, settings, fetcher, client, server_url, auth_headers, req)
+                        ops_jobs.cleanup_expired_evidence(conn)
                     except Exception as exc:
                         print(f"! request #{req['id']} failed: {exc}")
                         try:
@@ -1261,8 +1276,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--api-key", help="or set THIRDEYE_AGENT_KEY (preferred -- avoids shell history/saved task args)")
     p.add_argument("--poll-interval", type=int, default=30, help="seconds between checks when the queue is empty (only relevant with --daemon)")
     p.add_argument("--daemon", action="store_true",
-                   help="run continuously, polling until Ctrl+C -- by default the agent processes one "
-                        "queued request then exits automatically (no persistent terminal window)")
+                   help="run continuously, polling until the queue has been empty for --idle-exit-after "
+                        "consecutive checks (or until Ctrl+C) -- by default (without --daemon) the agent "
+                        "processes one queued request then exits immediately")
+    p.add_argument("--idle-exit-after", type=int, default=3,
+                   help="with --daemon, exit automatically after this many consecutive empty-queue polls "
+                        "instead of running forever (default: 3). Pass 0 to disable and poll forever until "
+                        "Ctrl+C, like a persistent watcher.")
     p.set_defaults(func=cmd_agent_daemon)
 
     # review

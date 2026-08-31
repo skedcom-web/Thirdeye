@@ -6,6 +6,7 @@
 <title>{{ record.go_identifier or record.go_number or ('Record #' ~ record.record_id) }} — Third Eye</title>
 <meta name="description" content="{{ record.subject[:160] if record.subject else 'A verified Tamil Nadu Government Order, backed by the original document.' }}">
 <meta name="theme-color" content="#1d4ed8">
+{% if record.go_url_slug %}<link rel="canonical" href="/go/{{ record.go_url_slug }}">{% endif %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">

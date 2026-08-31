@@ -67,7 +67,7 @@
   {% if records %}
   <div class="card-grid orders-grid" role="list">
     {% for r in records %}
-    <a class="feature-card orders-card" role="listitem" href="/orders/{{ r.record_id }}">
+    <a class="feature-card orders-card" role="listitem" href="{{ '/go/' ~ r.go_url_slug if r.go_url_slug else '/orders/' ~ r.record_id }}">
       <div class="orders-card-number">{{ r.go_identifier or r.go_number or 'GO number not yet verified' }}</div>
       <div class="orders-card-meta">
         {% if r.department %}<span class="pill neutral">{{ r.department }}</span>{% endif %}
