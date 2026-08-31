@@ -140,6 +140,18 @@ EXTRACTION_REQUESTS_KIND_COLUMNS: dict[str, str] = {
     "kind": "TEXT NOT NULL DEFAULT 'extraction'",
 }
 
+# GO Canonical Identifier Blueprint v1.0 -- derived identity columns, computed
+# from go_number/go_date by goengine/go_identity.py, never extracted directly.
+# All NULL until a record has both fields in a recognized format; backfilled
+# for pre-existing records in init_db() below.
+GO_RECORDS_IDENTITY_COLUMNS: dict[str, str] = {
+    "go_number_raw": "TEXT",
+    "go_number_numeric": "INTEGER",
+    "go_year": "INTEGER",
+    "go_identifier": "TEXT",
+    "canonical_go_id": "TEXT",
+}
+
 
 def utcnow() -> str:
     """Timestamps are ISO-8601 UTC everywhere; audit trails need one clock."""
@@ -275,6 +287,11 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_CITIZEN_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA_DOCUMENT_BLOBS_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA_ENGAGEMENT_PATH.read_text(encoding="utf-8"))
+    _ensure_columns(conn, "go_records", GO_RECORDS_IDENTITY_COLUMNS)
+
+    from . import go_identity
+
+    go_identity.backfill_all(conn)
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

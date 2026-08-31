@@ -47,6 +47,94 @@
     });
   }
 
+  // Progressive enhancement over a plain checkbox list: the checkboxes
+  // (name="departments", same values as always) stay exactly as they are in
+  // the DOM the whole time -- this only adds a dropdown shell around them,
+  // so the submitted form payload never changes and works identically with
+  // JS disabled (the panel just renders inline instead of collapsing).
+  // Written generically over [data-dept-multiselect] rather than one bucket
+  // list specifically, so it keeps working unchanged if the option count
+  // later grows from today's 4 buckets to the full department directory.
+  function wireDeptMultiselect() {
+    document.querySelectorAll("[data-dept-multiselect]").forEach(function (root) {
+      var toggle = root.querySelector("[data-dept-toggle]");
+      var panel = root.querySelector("[data-dept-panel]");
+      var search = root.querySelector("[data-dept-search]");
+      var summary = root.querySelector("[data-dept-summary]");
+      var selectAllBtn = root.querySelector("[data-dept-select-all]");
+      var clearBtn = root.querySelector("[data-dept-clear]");
+      var options = Array.prototype.slice.call(root.querySelectorAll("[data-dept-option]"));
+      if (!toggle || !panel) return;
+
+      function checkboxes() {
+        return options.map(function (opt) { return opt.querySelector("[data-dept-checkbox]"); });
+      }
+
+      function updateSummary() {
+        var checked = checkboxes().filter(function (cb) { return cb.checked; });
+        if (checked.length === 0) {
+          summary.textContent = "All Departments";
+        } else if (checked.length === options.length) {
+          summary.textContent = "All Departments";
+        } else {
+          summary.textContent = checked.length + " selected";
+        }
+      }
+
+      function open() {
+        panel.hidden = false;
+        toggle.setAttribute("aria-expanded", "true");
+        if (search) search.focus();
+      }
+      function close() {
+        panel.hidden = true;
+        toggle.setAttribute("aria-expanded", "false");
+      }
+
+      toggle.addEventListener("click", function () {
+        if (panel.hidden) open(); else close();
+      });
+      document.addEventListener("click", function (e) {
+        if (!root.contains(e.target)) close();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !panel.hidden) {
+          close();
+          toggle.focus();
+        }
+      });
+
+      if (search) {
+        search.addEventListener("input", function () {
+          var term = search.value.trim().toLowerCase();
+          options.forEach(function (opt) {
+            var text = opt.getAttribute("data-dept-text") || "";
+            opt.style.display = text.indexOf(term) === -1 ? "none" : "";
+          });
+        });
+      }
+
+      if (selectAllBtn) {
+        selectAllBtn.addEventListener("click", function () {
+          checkboxes().forEach(function (cb) { cb.checked = true; });
+          updateSummary();
+        });
+      }
+      if (clearBtn) {
+        clearBtn.addEventListener("click", function () {
+          checkboxes().forEach(function (cb) { cb.checked = false; });
+          updateSummary();
+        });
+      }
+
+      checkboxes().forEach(function (cb) {
+        cb.addEventListener("change", updateSummary);
+      });
+
+      updateSummary();
+    });
+  }
+
   function wireAutoRefresh() {
     // Was a plain <meta http-equiv="refresh" content="2"> on job/diagnostic-
     // run pages -- a real usability bug: it reloaded the whole page (nav
@@ -143,6 +231,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     wireThemeToggle();
     wireMobileNav();
+    wireDeptMultiselect();
     wireAutoRefresh();
     wireSpotlight();
     wireCountUp();

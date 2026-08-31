@@ -219,7 +219,7 @@ def test_bookmark_toggle(client, conn):
     client.post(f"/orders/{record_id}/save", follow_redirects=False)
     dash_after = client.get("/dashboard").text
     assert "No saved records yet" not in dash_after
-    assert "G.O.(Ms) No.123" in dash_after
+    assert "GO123/2026" in dash_after  # citizen-facing identifier, not the raw "G.O.(Ms) No.123"
 
     client.post(f"/orders/{record_id}/save", follow_redirects=False)  # toggle off
     dash_final = client.get("/dashboard").text

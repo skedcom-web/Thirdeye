@@ -208,6 +208,11 @@ def correct_field(
             "UPDATE go_fields SET superseded_by = ? WHERE id = ?", (new_id, int(current["id"]))
         )
 
+    if field_name in ("go_number", "go_date"):
+        from . import go_identity
+
+        go_identity.compute_identity(conn, record_id)
+
     audit.record(
         conn,
         action="field.corrected",

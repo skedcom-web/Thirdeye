@@ -708,6 +708,41 @@ footer.site-footer a { color: var(--muted); }
 .dept-checkbox-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .dept-checkbox-item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 
+/* Searchable multi-select -- replaces a bare checkbox row with a compact
+   dropdown so the department list can grow from today's 4 buckets to the
+   full department directory later without the panel becoming an unusably
+   long wall of checkboxes. The checkboxes themselves are unchanged (see
+   theme.js's wireDeptMultiselect) -- this only styles the shell around them. */
+.dept-multiselect { position: relative; margin-top: 4px; max-width: 360px; }
+.dept-multiselect-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; padding: 10px 14px; font: inherit; font-size: 13.5px; text-align: left;
+  background: var(--bg-elevated); color: var(--ink); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.dept-multiselect-toggle:hover { border-color: var(--muted); }
+.dept-multiselect-caret { color: var(--muted); font-size: 11px; }
+.dept-multiselect-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+  width: 100%; min-width: 280px; padding: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm); box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+}
+.dept-multiselect-search {
+  width: 100%; padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm); margin-bottom: 8px;
+}
+.dept-multiselect-actions { display: flex; gap: 14px; margin-bottom: 8px; }
+.dept-multiselect-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.dept-multiselect-list .dept-checkbox-item { padding: 4px 6px; border-radius: var(--radius-sm); }
+.dept-multiselect-list .dept-checkbox-item:hover { background: var(--neutral-soft); }
+.linklike {
+  background: none; border: none; padding: 0; font: inherit; font-size: 12.5px;
+  font-weight: 600; color: var(--accent); cursor: pointer; text-decoration: underline;
+}
+.linklike:hover { opacity: .8; }
+
 .schedule-options-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
 .schedule-option {
   display: flex; flex-direction: column; align-items: center; gap: 4px;

@@ -597,6 +597,10 @@ def extract_and_store(
             ),
         )
 
+    from .. import go_identity
+
+    go_identity.compute_identity(conn, record_id)
+
     winners = {(c.field_name, c.normalized_value) for c in metadata.fields.values()}
     for candidate in metadata.candidates:
         if (candidate.field_name, candidate.normalized_value) in winners:

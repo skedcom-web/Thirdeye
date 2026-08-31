@@ -237,9 +237,10 @@ def log_download(
 def recent_downloads(conn: sqlite3.Connection, citizen_id: int, limit: int = 10) -> list[dict]:
     rows = conn.execute(
         """
-        SELECT d.record_id, d.format, d.downloaded_at,
+        SELECT d.record_id, d.format, d.downloaded_at, r.go_identifier,
                f_num.normalized_value AS go_number, f_sub.normalized_value AS subject
           FROM download_log d
+          LEFT JOIN go_records r ON r.id = d.record_id
           LEFT JOIN go_fields f_num
                  ON f_num.record_id = d.record_id AND f_num.field_name = 'go_number' AND f_num.superseded_by IS NULL
           LEFT JOIN go_fields f_sub

@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ record.go_number or ('Record #' ~ record.record_id) }} — Third Eye</title>
+<title>{{ record.go_identifier or record.go_number or ('Record #' ~ record.record_id) }} — Third Eye</title>
 <meta name="description" content="{{ record.subject[:160] if record.subject else 'A verified Tamil Nadu Government Order, backed by the original document.' }}">
 <meta name="theme-color" content="#1d4ed8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/theme.css?v=16">
+<link rel="stylesheet" href="/static/theme.css?v=17">
 {% from "_partials.html" import mark, theme_init_script, public_header %}
 {{ theme_init_script() }}
 </head>
@@ -22,7 +22,7 @@
 
   <div class="panel">
     <div style="display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;">
-      <h1 id="record-heading" style="margin:0; font-size:24px;">{{ record.go_number or ('Record #' ~ record.record_id) }}</h1>
+      <h1 id="record-heading" style="margin:0; font-size:24px;">{{ record.go_identifier or record.go_number or ('Record #' ~ record.record_id) }}</h1>
       <span class="pill ok">Verified</span>
       <span class="muted">{{ record.department }}</span>
     </div>
@@ -101,6 +101,6 @@
   <p class="footer-copy">© 2026 Third Eye. Built on official Tamil Nadu government records.</p>
 </footer>
 
-<script src="/static/theme.js?v=16" defer></script>
+<script src="/static/theme.js?v=17" defer></script>
 </body>
 </html>

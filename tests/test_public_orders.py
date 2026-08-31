@@ -160,6 +160,31 @@ def test_search_query_matches_go_number(public_client, conn):
     assert f"/orders/{record_id}" not in miss.text
 
 
+def test_search_query_matches_the_new_canonical_identifier_format(public_client, conn):
+    # sampledata's first sample is "G.O.(Ms) No.123" dated 2026-03-15.
+    record_id = _record_ids(conn)[0]
+    review.approve(conn, record_id, reviewer="admin")
+
+    for query in ("GO123/2026", "go123/2026", "GO123"):
+        response = public_client.get("/orders", params={"q": query})
+        assert response.status_code == 200, query
+        assert f"/orders/{record_id}" in response.text, query
+
+    wrong_year = public_client.get("/orders", params={"q": "GO123/2020"})
+    assert f"/orders/{record_id}" not in wrong_year.text
+
+
+def test_orders_list_and_detail_show_the_citizen_facing_identifier(public_client, conn):
+    record_id = _record_ids(conn)[0]
+    review.approve(conn, record_id, reviewer="admin")
+
+    listing = public_client.get("/orders")
+    assert "GO123/2026" in listing.text
+
+    detail = public_client.get(f"/orders/{record_id}")
+    assert "GO123/2026" in detail.text
+
+
 def test_pagination_math(public_client, conn):
     ids = _record_ids(conn)
     assert len(ids) >= 2, "sampledata must produce more than one record for pagination to be testable"

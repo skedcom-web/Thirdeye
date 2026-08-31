@@ -171,3 +171,23 @@ def test_state_admin_cannot_start_job_for_another_state(conn, settings, fetcher,
 def test_missing_job_is_404(client):
     assert client.get("/ops/jobs/9999").status_code == 404
     assert client.get("/api/jobs/9999").status_code == 404
+
+
+def test_department_multiselect_keeps_the_same_checkbox_contract(client):
+    """The searchable multi-select (theme.js's wireDeptMultiselect) is a
+    progressive-enhancement layer over the exact same checkboxes -- this
+    locks in that jobs_start's form contract (name="departments",
+    value=<bucket key>) never changed underneath the new UI shell."""
+    from goengine.certification.categorize import ALL_BUCKETS
+
+    page = client.get("/ops/jobs").text
+    assert 'data-dept-multiselect' in page
+    for bucket in ALL_BUCKETS:
+        assert f'name="departments" value="{bucket}"' in page
+
+
+def test_starting_a_job_with_departments_still_works_via_the_same_form_fields(client):
+    response = client.post(
+        "/ops/jobs/start", data={"departments": ["health", "education"]}, follow_redirects=False
+    )
+    assert response.status_code == 303

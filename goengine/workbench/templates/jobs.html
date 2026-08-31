@@ -96,14 +96,29 @@
       </div>
 
       <div class="extract-form-group" style="grid-column:span 2;">
-        <label class="field-label">Departments (optional — leave blank to include all)</label>
-        <div class="dept-checkbox-row">
-          {% for b in buckets %}
-          <label class="dept-checkbox-item">
-            <input type="checkbox" name="departments" value="{{ b }}">
-            {{ b.replace('_',' ')|title }}
-          </label>
-          {% endfor %}
+        <label class="field-label" id="dept-multiselect-label">Departments (optional — leave blank to include all)</label>
+        <div class="dept-multiselect" data-dept-multiselect>
+          <button type="button" class="dept-multiselect-toggle" data-dept-toggle
+                  aria-haspopup="true" aria-expanded="false" aria-labelledby="dept-multiselect-label">
+            <span data-dept-summary>All Departments</span>
+            <span class="dept-multiselect-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="dept-multiselect-panel" data-dept-panel hidden>
+            <input type="search" class="dept-multiselect-search" data-dept-search
+                   placeholder="Search departments…" aria-label="Search departments">
+            <div class="dept-multiselect-actions">
+              <button type="button" class="linklike" data-dept-select-all>Select All</button>
+              <button type="button" class="linklike" data-dept-clear>Clear</button>
+            </div>
+            <div class="dept-multiselect-list" data-dept-list>
+              {% for b in buckets %}
+              <label class="dept-checkbox-item" data-dept-option data-dept-text="{{ b.replace('_',' ')|title|lower }}">
+                <input type="checkbox" name="departments" value="{{ b }}" data-dept-checkbox>
+                {{ b.replace('_',' ')|title }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
         </div>
       </div>
 

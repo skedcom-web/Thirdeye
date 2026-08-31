@@ -14,6 +14,7 @@ history, reviewer identity) stays in `review.py` and is never surfaced here.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -29,12 +30,21 @@ DEPARTMENT_LABELS: dict[str, str] = {
     "other": "Other",
 }
 
+# Matches the citizen-facing "GO41/2022" / "GO41" identifier format
+# (goengine/go_identity.py) so search can filter numerically instead of by
+# free-text LIKE. Anything else -- old-format queries like "G.O.(Ms) No.41"
+# or a subject fragment -- falls through to the existing LIKE match.
+_GO_IDENTIFIER_QUERY_RE = re.compile(
+    r"^GO\s*(?P<number>\d{1,5})\s*(?:/\s*(?P<year>(?:19|20)\d{2}))?$", re.IGNORECASE
+)
+
 
 @dataclass
 class PublicRecord:
     record_id: int
     document_id: int
     go_number: str | None
+    go_identifier: str | None
     go_date: str | None
     department: str | None
     district: str | None
@@ -77,6 +87,7 @@ def _build_record(conn: sqlite3.Connection, row: sqlite3.Row) -> PublicRecord:
         record_id=int(row["id"]),
         document_id=int(row["document_id"]),
         go_number=val("go_number"),
+        go_identifier=row["go_identifier"],
         go_date=val("go_date"),
         department=val("department"),
         district=val("district"),
@@ -109,12 +120,20 @@ def _filters(
         )
         params.append(district)
     if q:
-        where.append(
-            "EXISTS (SELECT 1 FROM go_fields f WHERE f.record_id = r.id "
-            "AND f.field_name IN ('go_number', 'subject') AND f.superseded_by IS NULL "
-            "AND f.normalized_value LIKE ?)"
-        )
-        params.append(f"%{q}%")
+        go_match = _GO_IDENTIFIER_QUERY_RE.match(q.strip())
+        if go_match:
+            where.append("r.go_number_numeric = ?")
+            params.append(int(go_match.group("number")))
+            if go_match.group("year"):
+                where.append("r.go_year = ?")
+                params.append(int(go_match.group("year")))
+        else:
+            where.append(
+                "EXISTS (SELECT 1 FROM go_fields f WHERE f.record_id = r.id "
+                "AND f.field_name IN ('go_number', 'subject') AND f.superseded_by IS NULL "
+                "AND f.normalized_value LIKE ?)"
+            )
+            params.append(f"%{q}%")
     return joins, " AND ".join(where), params
 
 
@@ -137,7 +156,7 @@ def search(
 
     rows = conn.execute(
         f"""
-        SELECT r.id, r.document_id, d.source_url, d.file_name, d.sha256, e.page_count
+        SELECT r.id, r.document_id, r.go_identifier, d.source_url, d.file_name, d.sha256, e.page_count
           FROM go_records r
           JOIN documents d ON d.id = r.document_id
           JOIN extractions e ON e.id = r.extraction_id
@@ -155,7 +174,7 @@ def search(
 def get(conn: sqlite3.Connection, record_id: int) -> PublicRecord | None:
     row = conn.execute(
         """
-        SELECT r.id, r.document_id, d.source_url, d.file_name, d.sha256, e.page_count
+        SELECT r.id, r.document_id, r.go_identifier, d.source_url, d.file_name, d.sha256, e.page_count
           FROM go_records r
           JOIN documents d ON d.id = r.document_id
           JOIN extractions e ON e.id = r.extraction_id
