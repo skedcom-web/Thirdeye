@@ -423,13 +423,18 @@ def _mirror_sources_from_server(conn, http_client, server_url: str, auth_headers
 
 _BATCH_SIZE = 10  # small on purpose -- see _run_claimed_request docstring
 
-# Discovery (crawling the listing/hub page and following its pagination) is
-# now done ONCE per source, not once per batch -- see the perf note below.
-# 100 pages comfortably covers any real TN department listing's pagination
-# depth (a department hub + its per-year listing pages + a handful of
-# pagination hops), while still being a bounded, finite pass rather than an
-# unbounded crawl.
-_DISCOVERY_MAX_PAGES = 100
+# Each discovery attempt stays small and bounded, exactly as it always was
+# -- see the perf note below for why the fix is "stop repeating it once
+# exhausted", not "make one call cover everything up front" (that was tried
+# and made things worse: a single 100-page discovery pass can itself run
+# long with zero visible progress in the meantime, which is a worse failure
+# mode than the redundant-recrawl bug it was meant to fix).
+_DISCOVERY_MAX_PAGES = 5
+# How many consecutive discovery attempts finding zero new documents mean
+# "this source's listing is fully discovered" -- 2, not 1, since a listing
+# that paginates can legitimately have one intermediate page contribute
+# nothing new (an index/nav page) before a later page still has content.
+_DISCOVERY_EXHAUSTED_AFTER = 2
 
 
 def _run_claimed_request(
@@ -446,19 +451,23 @@ def _run_claimed_request(
     an entire large source finishes, and a killed/interrupted run keeps
     whatever batches already landed.
 
-    Performance note: discovery (crawling the listing page and its
-    pagination) runs exactly ONCE per source here, before the batch loop --
-    not inside it. A real production run confirmed this the hard way: with
-    discovery folded into every batch (the original pipeline.run_all() call,
-    repeated with max_pages=5 until nothing new turned up), a department
-    needing 30 batches to exhaust its backlog re-crawled the same handful of
-    listing pages 30 times over, each hop paying the same 1.5s per-host
-    politeness delay for a page that had already been fully seen on the
-    first pass -- pure waste that got worse the deeper into a large listing
-    the run got, since more of a re-crawl's pages found nothing new. Running
-    discovery once with a generous max_pages, then batching only the
-    download/parse stages against what's already discovered, does the same
-    real work with none of the repeated re-crawling."""
+    Performance note, revised after two real production runs: the original
+    code called pipeline.run_all() (discovery + download + parse together)
+    inside the batch loop, so a department needing 30 batches to exhaust its
+    backlog re-crawled the same handful of listing pages 30 times over, each
+    hop paying the 1.5s per-host politeness delay for a page already fully
+    seen -- pure waste, worse the deeper into a large listing the run got.
+    The first fix tried moving discovery to one big call (max_pages=100)
+    before the batch loop -- that traded the redundant-recrawl problem for a
+    worse one: a single large discovery pass can itself take a long time on
+    a slow government host, or wander through an unrelated navigation link
+    graph, with *zero* progress visible on the dashboard the entire time (a
+    real run: 15 minutes, nothing). The actual fix keeps discovery exactly
+    as small and incremental as it always was (max_pages=5, so progress
+    keeps appearing every few seconds) but STOPS calling it once it has
+    found nothing new twice in a row, instead of calling it again on every
+    single one of the (possibly dozens of) remaining download/parse
+    batches -- eliminating the real waste without sacrificing visibility."""
     request_id = req["id"]
     source_ids = extraction_queue.resolve_local_source_ids(
         conn, state_name=req.get("state_name"), district_name=req.get("district_name"),
@@ -474,19 +483,31 @@ def _run_claimed_request(
         json={"sources_total": len(source_ids), "sources_completed": 0},
     )
     for sid in source_ids:
-        discovery_started = time.monotonic()
-        crawl_results = pipeline.run_discovery(
-            conn, fetcher, only_due=False, source_id=sid, max_pages=_DISCOVERY_MAX_PAGES,
-        )
-        discovery_elapsed = time.monotonic() - discovery_started
-        source_new_documents = sum(r.new_documents for r in crawl_results)
-        documents_found += source_new_documents
-        print(
-            f"  source {sid}: discovery found {source_new_documents} new document(s) "
-            f"in {discovery_elapsed:.1f}s ({sum(r.pages_fetched for r in crawl_results)} pages fetched)"
-        )
+        discovery_exhausted = False
+        consecutive_empty_discoveries = 0
 
         while True:
+            if not discovery_exhausted:
+                discovery_started = time.monotonic()
+                crawl_results = pipeline.run_discovery(
+                    conn, fetcher, only_due=False, source_id=sid, max_pages=_DISCOVERY_MAX_PAGES,
+                )
+                discovery_elapsed = time.monotonic() - discovery_started
+                new_from_discovery = sum(r.new_documents for r in crawl_results)
+                documents_found += new_from_discovery
+                pages_fetched = sum(r.pages_fetched for r in crawl_results)
+                print(
+                    f"  source {sid}: discovery pass found {new_from_discovery} new document(s) "
+                    f"in {discovery_elapsed:.1f}s ({pages_fetched} pages fetched)"
+                )
+                if new_from_discovery == 0:
+                    consecutive_empty_discoveries += 1
+                    if consecutive_empty_discoveries >= _DISCOVERY_EXHAUSTED_AFTER:
+                        discovery_exhausted = True
+                        print(f"  source {sid}: discovery exhausted, switching to download/parse only")
+                else:
+                    consecutive_empty_discoveries = 0
+
             batch_started = time.monotonic()
             download_report = pipeline.run_downloads(conn, settings, fetcher, limit=_BATCH_SIZE, source_id=sid)
             download_elapsed = time.monotonic() - batch_started
@@ -525,9 +546,9 @@ def _run_claimed_request(
                 },
             )
 
-            # Nothing downloaded or parsed this batch -- this source's
-            # already-discovered backlog is exhausted, move to the next one.
-            if download_report.succeeded == 0 and parse_report.succeeded == 0:
+            # Discovery is exhausted and nothing downloaded or parsed this
+            # batch -- this source's backlog is fully drained, move on.
+            if discovery_exhausted and download_report.succeeded == 0 and parse_report.succeeded == 0:
                 break
 
         sources_completed += 1

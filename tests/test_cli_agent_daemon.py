@@ -201,13 +201,19 @@ class _FakeRealWorkHttpxClient:
         return _FakeResponse({"ok": True})
 
 
-def test_discovery_runs_once_per_source_not_once_per_batch(conn, settings, fetcher, source_id, monkeypatch):
+def test_discovery_stops_once_exhausted_instead_of_repeating_per_batch(conn, settings, fetcher, source_id, monkeypatch):
     """The actual bug, reproduced directly: with _BATCH_SIZE=10 and only 3
-    sample documents, the old code (pipeline.run_all() inside the batch
-    loop) called discovery twice -- once to find and download all 3 in the
-    first batch, once more to confirm the source was exhausted. The fixed
-    code calls it exactly once, before the batch loop starts, regardless of
-    how many download/parse batches follow."""
+    sample documents (all fit in one download/parse batch), the old code
+    (pipeline.run_all() inside the batch loop) called discovery on every
+    single batch indefinitely -- for a source with a large real backlog
+    needing dozens of batches, that meant dozens of redundant re-crawls of
+    the same listing pages. The fix calls discovery repeatedly too (small,
+    bounded max_pages=5 each time, so progress keeps appearing), but stops
+    once it has found nothing new twice in a row (_DISCOVERY_EXHAUSTED_AFTER)
+    rather than continuing to call it on every remaining batch -- a small,
+    bounded number of calls (3 here: one real pass, two confirmations),
+    never proportional to how many download/parse batches a large backlog
+    needs."""
     discovery_calls = []
     original_run_discovery = pipeline.run_discovery
 
@@ -224,8 +230,12 @@ def test_discovery_runs_once_per_source_not_once_per_batch(conn, settings, fetch
         conn, settings, fetcher, _FakeRealWorkHttpxClient(), "https://example.invalid", {}, req,
     )
 
-    assert len(discovery_calls) == 1
-    assert discovery_calls[0] == source_id
+    assert len(discovery_calls) == cli._DISCOVERY_EXHAUSTED_AFTER + 1
+    assert all(sid == source_id for sid in discovery_calls)
+
+    # And the real work still happened despite the extra confirmation passes.
+    assert conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"] == 3
+    assert conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"] == 3
 
     # And the real work still happened: sampledata's 3 documents were
     # actually discovered, downloaded, and parsed via this one pass.
