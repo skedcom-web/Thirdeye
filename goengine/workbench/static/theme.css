@@ -868,9 +868,6 @@ footer.site-footer a { color: var(--muted); }
   .trust-item { width: 50%; justify-content: center; text-align: center; flex-direction: column; gap: 4px; }
 }
 
-/* ── Metrics ────────────────────────────────────────────────────────────── */
-.citizens-connected { font-size: 26px; letter-spacing: -.01em; }
-
 /* ── Project category cards: colour-coded icons ─────────────────────────── */
 .cat-roads    { background: #fef3c7; color: #b45309; }
 .cat-health   { background: #fee2e2; color: #b91c1c; }

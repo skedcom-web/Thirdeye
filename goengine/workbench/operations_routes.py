@@ -32,6 +32,7 @@ from ..operations import dashboard as ops_dashboard
 from ..operations import engagement as ops_engagement
 from ..operations import health as ops_health
 from ..operations import publication as ops_publication
+from ..operations import analytics as ops_analytics
 from ..operations import quality as ops_quality
 from ..operations import reset as ops_reset
 from ..operations import review as ops_review
@@ -446,6 +447,22 @@ def _register_jobs(app: FastAPI) -> None:
         extraction_queue.enqueue_resync_all_request(conn, created_by=current_user.username)
         return RedirectResponse("/ops/jobs", status_code=303)
 
+    @app.post("/ops/jobs/{request_id}/cancel")
+    def jobs_cancel(request_id: int, conn: Conn, current_user: RequireCertify):
+        """Marks a stuck/no-longer-wanted local extraction request as
+        failed from the dashboard -- for exactly the scenario a real
+        production run hit: the local agent hung or was force-stopped and
+        will never report back on its own. Doesn't reach the agent itself
+        (see extraction_queue.cancel_request's own docstring) -- if it's
+        actually still running, it must also be stopped on that machine."""
+        try:
+            extraction_queue.cancel_request(conn, request_id, actor=current_user.username)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse("/ops/jobs", status_code=303)
+
 
 # ---------------------------------------------------------------------------
 # Document Library -- every downloaded file, independent of review status,
@@ -700,12 +717,14 @@ def _register_dashboard(app: FastAPI) -> None:
     @app.get("/ops/quality", response_class=HTMLResponse)
     def extraction_quality(request: Request, conn: Conn, config: Config, current_user: LoggedIn):
         health = ops_quality.department_health(conn, config)
+        department_kpis = ops_quality.department_coverage_kpis(conn, registry.list_departments(conn), health)
         return templates.TemplateResponse(
             request, "ops_quality.html",
             {
                 "quality": ops_quality.quality_summary(conn),
                 "department_health": health,
-                "department_kpis": ops_quality.department_coverage_kpis(conn, registry.list_departments(conn), health),
+                "department_kpis": department_kpis,
+                "coverage": ops_quality.extraction_coverage(conn, department_kpis),
                 "current_user": current_user,
             },
         )
@@ -724,6 +743,25 @@ def _register_dashboard(app: FastAPI) -> None:
             },
         )
 
+    @app.get("/ops/repository", response_class=HTMLResponse)
+    def repository_excellence(request: Request, conn: Conn, config: Config, current_user: LoggedIn):
+        """Phase 3.6 -- is the published repository itself healthy/complete/
+        trustworthy, distinct from /ops/quality's "is extraction producing
+        good data." Composes analytics.py + quality.py; the two aren't
+        cross-imported (analytics.py already imports from quality.py), so
+        the by-year trend is combined here rather than inside
+        repository_health() itself."""
+        analytics_data = ops_analytics.repository_analytics(conn, config)
+        return templates.TemplateResponse(
+            request, "ops_repository.html",
+            {
+                "readiness": ops_quality.department_readiness(conn, config),
+                "analytics": analytics_data,
+                "health": ops_quality.repository_health(conn, config),
+                "trend": analytics_data["by_year"],
+                "current_user": current_user,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

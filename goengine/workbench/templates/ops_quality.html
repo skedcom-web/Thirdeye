@@ -39,6 +39,24 @@
   </div>
 </div>
 
+<h2 style="margin-bottom:8px;">Extraction Coverage</h2>
+<div class="grid cols-2" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--ok);">📈</div></div>
+    <div class="kpi-n">{{ coverage.success_rate_pct }}%</div>
+    <div class="kpi-l">Success Rate</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">
+      {{ coverage.departments_completed }} completed, {{ coverage.departments_remaining }} remaining
+    </div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:{{ 'var(--bad)' if coverage.failure_rate_pct else 'var(--ok)' }};">📉</div></div>
+    <div class="kpi-n">{{ coverage.failure_rate_pct }}%</div>
+    <div class="kpi-l">Failure Rate</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">Share of local extraction requests that failed</div>
+  </div>
+</div>
+
 <div class="panel">
   <h2>Department Health</h2>
   <p class="muted" style="margin-bottom:12px;">

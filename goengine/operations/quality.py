@@ -212,6 +212,144 @@ def department_coverage_kpis(conn: sqlite3.Connection, departments: list[str], h
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 3.7 Initiative 7 -- Extraction Coverage Dashboard
+#
+# Composes department_coverage_kpis() rather than recomputing it -- 4 of
+# its 5 numbers already exist there. Only success/failure rate are new.
+# ---------------------------------------------------------------------------
+def extraction_coverage(conn: sqlite3.Connection, kpis: dict) -> dict:
+    """`kpis` is department_coverage_kpis()'s own return value -- callers
+    that already computed it (every current caller does, to build the
+    Department Health Table) pass it straight through rather than paying
+    for a second pass over the same department data."""
+    configured = kpis["configured"]
+    completed = kpis["extracted"]
+
+    request_counts = conn.execute(
+        "SELECT status, COUNT(*) AS n FROM extraction_requests GROUP BY status"
+    ).fetchall()
+    total_requests = sum(r["n"] for r in request_counts)
+    failed_requests = sum(r["n"] for r in request_counts if r["status"] == "FAILED")
+
+    return {
+        "departments_completed": completed,
+        "departments_remaining": configured - completed,
+        "success_rate_pct": _pct(completed, configured),
+        # Request-level, not per-department -- there is no per-department
+        # attempt-tracking today (a department can be scoped by several
+        # requests, or none), so this is the only granularity that's real
+        # rather than invented for this report.
+        "failure_rate_pct": _pct(failed_requests, total_requests),
+        "latest_successful_extraction": kpis["last_successful_extraction"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative A -- Department Readiness Certification Center
+# ---------------------------------------------------------------------------
+STATUS_READY = "Ready"
+STATUS_PARTIALLY_READY = "Partially Ready"
+STATUS_NEEDS_ATTENTION = "Needs Attention"
+
+
+def department_readiness(conn: sqlite3.Connection, settings: Settings) -> list[dict]:
+    """One row per configured department, checked against 6 real,
+    independently-verifiable criteria -- reuses department_health()'s
+    total_gos rather than recomputing it. A department with zero extracted
+    GOs is "Needs Attention" outright (nothing to certify yet); otherwise
+    "Ready" only if every check passes, else "Partially Ready"."""
+    from .. import public, registry
+
+    health_by_department = {h["department"]: h for h in department_health(conn, settings)}
+
+    result = []
+    for department in registry.list_departments(conn):
+        total_gos = health_by_department.get(department, {}).get("total_gos", 0)
+
+        records = conn.execute(
+            """
+            SELECT r.id AS record_id, r.document_id, r.go_url_slug FROM go_records r
+              JOIN sources s ON s.id = r.source_id
+             WHERE s.department = ?
+            """,
+            (department,),
+        ).fetchall()
+
+        pdf_available = any(repository.is_available(settings, conn, int(r["document_id"])) for r in records)
+        permanent_url_available = any(r["go_url_slug"] for r in records)
+
+        metadata_complete = False
+        for r in records:
+            present = {
+                f["field_name"] for f in conn.execute(
+                    "SELECT field_name FROM go_fields WHERE record_id = ? AND superseded_by IS NULL",
+                    (r["record_id"],),
+                ).fetchall()
+            }
+            if all(field in present for field in CORE_FIELDS):
+                metadata_complete = True
+                break
+
+        # A real functional check, not a data-shape guess: does searching
+        # for this department by name actually surface its own GOs.
+        searchable = total_gos > 0 and public.search(conn, q=department)[1] > 0
+
+        checklist = {
+            "latest_go_extracted": total_gos > 0,
+            "historical_go_available": total_gos >= 2,
+            "pdf_available": pdf_available,
+            "metadata_complete": metadata_complete,
+            "searchable": searchable,
+            "permanent_url_available": permanent_url_available,
+        }
+
+        if total_gos == 0:
+            status = STATUS_NEEDS_ATTENTION
+        elif all(checklist.values()):
+            status = STATUS_READY
+        else:
+            status = STATUS_PARTIALLY_READY
+
+        result.append({
+            "department": department,
+            "total_gos": total_gos,
+            "checklist": checklist,
+            "status": status,
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative E -- Publication Confidence Model
+#
+# Maps the internal Quality Score (Phase 3.5's go_quality_score) into a
+# citizen-friendly label. Only the label ever reaches a citizen-facing
+# template -- the numeric score and its per-criterion breakdown stay
+# server-side, per the directive's "do not expose internal scoring
+# calculations." Thresholds are a defensible default (the blueprint names
+# the 3 labels but not the cutoffs), documented here so they can be revisited.
+# ---------------------------------------------------------------------------
+CONFIDENCE_HIGH = "High Confidence"
+CONFIDENCE_MEDIUM = "Medium Confidence"
+CONFIDENCE_REVIEW_RECOMMENDED = "Review Recommended"
+
+_CONFIDENCE_HIGH_THRESHOLD = 85
+_CONFIDENCE_MEDIUM_THRESHOLD = 60
+
+
+def publication_confidence_label(score: float) -> str:
+    if score >= _CONFIDENCE_HIGH_THRESHOLD:
+        return CONFIDENCE_HIGH
+    if score >= _CONFIDENCE_MEDIUM_THRESHOLD:
+        return CONFIDENCE_MEDIUM
+    return CONFIDENCE_REVIEW_RECOMMENDED
+
+
+def publication_confidence(conn: sqlite3.Connection, settings: Settings, record_id: int) -> str:
+    return publication_confidence_label(go_quality_score(conn, settings, record_id)["score"])
+
+
 def _records_with_all_fields_present(
     conn: sqlite3.Connection, fields: tuple[str, ...], *, needs_ocr: bool | None = None
 ) -> int:
@@ -390,4 +528,46 @@ def quality_summary(conn: sqlite3.Connection) -> dict:
         "missing_metadata": missing_metadata(conn),
         "review_corrections": review_corrections(conn),
         "department_coverage": department_coverage(conn),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative F -- Repository Health Dashboard
+#
+# Composes signals already built above rather than reinventing them. Does
+# NOT include the "trend" view here: that's Initiative B's by-year
+# published counts (operations/analytics.py), which can't be imported from
+# this module without an import cycle (analytics.py already imports
+# department_coverage/department_health from here) -- the /ops/repository
+# route combines the two at render time instead.
+# ---------------------------------------------------------------------------
+def repository_health(conn: sqlite3.Connection, settings: Settings) -> dict:
+    metadata_completeness_pct = extraction_success_rate(conn)["rate"]
+
+    document_ids = [int(r["document_id"]) for r in conn.execute("SELECT DISTINCT document_id FROM go_records").fetchall()]
+    pdf_available_count = sum(1 for doc_id in document_ids if repository.is_available(settings, conn, doc_id))
+    pdf_availability_pct = _pct(pdf_available_count, len(document_ids))
+
+    readiness = department_readiness(conn, settings)
+    departments_with_data = [d for d in readiness if d["total_gos"] > 0]
+    search_indexing_coverage_pct = _pct(
+        sum(1 for d in departments_with_data if d["checklist"]["searchable"]), len(departments_with_data)
+    )
+    readiness_counts = {STATUS_READY: 0, STATUS_PARTIALLY_READY: 0, STATUS_NEEDS_ATTENTION: 0}
+    for d in readiness:
+        readiness_counts[d["status"]] += 1
+
+    confidence_counts = {CONFIDENCE_HIGH: 0, CONFIDENCE_MEDIUM: 0, CONFIDENCE_REVIEW_RECOMMENDED: 0}
+    approved_ids = [
+        int(r["id"]) for r in conn.execute("SELECT id FROM go_records WHERE status = 'approved'").fetchall()
+    ]
+    for record_id in approved_ids:
+        confidence_counts[publication_confidence(conn, settings, record_id)] += 1
+
+    return {
+        "metadata_completeness_pct": metadata_completeness_pct,
+        "pdf_availability_pct": pdf_availability_pct,
+        "search_indexing_coverage_pct": search_indexing_coverage_pct,
+        "department_readiness": readiness_counts,
+        "publication_confidence_distribution": confidence_counts,
     }

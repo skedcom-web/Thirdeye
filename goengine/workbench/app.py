@@ -33,7 +33,6 @@ from ..fetching import FetchError
 from ..operations import auth
 from ..operations import citizen as ops_citizen
 from ..operations import engagement as ops_engagement
-from ..operations import departments as ops_departments
 from .deps import (
     CITIZEN_SESSION_COOKIE,
     Config,
@@ -77,28 +76,17 @@ def _post_login_destination(user: auth.User) -> str:
 
 
 def _landing_stats(conn: sqlite3.Connection, settings: Settings) -> dict:
-    """Real numbers for the (citizen-facing) landing page -- reuses Module
-    9's operations summary and Module 7's review counts (the same sources
-    of truth as the admin dashboard and /api/verified) rather than a second
-    set of queries that could drift out of sync with them.
+    """Phase 3.6 Initiative C -- the landing page's repository statistics.
+    Reuses operations/analytics.py's homepage_statistics() (the same
+    definitions /ops/repository's Analytics Center uses) rather than a
+    second set of queries that could drift out of sync with it. Previously
+    this mixed real numbers with one dead placeholder tile ("Citizens
+    Connected") that had no data source and always rendered "--"; replaced
+    outright rather than carried forward, per "only real repository data
+    may be shown.\""""
+    from ..operations import analytics as ops_analytics
 
-    Phase 3.2's blueprint asks for citizen-friendly metrics, not technical
-    ones -- "records available" here is deliberately the *approved* count
-    (what /api/verified actually serves), not the raw ingested count, since
-    that is the number a citizen visitor can actually go look at."""
-    from ..operations import dashboard as ops_dashboard
-
-    summary = ops_dashboard.operations_summary(conn, settings)
-    review_counts = review.counts_by_status(conn)
-    return {
-        "documents_processed": summary["documents_processed"],
-        "projects_published": summary["publication_coverage"]["districts_published"],
-        "certified_sources": summary["certified_sources"],
-        "districts_covered": summary["active_districts"],
-        "records_available": review_counts[review.STATUS_APPROVED],
-        "departments_tracked": len(ops_departments.list_departments(conn)),
-        "summary": summary,
-    }
+    return ops_analytics.homepage_statistics(conn)
 
 
 def _bootstrap_admin_from_env(settings: Settings) -> None:
@@ -340,6 +328,65 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/timeline", response_class=HTMLResponse)
+    def timeline_explorer(
+        request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
+        visitor_id: VisitorId, view: str = "year", department: str | None = None, district: str | None = None,
+        q: str | None = None,
+    ):
+        """Phase 3.6 Initiative D -- browse published GOs by year, department,
+        or GO type without needing to search. Reuses public.search() exactly
+        as /orders does (same department-bucket/district/q filters, no new
+        query capability) and groups the *same* result set into sections in
+        Python -- no new storage, no architecture change. "GO Type" reads
+        the series code already embedded in canonical_go_id (e.g.
+        "HFW-MS-GO41/2022" -> "MS") rather than adding a column for it."""
+        view = view if view in ("year", "department", "go_type") else "year"
+        # A generous single page rather than /orders' 20-per-page limit --
+        # grouping needs the whole matching set to make sense as sections,
+        # not just one page of it. Fine at this repository's current scale;
+        # would need real pagination if that scale changes materially.
+        records, total = public.search(
+            conn, department_bucket=department or None, district=district or None, q=q or None, limit=500,
+        )
+
+        groups: dict[str, list] = {}
+        for record in records:
+            if view == "year":
+                key = record.go_date[:4] if record.go_date else "Unknown Year"
+            elif view == "department":
+                key = record.department or "Unknown Department"
+            else:  # go_type
+                canonical = conn.execute(
+                    "SELECT canonical_go_id FROM go_records WHERE id = ?", (record.record_id,)
+                ).fetchone()
+                parts = (canonical["canonical_go_id"] or "").split("-") if canonical else []
+                key = parts[1] if len(parts) >= 2 else "Unknown Type"
+            groups.setdefault(key, []).append(record)
+
+        sorted_groups = sorted(groups.items(), key=lambda kv: kv[0], reverse=(view == "year"))
+
+        if current_user is None:
+            ops_engagement.log_event(
+                conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_ORDERS_VIEW,
+                path="/timeline", district=district or None, query_used=bool(q),
+            )
+
+        return templates.TemplateResponse(
+            request, "timeline.html",
+            {
+                "current_user": current_user,
+                "current_citizen": current_citizen,
+                "view": view,
+                "groups": sorted_groups,
+                "total": total,
+                "filters": public.filter_options(conn),
+                "selected_department": department or "",
+                "selected_district": district or "",
+                "q": q or "",
+            },
+        )
+
     @app.get("/my-area", response_class=HTMLResponse)
     def my_area(
         request: Request, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
@@ -412,11 +459,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     def _order_detail_response(
-        request: Request, record, record_id: int, conn: sqlite3.Connection,
+        request: Request, record, record_id: int, conn: sqlite3.Connection, config: Settings,
         current_user, current_citizen, visitor_id: str, ref: str | None,
     ):
         """Shared by /orders/{record_id} and /go/{slug} -- both resolve to a
         PublicRecord differently but render the identical page."""
+        from ..operations import quality as ops_quality
+
         if current_user is None:
             ops_engagement.log_event(
                 conn, visitor_id=visitor_id, event_type=ops_engagement.EVENT_GO_DETAIL_VIEW,
@@ -437,23 +486,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "core_fields": meta.CORE_FIELDS,
                 "optional_fields": meta.OPTIONAL_FIELDS,
                 "is_saved": ops_citizen.is_saved(conn, current_citizen.id, record_id) if current_citizen else False,
+                # Phase 3.6 Initiative E -- citizen-friendly label only, the
+                # numeric Quality Score behind it never reaches this template.
+                "confidence_label": ops_quality.publication_confidence(conn, config, record_id),
             },
         )
 
     @app.get("/orders/{record_id}", response_class=HTMLResponse)
     def public_order_detail(
-        request: Request, record_id: int, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
-        visitor_id: VisitorId, ref: str | None = None,
+        request: Request, record_id: int, conn: Conn, config: Config, current_user: CurrentUser,
+        current_citizen: CurrentCitizen, visitor_id: VisitorId, ref: str | None = None,
     ):
         record = public.get(conn, record_id)
         if record is None:
             raise HTTPException(status_code=404, detail="no such Government Order")
-        return _order_detail_response(request, record, record_id, conn, current_user, current_citizen, visitor_id, ref)
+        return _order_detail_response(
+            request, record, record_id, conn, config, current_user, current_citizen, visitor_id, ref,
+        )
 
     @app.get("/go/{slug}", response_class=HTMLResponse)
     def public_order_detail_by_slug(
-        request: Request, slug: str, conn: Conn, current_user: CurrentUser, current_citizen: CurrentCitizen,
-        visitor_id: VisitorId, ref: str | None = None,
+        request: Request, slug: str, conn: Conn, config: Config, current_user: CurrentUser,
+        current_citizen: CurrentCitizen, visitor_id: VisitorId, ref: str | None = None,
     ):
         """Permanent, shareable GO URL -- e.g. /go/HFW-MS-GO41-2022 -- built
         from the record's already-unique canonical_go_id (see
@@ -463,7 +517,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if record is None:
             raise HTTPException(status_code=404, detail="no such Government Order")
         return _order_detail_response(
-            request, record, record.record_id, conn, current_user, current_citizen, visitor_id, ref,
+            request, record, record.record_id, conn, config, current_user, current_citizen, visitor_id, ref,
         )
 
     @app.get("/orders/{record_id}/pdf")

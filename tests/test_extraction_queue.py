@@ -376,3 +376,86 @@ def test_run_history_row_excludes_documents_outside_the_run_scope(conn, settings
     )
     result = eq.run_history_row(conn, eq.get_request(conn, rid))
     assert result["documents_published"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Cancelling a stuck/no-longer-wanted request -- a real production incident:
+# a local agent hung mid-crawl and Ctrl+C in its terminal did nothing (it
+# only checks for interruption between whole requests), leaving a request
+# stuck at RUNNING forever with no way to clear it from the dashboard.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("status", ["QUEUED", "CLAIMED", "RUNNING"])
+def test_cancel_request_marks_a_cancellable_request_as_failed(conn, agent_key, status):
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    if status != "QUEUED":
+        eq.claim_next(conn, agent_key_id=key_id)
+    if status == "RUNNING":
+        eq.report_progress(conn, rid, sources_total=1, sources_completed=0)
+    assert eq.get_request(conn, rid)["status"] == status
+
+    eq.cancel_request(conn, rid, actor="admin")
+
+    row = eq.get_request(conn, rid)
+    assert row["status"] == eq.STATUS_FAILED
+    assert row["error"] == "Cancelled by admin"
+    assert row["finished_at"] is not None
+
+
+def test_cancel_request_refuses_an_already_finished_request(conn):
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.complete_request(conn, rid, ok=True)
+
+    with pytest.raises(ValueError, match="not cancellable"):
+        eq.cancel_request(conn, rid, actor="admin")
+
+
+def test_cancel_request_unknown_id_raises(conn):
+    with pytest.raises(LookupError):
+        eq.cancel_request(conn, 9999, actor="admin")
+
+
+def test_cancel_request_records_an_audit_entry_with_the_admin_as_actor(conn):
+    from goengine import audit
+
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.cancel_request(conn, rid, actor="alex")
+
+    entries = audit.trail(conn, entity_type="extraction_request", entity_id=rid)
+    cancelled = [e for e in entries if e.action == "extraction_request.cancelled"]
+    assert len(cancelled) == 1
+    assert cancelled[0].actor == "alex"
+
+
+def test_jobs_cancel_route_marks_request_failed_and_redirects(client, conn):
+    login_as(client, conn)
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+
+    response = client.post(f"/ops/jobs/{rid}/cancel", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ops/jobs"
+    assert eq.get_request(conn, rid)["status"] == eq.STATUS_FAILED
+
+
+def test_jobs_cancel_route_404s_for_an_unknown_request(client, conn):
+    login_as(client, conn)
+    assert client.post("/ops/jobs/9999/cancel").status_code == 404
+
+
+def test_jobs_cancel_route_400s_for_an_already_finished_request(client, conn):
+    login_as(client, conn)
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.complete_request(conn, rid, ok=True)
+
+    assert client.post(f"/ops/jobs/{rid}/cancel").status_code == 400
+
+
+def test_jobs_cancel_route_requires_certify_permission(conn, settings):
+    from goengine.operations import auth as ops_auth
+
+    app = create_app(settings)
+    reviewer_client = TestClient(app)
+    login_as(reviewer_client, conn, username="reviewer1", role=ops_auth.ROLE_REVIEWER)
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+
+    assert reviewer_client.post(f"/ops/jobs/{rid}/cancel").status_code == 403

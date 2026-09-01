@@ -131,23 +131,26 @@
     The platform, by the numbers
   </h2>
   <div class="metric-row reveal reveal-stagger">
-    <a class="glass-card" href="/orders" aria-label="View public records available">
-      <div class="metric-n" data-count-to="{{ stats.records_available }}" aria-live="polite">0</div>
-      <div class="metric-l">📄 Public Records Available</div>
+    <a class="glass-card" href="/orders" aria-label="View total published Government Orders">
+      <div class="metric-n" data-count-to="{{ stats.total_published }}" aria-live="polite">0</div>
+      <div class="metric-l">📚 Total Published GOs</div>
     </a>
-    <div class="glass-card" role="group" aria-label="Departments tracked metric">
-      <div class="metric-n" data-count-to="{{ stats.departments_tracked }}" aria-live="polite">0</div>
-      <div class="metric-l">🏛 Departments Tracked</div>
+    <div class="glass-card" role="group" aria-label="Departments covered metric">
+      <div class="metric-n" data-count-to="{{ stats.departments_covered }}" aria-live="polite">0</div>
+      <div class="metric-l">🏛 Departments Covered</div>
     </div>
-    <div class="glass-card" role="group" aria-label="Districts covered metric">
-      <div class="metric-n" data-count-to="{{ stats.districts_covered }}" aria-live="polite">0</div>
-      <div class="metric-l">📍 Districts Covered</div>
+    <div class="glass-card" role="group" aria-label="Years covered metric">
+      <div class="metric-n" data-count-to="{{ stats.years_covered }}" aria-live="polite">0</div>
+      <div class="metric-l">📅 Years Covered</div>
     </div>
-    <div class="glass-card" role="group" aria-label="Citizens connected metric">
-      <div class="metric-n citizens-connected" aria-live="polite">—</div>
-      <div class="metric-l">👥 Citizens Connected</div>
+    <div class="glass-card" role="group" aria-label="Latest publication date metric">
+      <div class="metric-n" style="font-size:22px;" aria-live="polite">{{ stats.latest_publication_date[:10] if stats.latest_publication_date else 'None yet' }}</div>
+      <div class="metric-l">🕐 Latest Publication Date</div>
     </div>
   </div>
+  <p class="muted" style="text-align:center; margin-top:16px; font-size:13px;">
+    Data sourced from official Tamil Nadu Government publications.
+  </p>
 </section>
 
 {% if recent_actions %}

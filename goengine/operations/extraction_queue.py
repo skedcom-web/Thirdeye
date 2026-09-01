@@ -195,6 +195,41 @@ def complete_request(
     )
 
 
+CANCELLABLE_STATUSES = (STATUS_QUEUED, STATUS_CLAIMED, STATUS_RUNNING)
+
+
+def cancel_request(conn: sqlite3.Connection, request_id: int, *, actor: str) -> None:
+    """Marks a stuck or no-longer-wanted request as failed, from the admin
+    side -- for when the local agent that claimed it has died, hung, or was
+    force-stopped and will never report back on its own (a real production
+    incident: Ctrl+C in the terminal did nothing because the agent process
+    was blocked inside a long-running crawl/download/OCR call, which only
+    checks for interruption between whole requests, not mid-request).
+
+    This does NOT reach the local agent -- there is no channel to push a
+    stop signal to a machine that may be offline, unreachable, or simply not
+    polling anymore. It only ends the *server-side* bookkeeping, so the
+    request stops occupying a queue slot and stops looking like active work
+    on the dashboard. If the agent is actually still alive and working, it
+    must also be stopped locally (Ctrl+C, or ending the process) -- it will
+    otherwise keep working and may still report progress/completion for a
+    request the server now considers cancelled."""
+    row = get_request(conn, request_id)
+    if row is None:
+        raise LookupError(f"no extraction_request with id {request_id}")
+    if row["status"] not in CANCELLABLE_STATUSES:
+        raise ValueError(f"request {request_id} is already {row['status']}, not cancellable")
+
+    conn.execute(
+        "UPDATE extraction_requests SET status = ?, finished_at = ?, error = ? WHERE id = ?",
+        (STATUS_FAILED, utcnow(), "Cancelled by admin", request_id),
+    )
+    audit.record(
+        conn, action="extraction_request.cancelled", entity_type="extraction_request",
+        entity_id=request_id, actor=actor,
+    )
+
+
 def get_request(conn: sqlite3.Connection, request_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM extraction_requests WHERE id = ?", (request_id,)).fetchone()
 

@@ -423,6 +423,14 @@ def _mirror_sources_from_server(conn, http_client, server_url: str, auth_headers
 
 _BATCH_SIZE = 10  # small on purpose -- see _run_claimed_request docstring
 
+# Discovery (crawling the listing/hub page and following its pagination) is
+# now done ONCE per source, not once per batch -- see the perf note below.
+# 100 pages comfortably covers any real TN department listing's pagination
+# depth (a department hub + its per-year listing pages + a handful of
+# pagination hops), while still being a bounded, finite pass rather than an
+# unbounded crawl.
+_DISCOVERY_MAX_PAGES = 100
+
 
 def _run_claimed_request(
     conn, settings: Settings, fetcher, http_client, server_url: str, auth_headers: dict, req: dict,
@@ -432,11 +440,25 @@ def _run_claimed_request(
     parsing all of them for real, at a polite per-host crawl delay, can take
     a long time. Processing a source in one giant pipeline.run_all() call
     means the admin sees nothing land in the portal and no progress update
-    for the entire duration. Instead this repeatedly calls pipeline.run_all
-    with a small `limit`, syncing and reporting progress after every small
-    batch, until a batch does no new work -- so results appear within
-    seconds/minutes rather than only once an entire large source finishes,
-    and a killed/interrupted run keeps whatever batches already landed."""
+    for the entire duration. Instead this downloads/parses in small batches,
+    syncing and reporting progress after each, until a batch does no new
+    work -- so results appear within seconds/minutes rather than only once
+    an entire large source finishes, and a killed/interrupted run keeps
+    whatever batches already landed.
+
+    Performance note: discovery (crawling the listing page and its
+    pagination) runs exactly ONCE per source here, before the batch loop --
+    not inside it. A real production run confirmed this the hard way: with
+    discovery folded into every batch (the original pipeline.run_all() call,
+    repeated with max_pages=5 until nothing new turned up), a department
+    needing 30 batches to exhaust its backlog re-crawled the same handful of
+    listing pages 30 times over, each hop paying the same 1.5s per-host
+    politeness delay for a page that had already been fully seen on the
+    first pass -- pure waste that got worse the deeper into a large listing
+    the run got, since more of a re-crawl's pages found nothing new. Running
+    discovery once with a generous max_pages, then batching only the
+    download/parse stages against what's already discovered, does the same
+    real work with none of the repeated re-crawling."""
     request_id = req["id"]
     source_ids = extraction_queue.resolve_local_source_ids(
         conn, state_name=req.get("state_name"), district_name=req.get("district_name"),
@@ -452,14 +474,28 @@ def _run_claimed_request(
         json={"sources_total": len(source_ids), "sources_completed": 0},
     )
     for sid in source_ids:
+        discovery_started = time.monotonic()
+        crawl_results = pipeline.run_discovery(
+            conn, fetcher, only_due=False, source_id=sid, max_pages=_DISCOVERY_MAX_PAGES,
+        )
+        discovery_elapsed = time.monotonic() - discovery_started
+        source_new_documents = sum(r.new_documents for r in crawl_results)
+        documents_found += source_new_documents
+        print(
+            f"  source {sid}: discovery found {source_new_documents} new document(s) "
+            f"in {discovery_elapsed:.1f}s ({sum(r.pages_fetched for r in crawl_results)} pages fetched)"
+        )
+
         while True:
-            report = pipeline.run_all(
-                conn, settings, fetcher, only_due=False, source_id=sid, max_pages=5, limit=_BATCH_SIZE,
-            )
-            documents_found += report.new_documents
-            documents_downloaded += report.download.succeeded
-            documents_parsed += report.parse.succeeded
-            documents_failed += report.download.failed + report.parse.failed
+            batch_started = time.monotonic()
+            download_report = pipeline.run_downloads(conn, settings, fetcher, limit=_BATCH_SIZE, source_id=sid)
+            download_elapsed = time.monotonic() - batch_started
+            parse_started = time.monotonic()
+            parse_report = pipeline.run_parsing(conn, settings, limit=_BATCH_SIZE, source_id=sid)
+            parse_elapsed = time.monotonic() - parse_started
+            documents_downloaded += download_report.succeeded
+            documents_parsed += parse_report.succeeded
+            documents_failed += download_report.failed + parse_report.failed
 
             sync_results = _sync_documents(
                 conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
@@ -469,9 +505,15 @@ def _run_claimed_request(
             synced_total += batch_synced
             sync_failed_total += batch_sync_failed
 
+            # Per-stage timing so a slow run is diagnosable from the printed
+            # log alone -- e.g. a high parse time here almost always means
+            # OCR (Tesseract) is doing real work on scanned documents, not a
+            # bug; a high download time points at the government host itself
+            # being slow, not this code.
             print(
-                f"  source {sid}, batch: {report.download.succeeded} downloaded, "
-                f"{report.parse.succeeded} parsed, {batch_synced - batch_sync_failed}/{batch_synced} synced "
+                f"  source {sid}, batch: {download_report.succeeded} downloaded ({download_elapsed:.1f}s), "
+                f"{parse_report.succeeded} parsed ({parse_elapsed:.1f}s), "
+                f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
                 f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
             )
             http_client.post(
@@ -483,9 +525,9 @@ def _run_claimed_request(
                 },
             )
 
-            # Nothing new discovered, downloaded, or parsed this batch --
-            # this source is exhausted, move to the next one.
-            if report.new_documents == 0 and report.download.succeeded == 0 and report.parse.succeeded == 0:
+            # Nothing downloaded or parsed this batch -- this source's
+            # already-discovered backlog is exhausted, move to the next one.
+            if download_report.succeeded == 0 and parse_report.succeeded == 0:
                 break
 
         sources_completed += 1

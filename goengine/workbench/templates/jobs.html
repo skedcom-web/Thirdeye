@@ -177,7 +177,7 @@
   {% if local_requests %}
   <table style="margin-top:16px;">
     <thead>
-      <tr><th>Request</th><th>Type</th><th>Status</th><th>Departments</th><th>Sources</th><th>Documents</th><th>Duration</th><th>Published</th><th>Created</th></tr>
+      <tr><th>Request</th><th>Type</th><th>Status</th><th>Departments</th><th>Sources</th><th>Documents</th><th>Duration</th><th>Published</th><th>Created</th><th></th></tr>
     </thead>
     <tbody>
       {% for r in local_requests %}
@@ -195,6 +195,14 @@
         <td>{{ '%.0fs'|format(r.duration_seconds) if r.duration_seconds is not none else '—' }}</td>
         <td>{{ r.documents_published if r.documents_published is not none else '—' }}</td>
         <td class="mono" style="font-size:12px;">{{ r.created_at }}</td>
+        <td>
+          {% if can_run and r.status in ('QUEUED', 'CLAIMED', 'RUNNING') %}
+          <form method="post" action="/ops/jobs/{{ r.id }}/cancel" style="margin:0;"
+                onsubmit="return confirm('Cancel request #{{ r.id }}? This only updates the dashboard -- if the local agent is still actually running, stop it on that machine too (Ctrl+C or End Task).');">
+            <button type="submit" class="btn-sm btn-secondary" style="color:var(--bad); border-color:var(--bad);">✕ Cancel</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

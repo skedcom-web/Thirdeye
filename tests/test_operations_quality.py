@@ -283,6 +283,9 @@ def test_quality_page_renders(conn, settings, fetcher, source_id):
     assert "Extraction Success Rate" in response.text
     assert "Department Health" in response.text
     assert "All Departments" in response.text  # the fixture source's department, in the health table
+    assert "Extraction Coverage" in response.text
+    assert "Success Rate" in response.text
+    assert "Failure Rate" in response.text
 
 
 def test_metadata_workbench_lists_a_record_missing_a_field(conn, settings, fetcher, source_id):
@@ -353,3 +356,175 @@ def test_reprocess_unknown_record_404s(conn, settings, fetcher, source_id):
     client = TestClient(create_app(settings))
     login_as(client, conn)
     assert client.post("/records/9999/reprocess").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative A -- Department Readiness Certification
+# ---------------------------------------------------------------------------
+def test_department_readiness_needs_attention_with_no_data(conn, settings, records):
+    from goengine import registry
+
+    registry.add_source(
+        conn, name="Untouched Dept Source", department="Untouched Department",
+        url="https://www.tn.gov.in/go.php?dep_id=untouched", source_type="department_site",
+    )
+    readiness = {row["department"]: row for row in quality.department_readiness(conn, settings)}
+    row = readiness["Untouched Department"]
+    assert row["status"] == "Needs Attention"
+    assert row["total_gos"] == 0
+    assert not any(row["checklist"].values())
+
+
+def test_department_readiness_partially_ready_before_anything_is_approved(conn, settings, records):
+    # sample data extracts cleanly (complete metadata, real PDFs, a computed
+    # slug) but nothing is approved yet -- searchability specifically
+    # requires an approved record (public.search() only ever returns
+    # approved rows), so this must not be "Ready" yet.
+    readiness = {row["department"]: row for row in quality.department_readiness(conn, settings)}
+    row = readiness["All Departments"]
+    assert row["status"] == "Partially Ready"
+    assert row["checklist"]["latest_go_extracted"] is True
+    assert row["checklist"]["historical_go_available"] is True
+    assert row["checklist"]["pdf_available"] is True
+    assert row["checklist"]["metadata_complete"] is True
+    assert row["checklist"]["permanent_url_available"] is True
+    assert row["checklist"]["searchable"] is False
+
+
+def test_department_readiness_ready_once_something_is_approved_and_searchable(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+    readiness = {row["department"]: row for row in quality.department_readiness(conn, settings)}
+    row = readiness["All Departments"]
+    assert row["checklist"]["searchable"] is True
+    assert row["status"] == "Ready"
+
+
+def test_department_readiness_partially_ready_when_a_core_field_is_missing(conn, settings, records):
+    conn.execute("DELETE FROM go_fields WHERE record_id = ? AND field_name = 'go_number'", (records[0],))
+    conn.execute("DELETE FROM go_fields WHERE record_id = ? AND field_name = 'go_number'", (records[1],))
+    conn.execute("DELETE FROM go_fields WHERE record_id = ? AND field_name = 'go_number'", (records[2],))
+    readiness = {row["department"]: row for row in quality.department_readiness(conn, settings)}
+    row = readiness["All Departments"]
+    assert row["checklist"]["metadata_complete"] is False
+    assert row["status"] == "Partially Ready"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative E -- Publication Confidence Model
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "score, expected",
+    [(100, "High Confidence"), (85, "High Confidence"), (84.9, "Medium Confidence"),
+     (60, "Medium Confidence"), (59.9, "Review Recommended"), (0, "Review Recommended")],
+)
+def test_publication_confidence_label_thresholds(score, expected):
+    assert quality.publication_confidence_label(score) == expected
+
+
+def test_publication_confidence_never_exposes_the_raw_score(conn, settings, records):
+    label = quality.publication_confidence(conn, settings, records[0])
+    assert label in ("High Confidence", "Medium Confidence", "Review Recommended")
+    assert isinstance(label, str)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative F -- Repository Health Dashboard
+# ---------------------------------------------------------------------------
+def test_repository_health_with_no_records(conn, settings):
+    health = quality.repository_health(conn, settings)
+    assert health["metadata_completeness_pct"] == 0.0
+    assert health["pdf_availability_pct"] == 0.0
+    assert health["search_indexing_coverage_pct"] == 0.0
+    assert sum(health["publication_confidence_distribution"].values()) == 0
+
+
+def test_repository_health_reflects_real_data(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+
+    health = quality.repository_health(conn, settings)
+    assert health["metadata_completeness_pct"] == quality.extraction_success_rate(conn)["rate"]
+    assert health["pdf_availability_pct"] > 0
+    assert sum(health["department_readiness"].values()) >= 1
+    assert sum(health["publication_confidence_distribution"].values()) == 1  # exactly one approved record
+
+
+def test_repository_health_confidence_distribution_matches_per_record_labels(conn, settings, records):
+    for record_id in records:
+        review.approve(conn, record_id, reviewer="admin")
+
+    health = quality.repository_health(conn, settings)
+    expected_counts = {"High Confidence": 0, "Medium Confidence": 0, "Review Recommended": 0}
+    for record_id in records:
+        expected_counts[quality.publication_confidence(conn, settings, record_id)] += 1
+    assert health["publication_confidence_distribution"] == expected_counts
+
+
+def test_repository_page_renders(conn, settings, fetcher, source_id):
+    run_all(conn, settings, fetcher, only_due=False)
+    record_id = int(conn.execute("SELECT id FROM go_records ORDER BY id LIMIT 1").fetchone()["id"])
+    review.approve(conn, record_id, reviewer="admin")
+
+    client = TestClient(create_app(settings))
+    login_as(client, conn)
+    response = client.get("/ops/repository")
+    assert response.status_code == 200
+    assert "Repository Analytics Center" in response.text
+    assert "Department Readiness Certification" in response.text
+    assert "Repository Health Dashboard" in response.text
+    assert "All Departments" in response.text  # a real department appearing in the tables
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.7 Initiative 7 -- Extraction Coverage Dashboard
+# ---------------------------------------------------------------------------
+def test_extraction_coverage_with_no_departments_or_requests_does_not_crash(conn, settings):
+    kpis = quality.department_coverage_kpis(conn, [], [])
+    coverage = quality.extraction_coverage(conn, kpis)
+    assert coverage == {
+        "departments_completed": 0, "departments_remaining": 0,
+        "success_rate_pct": 0.0, "failure_rate_pct": 0.0,
+        "latest_successful_extraction": None,
+    }
+
+
+def test_extraction_coverage_success_rate_reflects_real_extraction(conn, settings, records):
+    from goengine import registry
+
+    registry.add_source(
+        conn, name="Untouched Dept Source", department="Untouched Department",
+        url="https://www.tn.gov.in/go.php?dep_id=untouched", source_type="department_site",
+    )
+    departments = registry.list_departments(conn)
+    health = quality.department_health(conn, settings)
+    kpis = quality.department_coverage_kpis(conn, departments, health)
+
+    coverage = quality.extraction_coverage(conn, kpis)
+    assert coverage["departments_completed"] == 1  # "All Departments" has real GOs
+    assert coverage["departments_remaining"] == 1  # "Untouched Department" does not
+    assert coverage["success_rate_pct"] == 50.0
+
+
+def test_extraction_coverage_failure_rate_is_request_level(conn, settings, records):
+    from goengine.operations import agent_auth, extraction_queue
+
+    key_id, _ = agent_auth.generate_key(conn, label="test", created_by="admin")
+
+    ok_id = extraction_queue.enqueue_local_request(
+        conn, state_id=None, district_id=None, department_filter=None, created_by="admin",
+    )
+    extraction_queue.claim_next(conn, agent_key_id=key_id)
+    extraction_queue.complete_request(conn, ok_id, ok=True)
+
+    failed_id = extraction_queue.enqueue_local_request(
+        conn, state_id=None, district_id=None, department_filter=None, created_by="admin",
+    )
+    extraction_queue.claim_next(conn, agent_key_id=key_id)
+    extraction_queue.complete_request(conn, failed_id, ok=False, error="no local sources matched")
+
+    departments = ["All Departments"]
+    health = quality.department_health(conn, settings)
+    kpis = quality.department_coverage_kpis(conn, departments, health)
+    coverage = quality.extraction_coverage(conn, kpis)
+
+    assert coverage["failure_rate_pct"] == 50.0  # 1 of 2 requests failed
+    assert coverage["latest_successful_extraction"] is not None

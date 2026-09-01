@@ -302,10 +302,15 @@ def filter_options(conn: sqlite3.Connection) -> dict:
         """,
         (STATUS_APPROVED,),
     ).fetchall()
+    years = conn.execute(
+        "SELECT DISTINCT go_year FROM go_records WHERE status = ? AND go_year IS NOT NULL ORDER BY go_year DESC",
+        (STATUS_APPROVED,),
+    ).fetchall()
     return {
         "departments": [
             {"key": r["bucket"], "label": DEPARTMENT_LABELS.get(r["bucket"], r["bucket"].title())}
             for r in departments
         ],
         "districts": [r["district"] for r in districts],
+        "years": [int(r["go_year"]) for r in years],
     }

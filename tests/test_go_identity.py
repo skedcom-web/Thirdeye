@@ -354,3 +354,64 @@ def test_correcting_an_unrelated_field_does_not_touch_identity(conn, records):
 
     after = conn.execute("SELECT go_identifier FROM go_records WHERE id = ?", (record_id,)).fetchone()["go_identifier"]
     assert after == before
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.7 Initiative 2 -- GO Identity Validation, using the blueprint's own
+# literal examples for direct traceability from "the blueprint says X" to
+# "a passing test proves X".
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "go_number, go_date, expected_identifier",
+    [
+        ("G.O.(Ms) No.41", "2026-04-01", "GO41/2026"),
+        ("G.O.(Ms) No.78", "2025-04-01", "GO78/2025"),
+        ("G.O.(Ms) No.231", "2023-04-01", "GO231/2023"),
+    ],
+)
+def test_citizen_facing_identifiers_match_the_blueprints_examples(conn, go_number, go_date, expected_identifier):
+    record_id = _insert_record(conn, department="Health and Family Welfare", go_number=go_number, go_date=go_date)
+    go_identity.compute_identity(conn, record_id)
+    row = conn.execute("SELECT go_identifier FROM go_records WHERE id = ?", (record_id,)).fetchone()
+    assert row["go_identifier"] == expected_identifier
+
+
+def test_canonical_ids_match_the_blueprints_examples(conn):
+    hfw_record = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2026-04-01"
+    )
+    go_identity.compute_identity(conn, hfw_record)
+    hfw_row = conn.execute("SELECT canonical_go_id FROM go_records WHERE id = ?", (hfw_record,)).fetchone()
+    assert hfw_row["canonical_go_id"] == "HFW-MS-GO41/2026"
+
+    edu_record = _insert_record(
+        conn, department="School Education", go_number="G.O.(Ms) No.78", go_date="2025-04-01"
+    )
+    go_identity.compute_identity(conn, edu_record)
+    edu_row = conn.execute("SELECT canonical_go_id FROM go_records WHERE id = ?", (edu_record,)).fetchone()
+    assert edu_row["canonical_go_id"] == "EDU-MS-GO78/2025"
+
+
+def test_zero_collisions_among_the_blueprints_example_ids(conn):
+    """Two different real GOs must never resolve to the same canonical ID,
+    even when their department/series/number/year all genuinely match --
+    the collision-disambiguation guarantee, confirmed by name against the
+    blueprint's own example numbers rather than arbitrary ones."""
+    first = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2026-04-01"
+    )
+    second = _insert_record(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2026-11-30"
+    )
+    go_identity.compute_identity(conn, first)
+    go_identity.compute_identity(conn, second)
+
+    canonical_ids = {
+        row["id"]: row["canonical_go_id"]
+        for row in conn.execute(
+            "SELECT id, canonical_go_id FROM go_records WHERE id IN (?, ?)", (first, second)
+        ).fetchall()
+    }
+    assert canonical_ids[first] == "HFW-MS-GO41/2026"
+    assert canonical_ids[second] == f"HFW-MS-GO41/2026-R{second}"
+    assert len(set(canonical_ids.values())) == 2  # zero collisions

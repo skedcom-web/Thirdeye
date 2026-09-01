@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Repository Excellence · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center</div>
+    <h1 class="occ-page-title">Repository Excellence</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Is the published repository itself healthy, complete, and trustworthy -- distinct from
+      <a href="/ops/quality">Extraction Quality</a>, which measures whether extraction is producing good data.
+    </p>
+  </div>
+</div>
+
+<h2 style="margin-bottom:8px;">Repository Analytics Center</h2>
+<div class="grid cols-4" style="margin-bottom:16px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">📚</div></div>
+    <div class="kpi-n">{{ analytics.totals.total_published }}</div>
+    <div class="kpi-l">Total Published GOs</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🏛</div></div>
+    <div class="kpi-n">{{ analytics.totals.total_departments }}</div>
+    <div class="kpi-l">Total Departments</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">📄</div></div>
+    <div class="kpi-n">{{ analytics.totals.total_pdfs }}</div>
+    <div class="kpi-l">Total PDFs</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">📅</div></div>
+    <div class="kpi-n">{{ analytics.totals.total_years_covered }}</div>
+    <div class="kpi-l">Years Covered</div>
+  </div>
+</div>
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ analytics.totals.published_today }}</div>
+    <div class="kpi-l">Published Today</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ analytics.totals.published_this_week }}</div>
+    <div class="kpi-l">Published This Week</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ analytics.totals.published_this_month }}</div>
+    <div class="kpi-l">Published This Month</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ analytics.totals.published_this_year }}</div>
+    <div class="kpi-l">Published This Year</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3 style="margin-top:0;">Department Analytics</h3>
+  <table>
+    <thead>
+      <tr><th>Department</th><th>Published GOs</th><th>Latest Publication</th><th>Avg Quality Score</th></tr>
+    </thead>
+    <tbody>
+      {% for row in analytics.by_department if row.go_count > 0 %}
+      <tr>
+        <td>{{ row.department }}</td>
+        <td>{{ row.go_count }}</td>
+        <td class="mono" style="font-size:12px;">{{ row.latest_publication_date or '—' }}</td>
+        <td>{{ row.average_quality_score if row.average_quality_score is not none else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">No published Government Orders yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h3 style="margin-top:0;">Year Analytics &amp; Publication Trend</h3>
+  {% if trend %}
+  <table>
+    <thead>
+      <tr><th>Year</th><th>Published GOs</th><th>Department Distribution</th></tr>
+    </thead>
+    <tbody>
+      {% for row in trend %}
+      <tr>
+        <td class="mono">{{ row.year }}</td>
+        <td>{{ row.go_count }}</td>
+        <td>
+          {% for d in row.department_distribution %}
+          <span class="pill neutral" style="margin:2px;">{{ d.department }}: {{ d.count }}</span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0;">No published Government Orders yet.</p>
+  {% endif %}
+</div>
+
+<h2 style="margin-bottom:8px;">Department Readiness Certification</h2>
+<div class="panel">
+  <p class="muted" style="margin-bottom:12px;">
+    Every check below is evaluated against real, live repository data -- "Ready" only when all six pass.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Department</th><th>Latest GO</th><th>Historical GOs</th><th>PDF</th>
+        <th>Metadata</th><th>Searchable</th><th>Permanent URL</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in readiness %}
+      <tr>
+        <td>{{ row.department }}</td>
+        <td>{{ '✅' if row.checklist.latest_go_extracted else '—' }}</td>
+        <td>{{ '✅' if row.checklist.historical_go_available else '—' }}</td>
+        <td>{{ '✅' if row.checklist.pdf_available else '—' }}</td>
+        <td>{{ '✅' if row.checklist.metadata_complete else '—' }}</td>
+        <td>{{ '✅' if row.checklist.searchable else '—' }}</td>
+        <td>{{ '✅' if row.checklist.permanent_url_available else '—' }}</td>
+        <td>
+          <span class="pill {{ 'ok' if row.status == 'Ready' else ('warn' if row.status == 'Partially Ready' else 'neutral') }}">
+            {{ row.status }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 style="margin-bottom:8px;">Repository Health Dashboard</h2>
+<div class="grid cols-3" style="margin-bottom:16px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ health.metadata_completeness_pct }}%</div>
+    <div class="kpi-l">Metadata Completeness</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ health.pdf_availability_pct }}%</div>
+    <div class="kpi-l">PDF Availability</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ health.search_indexing_coverage_pct }}%</div>
+    <div class="kpi-l">Search Indexing Coverage</div>
+  </div>
+</div>
+
+<div class="grid cols-2" style="margin-bottom:24px;">
+  <div class="panel">
+    <h3 style="margin-top:0;">Department Readiness</h3>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <span class="pill ok">Ready: {{ health.department_readiness['Ready'] }}</span>
+      <span class="pill warn">Partially Ready: {{ health.department_readiness['Partially Ready'] }}</span>
+      <span class="pill neutral">Needs Attention: {{ health.department_readiness['Needs Attention'] }}</span>
+    </div>
+  </div>
+  <div class="panel">
+    <h3 style="margin-top:0;">Publication Confidence Distribution</h3>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <span class="pill ok">High: {{ health.publication_confidence_distribution['High Confidence'] }}</span>
+      <span class="pill warn">Medium: {{ health.publication_confidence_distribution['Medium Confidence'] }}</span>
+      <span class="pill neutral">Review Recommended: {{ health.publication_confidence_distribution['Review Recommended'] }}</span>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

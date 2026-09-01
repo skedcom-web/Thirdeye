@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline Explorer — Third Eye</title>
+<meta name="description" content="Browse Tamil Nadu Government Orders by year, department, or GO type without needing to search.">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css?v=17">
+{% from "_partials.html" import mark, theme_init_script, public_header %}
+{{ theme_init_script() }}
+</head>
+<body>
+
+{{ public_header(current_user=current_user, current_citizen=current_citizen) }}
+
+<section class="section tight" aria-labelledby="timeline-heading">
+  <div class="section-kicker" aria-hidden="true">Timeline Explorer</div>
+  <h1 id="timeline-heading" class="section-title">Browse Government Orders</h1>
+  <p class="section-sub">
+    {{ total }} verified Government Order{{ 's' if total != 1 else '' }} — grouped for discovery, no search required.
+  </p>
+
+  <div class="dept-checkbox-row" role="tablist" aria-label="Timeline view" style="margin-bottom:16px;">
+    {% for v, label in [('year', '📅 By Year'), ('department', '🏛 By Department'), ('go_type', '📋 By GO Type')] %}
+    <a role="tab" aria-selected="{{ 'true' if view == v else 'false' }}"
+       class="btn-sm {{ 'btn-primary' if view == v else 'btn-secondary' }}"
+       href="/timeline?view={{ v }}{% if selected_department %}&department={{ selected_department }}{% endif %}{% if selected_district %}&district={{ selected_district }}{% endif %}{% if q %}&q={{ q }}{% endif %}">
+      {{ label }}
+    </a>
+    {% endfor %}
+  </div>
+
+  <form method="get" action="/timeline" class="panel orders-filter-bar">
+    <input type="hidden" name="view" value="{{ view }}">
+    <div>
+      <label class="field-label" for="tl-dept">Department</label>
+      <select name="department" id="tl-dept" onchange="this.form.submit()">
+        <option value="">All departments</option>
+        {% for dep in filters.departments %}
+        <option value="{{ dep.key }}" {% if selected_department == dep.key %}selected{% endif %}>{{ dep.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="field-label" for="tl-district">District</label>
+      <select name="district" id="tl-district" onchange="this.form.submit()">
+        <option value="">All districts</option>
+        {% for d in filters.districts %}
+        <option value="{{ d }}" {% if selected_district == d %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="orders-filter-search">
+      <label class="field-label" for="tl-q">Search</label>
+      <input type="text" name="q" id="tl-q" value="{{ q }}" placeholder="GO number, e.g. GO41 or GO41/2022">
+    </div>
+    <button type="submit" class="btn-lg btn-secondary">Search</button>
+    {% if selected_department or selected_district or q %}
+    <a href="/timeline?view={{ view }}" class="muted" style="font-size:13px; align-self:center;">Clear filters</a>
+    {% endif %}
+  </form>
+
+  {% if groups %}
+  {% for key, group_records in groups %}
+  <h2 style="margin:32px 0 12px; font-size:18px;">{{ key }} <span class="muted" style="font-weight:400; font-size:14px;">({{ group_records|length }})</span></h2>
+  <div class="card-grid orders-grid" role="list">
+    {% for r in group_records %}
+    <a class="feature-card orders-card" role="listitem" href="{{ '/go/' ~ r.go_url_slug if r.go_url_slug else '/orders/' ~ r.record_id }}">
+      <div class="orders-card-number">{{ r.go_identifier or r.go_number or 'GO number not yet verified' }}</div>
+      <div class="orders-card-meta">
+        {% if r.department %}<span class="pill neutral">{{ r.department }}</span>{% endif %}
+        {% if r.district %}<span class="pill neutral">{{ r.district }}</span>{% endif %}
+        {% if r.go_date %}<span class="muted" style="font-size:13px;">{{ r.go_date }}</span>{% endif %}
+      </div>
+      {% if r.subject %}
+      <p class="orders-card-subject">{{ r.subject[:180] }}{% if r.subject|length > 180 %}…{% endif %}</p>
+      {% endif %}
+      <span class="orders-card-link">View record →</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="panel orders-empty">
+    <p style="font-size:18px; font-weight:600; margin:0 0 8px;">No verified Government Orders published yet</p>
+    <p class="muted" style="margin:0;">
+      {% if selected_department or selected_district or q %}
+      No records match these filters — try broadening your search.
+      {% else %}
+      Third Eye's reviewers are still working through the queue. Check back soon.
+      {% endif %}
+    </p>
+  </div>
+  {% endif %}
+</section>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="footer-brand">
+    {{ mark(22, 'footMark') }}
+    <strong>Third Eye</strong>
+  </div>
+  <p class="footer-tagline">The Citizen's Third Eye — Making government information accessible to everyone.</p>
+  <nav class="footer-nav" aria-label="Footer navigation">
+    <a href="/">Home</a>
+    <a href="/orders">Government Orders</a>
+    <a href="/timeline">Timeline Explorer</a>
+    <a href="/login">Administrator Sign In</a>
+  </nav>
+  <p class="footer-copy">© 2026 Third Eye. Built on official Tamil Nadu government records.</p>
+</footer>
+
+<script src="/static/theme.js?v=17" defer></script>
+</body>
+</html>

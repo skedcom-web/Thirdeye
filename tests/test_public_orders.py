@@ -34,7 +34,7 @@ def test_orders_list_requires_no_login(public_client):
     assert "Government Orders" in response.text
 
 
-@pytest.mark.parametrize("path", ["/orders", "/my-area", "/districts", "/taluks", "/villages"])
+@pytest.mark.parametrize("path", ["/orders", "/my-area", "/districts", "/taluks", "/villages", "/timeline"])
 def test_public_pages_have_a_working_mobile_nav_toggle(public_client, path):
     """Regression test: _partials.html's shared public_header() macro used
     to render the nav links with no way to reveal them on a phone-width
@@ -372,3 +372,147 @@ def test_existing_search_patterns_still_work_alongside_the_new_ones(conn, settin
     assert total_free_text == 1
     assert record_id > 0
     assert public.search(conn, q="no-such-go-anywhere")[1] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative C -- Landing Page Repository Statistics
+# ---------------------------------------------------------------------------
+def test_landing_page_shows_real_repository_statistics(public_client, conn):
+    record_id = _record_ids(conn)[0]
+    review.approve(conn, record_id, reviewer="admin")
+
+    response = public_client.get("/")
+    assert response.status_code == 200
+    assert "Total Published GOs" in response.text
+    assert "Departments Covered" in response.text
+    assert "Years Covered" in response.text
+    assert "Latest Publication Date" in response.text
+    assert "Data sourced from official Tamil Nadu Government publications." in response.text
+    # The dead placeholder tile must be gone, not just relabeled.
+    assert "Citizens Connected" not in response.text
+    assert 'data-count-to="1"' in response.text  # one real approved record
+
+
+def test_landing_page_shows_none_yet_with_nothing_published(public_client):
+    response = public_client.get("/")
+    assert response.status_code == 200
+    assert "None yet" in response.text
+    assert 'data-count-to="0"' in response.text
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative D -- Repository Timeline Explorer
+# ---------------------------------------------------------------------------
+def test_timeline_requires_no_login(public_client):
+    response = public_client.get("/timeline")
+    assert response.status_code == 200
+    assert "Timeline Explorer" in response.text
+
+
+def test_timeline_groups_by_year_by_default(public_client, conn):
+    for record_id in _record_ids(conn):
+        review.approve(conn, record_id, reviewer="admin")
+
+    response = public_client.get("/timeline")
+    assert response.status_code == 200
+    assert "2026" in response.text  # sampledata's 3 GOs are all dated 2026
+
+
+def test_timeline_groups_by_department_view(public_client, conn):
+    for record_id in _record_ids(conn):
+        review.approve(conn, record_id, reviewer="admin")
+
+    response = public_client.get("/timeline", params={"view": "department"})
+    assert response.status_code == 200
+    # sampledata's GOs each name their own content department in the header.
+    assert "Health and Family Welfare" in response.text
+    assert "School Education" in response.text
+    assert "Public Works" in response.text
+
+
+def test_timeline_groups_by_go_type_view(public_client, conn):
+    for record_id in _record_ids(conn):
+        review.approve(conn, record_id, reviewer="admin")
+
+    response = public_client.get("/timeline", params={"view": "go_type"})
+    assert response.status_code == 200
+    # sampledata's go_number values are "G.O.(Ms) No.X" -- series "MS".
+    assert ">MS <span" in response.text
+
+
+def test_timeline_invalid_view_falls_back_to_year(public_client, conn):
+    review.approve(conn, _record_ids(conn)[0], reviewer="admin")
+    response = public_client.get("/timeline", params={"view": "not-a-real-view"})
+    assert response.status_code == 200
+    assert "2026" in response.text
+
+
+def test_timeline_honors_district_and_search_filters(public_client, conn):
+    ids = _record_ids(conn)
+    for record_id in ids:
+        review.approve(conn, record_id, reviewer="admin")
+
+    # Madurai is sample #1's district only.
+    filtered = public_client.get("/timeline", params={"district": "Madurai"})
+    assert "GO123/2026" in filtered.text
+    assert "GO78/2026" not in filtered.text
+
+    searched = public_client.get("/timeline", params={"q": "GO78"})
+    assert "GO78/2026" in searched.text
+    assert "GO123/2026" not in searched.text
+
+
+def test_timeline_empty_state_when_nothing_published(public_client):
+    response = public_client.get("/timeline")
+    assert response.status_code == 200
+    assert "No verified Government Orders published yet" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 Initiative E -- Publication Confidence Model
+# ---------------------------------------------------------------------------
+def test_order_detail_shows_a_confidence_label_with_no_leaked_score(public_client, conn):
+    from goengine.operations import quality as ops_quality
+
+    record_id = _record_ids(conn)[0]
+    review.approve(conn, record_id, reviewer="admin")
+
+    detail = public_client.get(f"/orders/{record_id}").text
+    assert any(label in detail for label in ("High Confidence", "Medium Confidence", "Review Recommended"))
+    # The numeric quality score and its per-criterion breakdown must never
+    # reach the citizen-facing page -- only the label.
+    assert "go_number_numeric" not in detail
+    assert "breakdown" not in detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.7 Initiative 3 -- Search Validation, using the blueprint's own
+# 5 literal example queries for direct traceability.
+# ---------------------------------------------------------------------------
+def test_search_validation_matches_the_blueprints_five_examples(conn, settings):
+    from goengine import public
+
+    record_id = _approved_record_under(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2026-04-01",
+    )
+
+    for query in ("GO41", "GO41/2026", "HFW GO41", "2026", "Health and Family Welfare"):
+        records, total = public.search(conn, q=query)
+        assert total == 1, f"query {query!r} should find exactly the one record"
+        assert records[0].record_id == record_id, f"query {query!r} found the wrong record"
+
+
+def test_search_validation_examples_do_not_cross_match_a_different_go(conn, settings):
+    from goengine import public
+
+    target = _approved_record_under(
+        conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2026-04-01",
+    )
+    _approved_record_under(
+        conn, department="School Education", go_number="G.O.(Ms) No.78", go_date="2025-04-01",
+    )
+
+    for query in ("GO41", "GO41/2026", "HFW GO41", "Health and Family Welfare"):
+        records, total = public.search(conn, q=query)
+        assert total == 1, query
+        assert records[0].record_id == target, query

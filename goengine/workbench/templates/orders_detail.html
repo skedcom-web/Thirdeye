@@ -25,6 +25,10 @@
     <div style="display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;">
       <h1 id="record-heading" style="margin:0; font-size:24px;">{{ record.go_identifier or record.go_number or ('Record #' ~ record.record_id) }}</h1>
       <span class="pill ok">Verified</span>
+      <span class="pill {{ 'ok' if confidence_label == 'High Confidence' else ('warn' if confidence_label == 'Medium Confidence' else 'neutral') }}"
+            title="Third Eye's publication confidence rating for this record, based on metadata completeness, PDF availability, OCR quality, reviewer approval, and permanent URL availability.">
+        {{ confidence_label }}
+      </span>
       <span class="muted">{{ record.department }}</span>
     </div>
     {% if record.subject %}<p style="margin:10px 0 0; font-size:16px;">{{ record.subject }}</p>{% endif %}
