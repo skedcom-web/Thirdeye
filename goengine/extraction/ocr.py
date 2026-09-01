@@ -132,7 +132,18 @@ def _render_page(path: Path, page_number: int, dpi: int):
 
 
 def ocr_page(image_bytes: bytes, *, languages: str = OCR_LANGUAGES) -> tuple[str, float]:
-    """OCR one page image. Returns (text, mean word confidence 0..1)."""
+    """OCR one page image. Returns (text, mean word confidence 0..1).
+
+    A single Tesseract pass via image_to_data() -- this used to also call
+    image_to_string() separately for the text, which re-runs the full OCR
+    engine a second time on the same image (roughly doubling OCR time per
+    weak page for no benefit, since image_to_data()'s word-level output
+    already contains everything image_to_string() would produce). Text is
+    reconstructed by joining words in Tesseract's own recognition order,
+    grouped into lines by its block/paragraph/line numbering, so downstream
+    field-extraction regexes (e.g. matching "G.O.(Ms) No.41") see the same
+    line structure image_to_string() would have given them.
+    """
     _configure()
     import io
 
@@ -140,9 +151,21 @@ def ocr_page(image_bytes: bytes, *, languages: str = OCR_LANGUAGES) -> tuple[str
     from PIL import Image
 
     image = Image.open(io.BytesIO(image_bytes))
-    text = pytesseract.image_to_string(image, lang=languages)
     data = pytesseract.image_to_data(image, lang=languages, output_type=pytesseract.Output.DICT)
-    confidences = [int(c) for c in data.get("conf", []) if str(c) not in ("-1", "")]
+
+    lines: dict[tuple[int, int, int], list[str]] = {}
+    confidences: list[int] = []
+    for i, word in enumerate(data["text"]):
+        conf = data["conf"][i]
+        if str(conf) not in ("-1", ""):
+            confidences.append(int(conf))
+        word = word.strip()
+        if not word:
+            continue
+        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+        lines.setdefault(key, []).append(word)
+
+    text = "\n".join(" ".join(words) for words in lines.values())
     mean_confidence = (sum(confidences) / len(confidences) / 100.0) if confidences else 0.0
     return normalize_text(text), round(mean_confidence, 4)
 
