@@ -107,14 +107,17 @@ def queue_by_type(
 ) -> list[sqlite3.Row]:
     """One page of the pending-review queue, filtered/tagged by what kind of
     attention it most likely needs -- reusing Phase 1/2 data, not a new
-    parallel queue table. `department` narrows to one of categorize.py's
-    department buckets (health/education/public_works/rural_development/
-    other), the same classification publish_department() gates on.
+    parallel queue table. `department` narrows to the record's real
+    registered department (`sources.department`, e.g. "Health and Family
+    Welfare") -- the same names extraction requests are scoped by (see
+    registry.list_departments) -- not categorize.py's coarse 4-bucket content
+    classification (health/education/public_works/rural_development/other),
+    which exists for the separate "Real GO Acquisition Program" tracker and
+    lumps most real departments into 'other'.
     Paginated (see queue_counts for the total per queue) -- a queue of
     hundreds capped at a fixed limit with no way to reach the rest is
     exactly the bug this replaces."""
-    dept_join = "LEFT JOIN document_categories dc ON dc.document_id = d.id"
-    dept_clause = " AND dc.department_bucket = ?" if department else ""
+    dept_clause = " AND s.department = ?" if department else ""
     dept_params = [department] if department else []
 
     if queue_type == QUEUE_OCR:
@@ -125,7 +128,6 @@ def queue_by_type(
               JOIN documents d ON d.id = r.document_id
               JOIN sources s ON s.id = r.source_id
               JOIN extractions e ON e.id = r.extraction_id
-              {dept_join}
              WHERE r.status = 'pending' AND e.needs_ocr = 1{dept_clause}
              ORDER BY r.id
              LIMIT ? OFFSET ?
@@ -141,7 +143,6 @@ def queue_by_type(
               JOIN documents d ON d.id = r.document_id
               JOIN sources s ON s.id = r.source_id
               JOIN extraction_failures f ON f.document_id = d.id
-              {dept_join}
              WHERE r.status = 'pending'{dept_clause}
              ORDER BY r.id
              LIMIT ? OFFSET ?
@@ -161,7 +162,6 @@ def queue_by_type(
               JOIN sources s ON s.id = r.source_id
               JOIN extractions e ON e.id = r.extraction_id
               JOIN go_fields gf ON gf.record_id = r.id AND gf.superseded_by IS NULL
-              {dept_join}
              WHERE r.status = 'pending' AND e.needs_ocr = 0{dept_clause}
              GROUP BY r.id
             HAVING MIN(gf.confidence) < ?
@@ -179,7 +179,6 @@ def queue_by_type(
           JOIN documents d ON d.id = r.document_id
           JOIN sources s ON s.id = r.source_id
           JOIN extractions e ON e.id = r.extraction_id
-          {dept_join}
          WHERE r.status = 'pending'{dept_clause}
          ORDER BY e.confidence ASC
          LIMIT ? OFFSET ?
@@ -189,12 +188,15 @@ def queue_by_type(
 
 
 def queue_counts(conn: sqlite3.Connection, *, department: str | None = None) -> dict[str, int]:
-    dept_join = "LEFT JOIN document_categories dc ON dc.document_id = r.document_id"
-    dept_clause = " AND dc.department_bucket = ?" if department else ""
+    dept_clause = " AND s.department = ?" if department else ""
     dept_params = (department,) if department else ()
     return {
         QUEUE_EXTRACTION: conn.execute(
-            f"SELECT COUNT(*) AS n FROM go_records r {dept_join} WHERE r.status = 'pending'{dept_clause}",
+            f"""
+            SELECT COUNT(*) AS n FROM go_records r
+              JOIN sources s ON s.id = r.source_id
+             WHERE r.status = 'pending'{dept_clause}
+            """,
             dept_params,
         ).fetchone()["n"],
         QUEUE_OCR: len(queue_by_type(conn, QUEUE_OCR, department=department, limit=10_000)),

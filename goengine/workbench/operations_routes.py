@@ -18,10 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import audit, registry, repository
 from ..db import utcnow
-from ..certification.categorize import ALL_BUCKETS, BUCKET_OTHER
 from ..certification.sources import certification_history
-
-REVIEW_FILTER_BUCKETS = ALL_BUCKETS + (BUCKET_OTHER,)
 from ..operations import auth
 from ..operations import backup as ops_backup
 from ..operations import dedup as ops_dedup
@@ -550,8 +547,9 @@ def _register_review(app: FastAPI) -> None:
     ):
         if queue not in (ops_review.QUEUE_EXTRACTION, ops_review.QUEUE_OCR, ops_review.QUEUE_METADATA, ops_review.QUEUE_FAILURE):
             raise HTTPException(status_code=400, detail="unknown queue type")
+        all_departments = registry.list_departments(conn)
         department = department or None
-        if department is not None and department not in REVIEW_FILTER_BUCKETS:
+        if department is not None and department not in all_departments:
             raise HTTPException(status_code=400, detail="unknown department")
 
         counts = ops_review.queue_counts(conn, department=department)
@@ -566,7 +564,7 @@ def _register_review(app: FastAPI) -> None:
                 "counts": counts,
                 "selected_queue": queue,
                 "selected_department": department or "",
-                "departments": REVIEW_FILTER_BUCKETS,
+                "departments": all_departments,
                 "records": ops_review.queue_by_type(
                     conn, queue, department=department, limit=REVIEW_PAGE_SIZE,
                     offset=(page - 1) * REVIEW_PAGE_SIZE,

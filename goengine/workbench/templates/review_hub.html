@@ -25,7 +25,7 @@
     <select name="department" id="review-dept" onchange="this.form.submit()">
       <option value="">All departments</option>
       {% for d in departments %}
-      <option value="{{ d }}" {% if selected_department == d %}selected{% endif %}>{{ d.replace('_', ' ')|title }}</option>
+      <option value="{{ d }}" {% if selected_department == d %}selected{% endif %}>{{ d }}</option>
       {% endfor %}
     </select>
   </div>

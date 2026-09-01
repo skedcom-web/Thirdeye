@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from goengine import registry
 from goengine.operations import review as ops_review
 from goengine.workbench.app import create_app
 from tests.conftest import login_as
@@ -113,26 +114,30 @@ def test_queue_counts_sums_correctly(conn, parsed_documents):
 
 
 def test_department_filter_narrows_to_matching_documents_only(conn, parsed_documents):
+    """`department` narrows on the record's real registered department
+    (sources.department), not categorize.py's coarse content bucket -- real
+    deployments register one source per real department name (e.g. "Health
+    and Family Welfare"), so filtering must actually separate them."""
     doc_id = parsed_documents[0]
-    bucket = conn.execute(
-        "SELECT department_bucket FROM document_categories WHERE document_id = ?", (doc_id,)
-    ).fetchone()["department_bucket"]
+    other_source_id = registry.add_source(
+        conn, name="Health Department Site", department="Health and Family Welfare",
+        url="https://cms.tn.gov.in/health", source_type="go_portal",
+    )
+    conn.execute("UPDATE go_records SET source_id = ? WHERE document_id = ?", (other_source_id, doc_id))
 
     unfiltered = ops_review.queue_counts(conn)
-    filtered = ops_review.queue_counts(conn, department=bucket)
-    assert 1 <= filtered[ops_review.QUEUE_EXTRACTION] <= unfiltered[ops_review.QUEUE_EXTRACTION]
+    assert unfiltered[ops_review.QUEUE_EXTRACTION] == 3
 
-    # A bucket nothing in this fixture set was classified into must return
-    # zero everywhere, not error -- distinct from the "unknown department
-    # string" case, which the HTTP route rejects outright (see below).
-    every_bucket = {
-        r["department_bucket"] for r in conn.execute("SELECT DISTINCT department_bucket FROM document_categories")
-    }
-    from goengine.certification.categorize import ALL_BUCKETS, BUCKET_OTHER
+    moved = ops_review.queue_counts(conn, department="Health and Family Welfare")
+    assert moved[ops_review.QUEUE_EXTRACTION] == 1
 
-    unused = [b for b in (*ALL_BUCKETS, BUCKET_OTHER) if b not in every_bucket]
-    if unused:
-        assert ops_review.queue_counts(conn, department=unused[0])[ops_review.QUEUE_EXTRACTION] == 0
+    remaining = ops_review.queue_counts(conn, department="All Departments")
+    assert remaining[ops_review.QUEUE_EXTRACTION] == 2
+
+    # A department nothing is registered under must return zero everywhere,
+    # not error -- distinct from the "unknown department string" case, which
+    # the HTTP route rejects outright (see below).
+    assert ops_review.queue_counts(conn, department="Nonexistent Department")[ops_review.QUEUE_EXTRACTION] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -157,18 +162,15 @@ def test_review_hub_rejects_unknown_queue(client):
 
 
 def test_review_hub_department_filter_via_http(client, conn, parsed_documents):
-    doc_id = parsed_documents[0]
-    bucket = conn.execute(
-        "SELECT department_bucket FROM document_categories WHERE document_id = ?", (doc_id,)
-    ).fetchone()["department_bucket"]
+    department = "All Departments"  # the parsed_documents fixture's one registered source
 
-    response = client.get(f"/ops/review?queue=extraction&department={bucket}")
+    response = client.get("/ops/review", params={"queue": "extraction", "department": department})
     assert response.status_code == 200
-    assert f'value="{bucket}" selected' in response.text
+    assert f'value="{department}" selected' in response.text
 
 
 def test_review_hub_rejects_unknown_department(client):
-    response = client.get("/ops/review?queue=extraction&department=not-a-real-bucket")
+    response = client.get("/ops/review?queue=extraction&department=not-a-real-department")
     assert response.status_code == 400
 
 
