@@ -274,3 +274,49 @@ def test_agents_page_requires_manage_users_permission(client, conn):
     login_as(client, conn, username="reviewer1", role="reviewer")
     res = client.get("/ops/agents")
     assert res.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8 Initiative 7 -- Agent Performance Validation
+# ---------------------------------------------------------------------------
+def test_agent_performance_with_no_keys_or_requests(conn):
+    performance = agent_auth.agent_performance(conn)
+    assert performance["queue_depth"] == 0
+    assert performance["per_key"] == []
+
+
+def test_agent_performance_counts_successful_and_failed_syncs_per_key(conn):
+    from goengine.db import utcnow
+
+    key_id, _ = agent_auth.generate_key(conn, label="Laptop", created_by="admin")
+    other_key_id, _ = agent_auth.generate_key(conn, label="Other", created_by="admin")
+
+    conn.executemany(
+        "INSERT INTO agent_sync_log (agent_key_id, ok, synced_at) VALUES (?, ?, ?)",
+        [(key_id, 1, utcnow()), (key_id, 1, utcnow()), (key_id, 0, utcnow()), (other_key_id, 1, utcnow())],
+    )
+
+    per_key = {k["label"]: k for k in agent_auth.agent_performance(conn)["per_key"]}
+    assert per_key["Laptop"]["successful_syncs"] == 2
+    assert per_key["Laptop"]["failed_syncs"] == 1
+    assert per_key["Other"]["successful_syncs"] == 1
+    assert per_key["Other"]["failed_syncs"] == 0
+
+
+def test_agent_performance_queue_depth_counts_active_requests(conn):
+    from goengine.operations import extraction_queue
+
+    extraction_queue.enqueue_local_request(
+        conn, state_id=None, district_id=None, department_filter=None, created_by="admin",
+    )
+    assert agent_auth.agent_performance(conn)["queue_depth"] == 1
+
+
+def test_agents_page_renders_performance_section(client, conn):
+    login_as(client, conn)
+    agent_auth.generate_key(conn, label="Laptop", created_by="admin")
+    response = client.get("/ops/agents")
+    assert response.status_code == 200
+    assert "Agent Performance" in response.text
+    assert "Queue Depth" in response.text
+    assert "Laptop" in response.text

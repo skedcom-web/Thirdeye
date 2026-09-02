@@ -27,6 +27,7 @@ from ..operations import email as ops_email
 from ..operations import geography
 from ..operations import dashboard as ops_dashboard
 from ..operations import engagement as ops_engagement
+from ..operations import failures as ops_failures
 from ..operations import health as ops_health
 from ..operations import publication as ops_publication
 from ..operations import analytics as ops_analytics
@@ -64,6 +65,7 @@ def register(app: FastAPI) -> None:
     _register_review(app)
     _register_publication(app)
     _register_dashboard(app)
+    _register_certification(app)
     _register_engagement(app)
     _register_health(app)
     _register_users(app)
@@ -405,7 +407,7 @@ def _register_jobs(app: FastAPI) -> None:
         }
 
     @app.get("/ops/jobs", response_class=HTMLResponse)
-    def jobs_list(request: Request, conn: Conn, current_user: LoggedIn):
+    def jobs_list(request: Request, conn: Conn, current_user: LoggedIn, department: str | None = None):
         return templates.TemplateResponse(
             request, "jobs.html",
             {
@@ -413,6 +415,9 @@ def _register_jobs(app: FastAPI) -> None:
                 "current_user": current_user,
                 "can_run": current_user.has_permission("run_certification"),
                 "departments": registry.list_departments(conn),
+                # Pre-selects the department checkbox when arriving from a
+                # "Retry" link (/ops/failures) or similar deep link.
+                "preselect_department": department or "",
                 **_agent_status(conn),
             },
         )
@@ -644,8 +649,12 @@ def _register_publication(app: FastAPI) -> None:
                 "coverage": ops_publication.publication_coverage(conn),
                 "current_user": current_user,
                 "can_publish": current_user.has_permission("publish"),
+                "error": request.query_params.get("error"),
             },
         )
+
+    def _publication_error_redirect(message: str) -> RedirectResponse:
+        return RedirectResponse(f"/ops/publication?{urlencode({'error': message})}", status_code=303)
 
     @app.post("/ops/publication/districts/{district_id}/publish")
     def publish_district(district_id: int, conn: Conn, current_user: RequirePublish):
@@ -657,7 +666,7 @@ def _register_publication(app: FastAPI) -> None:
         try:
             ops_publication.publish_district(conn, district_id, actor=current_user.username)
         except ops_publication.PublicationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return _publication_error_redirect(str(exc))
         return RedirectResponse("/ops/publication", status_code=303)
 
     @app.post("/ops/publication/districts/{district_id}/unpublish")
@@ -672,16 +681,17 @@ def _register_publication(app: FastAPI) -> None:
         try:
             ops_publication.unpublish_district(conn, district_id, actor=current_user.username, reason=reason)
         except ops_publication.PublicationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return _publication_error_redirect(str(exc))
         return RedirectResponse("/ops/publication", status_code=303)
 
     @app.post("/ops/publication/departments/{department_id}/publish")
     def publish_department(department_id: int, conn: Conn, current_user: RequirePublish):
         try:
             ops_publication.publish_department(conn, department_id, actor=current_user.username)
-        except (ops_publication.PublicationError, LookupError) as exc:
-            status = 404 if isinstance(exc, LookupError) else 400
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ops_publication.PublicationError as exc:
+            return _publication_error_redirect(str(exc))
         return RedirectResponse("/ops/publication", status_code=303)
 
     @app.post("/ops/publication/departments/{department_id}/unpublish")
@@ -690,9 +700,10 @@ def _register_publication(app: FastAPI) -> None:
     ):
         try:
             ops_publication.unpublish_department(conn, department_id, actor=current_user.username, reason=reason)
-        except (ops_publication.PublicationError, LookupError) as exc:
-            status = 404 if isinstance(exc, LookupError) else 400
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ops_publication.PublicationError as exc:
+            return _publication_error_redirect(str(exc))
         return RedirectResponse("/ops/publication", status_code=303)
 
 
@@ -757,6 +768,100 @@ def _register_dashboard(app: FastAPI) -> None:
                 "analytics": analytics_data,
                 "health": ops_quality.repository_health(conn, config),
                 "trend": analytics_data["by_year"],
+                "current_user": current_user,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8 -- Extraction Excellence & Department Certification
+# ---------------------------------------------------------------------------
+def _register_certification(app: FastAPI) -> None:
+    @app.get("/ops/certification", response_class=HTMLResponse)
+    def certification_center(request: Request, conn: Conn, config: Config, current_user: LoggedIn):
+        """Department Certification Matrix (Initiatives 1, 3, 4, 5, 6 & 8
+        combined into one page): a 5-level maturity ladder per real
+        department, built from signals department_health()/
+        department_readiness() already compute -- no new certification
+        criteria. Historical coverage (Initiative 4) is merged into each
+        department's own row rather than a separate table, since it's the
+        same department-keyed data. This live page IS Initiative 8's
+        "statewide readiness report" -- always current, not a stale export."""
+        certification = ops_quality.department_certification(conn, config)
+        coverage_by_department = {c["department"]: c for c in ops_quality.historical_coverage(conn)}
+        for row in certification:
+            row["historical"] = coverage_by_department.get(row["department"])
+
+        campaign = ops_quality.campaign_summary(certification)
+        campaign["total_published_gos"] = ops_analytics.repository_analytics(conn, config)["totals"]["total_published"]
+
+        return templates.TemplateResponse(
+            request, "ops_certification.html",
+            {
+                "certification": certification,
+                "campaign": campaign,
+                "funnel": ops_quality.extraction_funnel(conn),
+                "current_user": current_user,
+            },
+        )
+
+    @app.get("/ops/failures", response_class=HTMLResponse)
+    def failure_workbench(
+        request: Request, conn: Conn, current_user: LoggedIn,
+        department: str | None = None, stage: str | None = None,
+    ):
+        """Initiative 2 -- Extraction Failure Workbench: real pipeline-stage
+        failures read straight from the audit log (operations/failures.py),
+        not a new parallel failure table. Kept as its own page rather than
+        folded into /ops/review?queue=failure -- that queue is go_records-
+        keyed, but most pipeline failures here (discovery/download) have no
+        go_record at all."""
+        all_departments = registry.list_departments(conn)
+        department = department or None
+        if department is not None and department not in all_departments:
+            raise HTTPException(status_code=400, detail="unknown department")
+        if stage is not None and stage not in ops_failures.ALL_STAGES:
+            raise HTTPException(status_code=400, detail="unknown stage")
+
+        return templates.TemplateResponse(
+            request, "ops_failures.html",
+            {
+                "failures": ops_failures.pipeline_failures(conn, department=department, stage=stage),
+                "departments": all_departments,
+                "stages": ops_failures.ALL_STAGES,
+                "selected_department": department or "",
+                "selected_stage": stage or "",
+                "current_user": current_user,
+            },
+        )
+
+    @app.get("/ops/departments/{department}", response_class=HTMLResponse)
+    def department_drilldown(
+        request: Request, department: str, conn: Conn, config: Config, current_user: LoggedIn,
+    ):
+        """Phase 3.9 Initiative 1 -- Department Drilldown Center. Every
+        number here already exists elsewhere (department_certification,
+        historical_coverage, extraction_funnel, pipeline_failures) -- this
+        page just puts one department's numbers in one place."""
+        if department not in registry.list_departments(conn):
+            raise HTTPException(status_code=404, detail="unknown department")
+
+        certification_row = next(
+            (r for r in ops_quality.department_certification(conn, config) if r["department"] == department),
+            None,
+        )
+        historical = next(
+            (r for r in ops_quality.historical_coverage(conn) if r["department"] == department), None,
+        )
+
+        return templates.TemplateResponse(
+            request, "ops_department_drilldown.html",
+            {
+                "department": department,
+                "certification": certification_row,
+                "historical": historical,
+                "funnel": ops_quality.extraction_funnel(conn, department=department),
+                "failures": ops_failures.pipeline_failures(conn, department=department),
                 "current_user": current_user,
             },
         )
@@ -899,6 +1004,7 @@ def _register_agents(app: FastAPI) -> None:
         return {
             "keys": agent_auth.list_keys(conn),
             "sync_log": sync_log,
+            "performance": agent_auth.agent_performance(conn),
             "current_user": current_user,
             "can_manage": current_user.has_permission(auth.PERM_MANAGE_USERS),
             "new_token": new_token,

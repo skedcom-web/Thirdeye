@@ -486,6 +486,37 @@ def test_order_detail_shows_a_confidence_label_with_no_leaked_score(public_clien
 
 
 # ---------------------------------------------------------------------------
+# Phase 3.9 Initiatives 6 & 7 -- citizen-facing republish status
+# ---------------------------------------------------------------------------
+def test_order_detail_shows_no_update_line_before_any_republish(public_client, conn):
+    record_id = _record_ids(conn)[0]
+    review.approve(conn, record_id, reviewer="admin")
+
+    detail = public_client.get(f"/orders/{record_id}").text
+    assert "Updated on" not in detail
+    assert "Revision History Available" not in detail
+
+
+def test_order_detail_shows_update_line_after_a_republish(public_client, conn, settings):
+    from goengine.operations import republish
+
+    record_id = _record_ids(conn)[0]
+    review.approve(conn, record_id, reviewer="admin")
+    revision_id = republish.request_revision(
+        conn, record_id, editor="alex", changes={"subject": "Citizen-visible correction"}, reason="typo fix",
+    )
+    republish.approve_revision(conn, revision_id, settings, reviewer="admin")
+
+    detail = public_client.get(f"/orders/{record_id}").text
+    assert "Updated on" in detail
+    assert "Revision History Available" in detail
+    assert "Citizen-visible correction" in detail
+    # Admin-only detail (reviewer identity, before value) must never leak here.
+    assert "admin" not in detail
+    assert "alex" not in detail
+
+
+# ---------------------------------------------------------------------------
 # Phase 3.7 Initiative 3 -- Search Validation, using the blueprint's own
 # 5 literal example queries for direct traceability.
 # ---------------------------------------------------------------------------

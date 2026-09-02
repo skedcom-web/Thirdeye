@@ -145,8 +145,17 @@ def test_publication_hub_renders(client):
 
 
 def test_publish_district_via_http_blocked_until_certified(client, conn, district_id):
-    response = client.post(f"/ops/publication/districts/{district_id}/publish")
-    assert response.status_code == 400
+    # A business-rule rejection redirects back to the same page with an
+    # inline error banner -- not a raw JSON error page (a real bug: a form
+    # POST landing on bare {"detail": "..."} instead of showing the message
+    # where the admin can see it and try again).
+    response = client.post(f"/ops/publication/districts/{district_id}/publish", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/ops/publication?error=")
+
+    followed = client.get(response.headers["location"])
+    assert followed.status_code == 200
+    assert "not certified" in followed.text
 
 
 def test_publish_district_via_http_succeeds(client, conn, district_id):

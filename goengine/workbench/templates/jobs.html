@@ -86,11 +86,12 @@
         <label class="field-label" id="dept-multiselect-label">Departments (optional — leave blank to include all)</label>
         <div class="dept-multiselect" data-dept-multiselect>
           <button type="button" class="dept-multiselect-toggle" data-dept-toggle
-                  aria-haspopup="true" aria-expanded="false" aria-labelledby="dept-multiselect-label">
+                  aria-haspopup="true" aria-expanded="{{ 'true' if preselect_department else 'false' }}"
+                  aria-labelledby="dept-multiselect-label">
             <span data-dept-summary>All Departments</span>
             <span class="dept-multiselect-caret" aria-hidden="true">▾</span>
           </button>
-          <div class="dept-multiselect-panel" data-dept-panel hidden>
+          <div class="dept-multiselect-panel" data-dept-panel {{ '' if preselect_department else 'hidden' }}>
             <input type="search" class="dept-multiselect-search" data-dept-search
                    placeholder="Search departments…" aria-label="Search departments">
             <div class="dept-multiselect-actions">
@@ -100,7 +101,8 @@
             <div class="dept-multiselect-list" data-dept-list>
               {% for d in departments %}
               <label class="dept-checkbox-item" data-dept-option data-dept-text="{{ d|lower }}">
-                <input type="checkbox" name="departments" value="{{ d }}" data-dept-checkbox>
+                <input type="checkbox" name="departments" value="{{ d }}" data-dept-checkbox
+                       {% if d == preselect_department %}checked{% endif %}>
                 {{ d }}
               </label>
               {% endfor %}

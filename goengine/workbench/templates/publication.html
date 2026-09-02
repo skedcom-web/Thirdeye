@@ -2,6 +2,10 @@
 {% block title %}Publication Control &middot; Thirdeye{% endblock %}
 {% block content %}
 
+{% if error %}
+<div class="error-banner">⚠ {{ error }}</div>
+{% endif %}
+
 <div class="grid cols-4" style="margin-bottom:16px;">
   <div class="stat"><div class="n">{{ coverage.districts_published }}/{{ coverage.districts_total }}</div><div class="l">Districts published</div></div>
   <div class="stat"><div class="n">{{ coverage.departments_published }}/{{ coverage.departments_total }}</div><div class="l">Departments published</div></div>

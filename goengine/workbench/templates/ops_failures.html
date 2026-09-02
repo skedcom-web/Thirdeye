@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Extraction Failures · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center · Phase 3.8</div>
+    <h1 class="occ-page-title">Extraction Failure Workbench</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Every real, already-recorded pipeline failure -- Discovery, Download, OCR, Parsing, and Publication --
+      read straight from the audit log. Nothing here is estimated.
+    </p>
+  </div>
+</div>
+
+<form method="get" action="/ops/failures" style="display:flex; gap:16px; align-items:flex-end; margin-bottom:16px;">
+  <div>
+    <label class="field-label" for="failure-dept">Department</label>
+    <select name="department" id="failure-dept" onchange="this.form.submit()">
+      <option value="">All departments</option>
+      {% for d in departments %}
+      <option value="{{ d }}" {% if selected_department == d %}selected{% endif %}>{{ d }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="field-label" for="failure-stage">Stage</label>
+    <select name="stage" id="failure-stage" onchange="this.form.submit()">
+      <option value="">All stages</option>
+      {% for s in stages %}
+      <option value="{{ s }}" {% if selected_stage == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="panel">
+  <table>
+    <thead>
+      <tr><th>Department</th><th>Source</th><th>Failure Stage</th><th>Error Message</th><th>Timestamp</th><th>Retry</th></tr>
+    </thead>
+    <tbody>
+      {% for f in failures %}
+      <tr>
+        <td>{{ f.department }}</td>
+        <td>{{ f.source_name }}</td>
+        <td><span class="pill warn">{{ f.stage }}</span></td>
+        <td style="max-width:360px;">{{ f.error_message }}</td>
+        <td class="mono" style="font-size:12px;">{{ f.timestamp or '—' }}</td>
+        <td><a href="{{ f.retry_url }}" class="btn-sm btn-secondary">↻ Retry</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No pipeline failures recorded{{ ' for this filter' if selected_department or selected_stage else '' }}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="muted" style="margin-top:16px;">
+  Retry launches a fresh extraction request scoped to that department on <a href="/ops/jobs">Run
+  Extraction</a> -- there is no separate per-document retry mechanism.
+</p>
+
+{% endblock %}

@@ -20,6 +20,7 @@ SCHEMA_AGENT_PATH = PACKAGE_DIR / "schema_agent.sql"
 SCHEMA_CITIZEN_PATH = PACKAGE_DIR / "schema_citizen.sql"
 SCHEMA_DOCUMENT_BLOBS_PATH = PACKAGE_DIR / "schema_document_blobs.sql"
 SCHEMA_ENGAGEMENT_PATH = PACKAGE_DIR / "schema_engagement.sql"
+SCHEMA_REPUBLISH_PATH = PACKAGE_DIR / "schema_republish.sql"
 
 # Columns added to the pre-existing `sources` table for Phase 1 certification.
 # SQLite's ALTER TABLE has no "ADD COLUMN IF NOT EXISTS", so this is applied
@@ -162,6 +163,14 @@ GO_RECORDS_IDENTITY_COLUMNS: dict[str, str] = {
 # moved "SE" -> "EDU" to match the Next Phase Blueprint's own example table.
 GO_IDENTITY_DEPARTMENT_CODE_MIGRATIONS: tuple[str, ...] = ("School Education",)
 
+# Phase 3.9 -- tracks the live version number a go_record is on. Bumped only
+# by operations/republish.py::approve_revision(); go_identity.py never
+# touches it, since a version bump never changes go_number/go_date/
+# department (see schema_republish.sql for why those stay frozen).
+GO_RECORDS_REPUBLISH_COLUMNS: dict[str, str] = {
+    "current_version": "INTEGER NOT NULL DEFAULT 1",
+}
+
 
 def utcnow() -> str:
     """Timestamps are ISO-8601 UTC everywhere; audit trails need one clock."""
@@ -299,6 +308,8 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_ENGAGEMENT_PATH.read_text(encoding="utf-8"))
     _ensure_columns(conn, "go_records", GO_RECORDS_IDENTITY_COLUMNS)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_go_records_url_slug ON go_records(go_url_slug)")
+    _ensure_columns(conn, "go_records", GO_RECORDS_REPUBLISH_COLUMNS)
+    conn.executescript(SCHEMA_REPUBLISH_PATH.read_text(encoding="utf-8"))
 
     from . import go_identity
 

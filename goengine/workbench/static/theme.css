@@ -780,6 +780,13 @@ footer.site-footer a { color: var(--muted); }
 }
 .alert-banner:last-child { margin-bottom: 0; }
 
+/* A real failure (a rejected action), distinct from .alert-banner's ongoing
+   system-health warning -- red/bad, not amber/warn. */
+.error-banner {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px;
+  background: var(--bad-soft); color: var(--bad); font-size: 13px; margin-bottom: 10px;
+}
+
 .activity-feed { display: flex; flex-direction: column; }
 .activity-item {
   display: flex; gap: 12px; align-items: baseline; padding: 10px 0; font-size: 13px;

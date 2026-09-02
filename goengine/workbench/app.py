@@ -33,6 +33,7 @@ from ..fetching import FetchError
 from ..operations import auth
 from ..operations import citizen as ops_citizen
 from ..operations import engagement as ops_engagement
+from ..operations import republish as ops_republish
 from .deps import (
     CITIZEN_SESSION_COOKIE,
     Config,
@@ -489,6 +490,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 # Phase 3.6 Initiative E -- citizen-friendly label only, the
                 # numeric Quality Score behind it never reaches this template.
                 "confidence_label": ops_quality.publication_confidence(conn, config, record_id),
+                # Phase 3.9 Initiatives 6 & 7 -- version + date only, no
+                # reviewer identity or before/after values (those stay
+                # admin-only on /records/{id}).
+                "republish_status": ops_republish.republish_status(conn, record_id),
+                "republish_history": [
+                    {"version": r["version"], "republished_at": r["republished_at"]}
+                    for r in ops_republish.revision_history(conn, record_id)
+                    if r["status"] == ops_republish.STATUS_REPUBLISHED
+                ],
             },
         )
 
@@ -805,6 +815,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "can_escalate": current_user.has_permission(auth.PERM_ESCALATE_RECORDS),
                 "escalations": ops_review.escalations_for_record(conn, record_id),
                 "error": error,
+                # Phase 3.9 Initiatives 6 & 7 -- only meaningful once published.
+                "revision_editable_fields": ops_republish.EDITABLE_FIELDS,
+                "revisions": ops_republish.revision_history(conn, record_id),
             },
         )
 
@@ -946,6 +959,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except review.ReviewError as exc:
             return _record_error_redirect(record_id, str(exc))
         return RedirectResponse("/workbench", status_code=303)
+
+    # -----------------------------------------------------------------------
+    # Phase 3.9 Initiatives 6 & 7 -- Published GO Edit & Republish Workflow
+    # -----------------------------------------------------------------------
+    @app.post("/records/{record_id}/revisions")
+    def post_request_revision(
+        record_id: int,
+        conn: Conn,
+        current_user: RequireReview,
+        field_name: Annotated[list[str], Form()],
+        new_value: Annotated[list[str], Form()],
+        reason: Annotated[str, Form()],
+    ):
+        changes = {name: value.strip() for name, value in zip(field_name, new_value) if value.strip()}
+        try:
+            ops_republish.request_revision(
+                conn, record_id, editor=current_user.username, changes=changes, reason=reason.strip(),
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ops_republish.RepublishError as exc:
+            return _record_error_redirect(record_id, str(exc))
+        return RedirectResponse(f"/records/{record_id}", status_code=303)
+
+    @app.post("/records/{record_id}/revisions/{revision_id}/submit")
+    def post_submit_revision(record_id: int, revision_id: int, conn: Conn, current_user: RequireReview):
+        try:
+            ops_republish.submit_for_review(conn, revision_id, editor=current_user.username)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ops_republish.RepublishError as exc:
+            return _record_error_redirect(record_id, str(exc))
+        return RedirectResponse(f"/records/{record_id}", status_code=303)
+
+    @app.post("/records/{record_id}/revisions/{revision_id}/approve")
+    def post_approve_revision(record_id: int, revision_id: int, conn: Conn, config: Config, current_user: RequireReview):
+        try:
+            ops_republish.approve_revision(conn, revision_id, config, reviewer=current_user.username)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ops_republish.RepublishError as exc:
+            return _record_error_redirect(record_id, str(exc))
+        return RedirectResponse(f"/records/{record_id}", status_code=303)
+
+    @app.post("/records/{record_id}/revisions/{revision_id}/reject")
+    def post_reject_revision(
+        record_id: int, revision_id: int, conn: Conn, current_user: RequireReview,
+        reason: Annotated[str, Form()],
+    ):
+        try:
+            ops_republish.reject_revision(conn, revision_id, reviewer=current_user.username, reason=reason.strip())
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ops_republish.RepublishError as exc:
+            return _record_error_redirect(record_id, str(exc))
+        return RedirectResponse(f"/records/{record_id}", status_code=303)
 
     @app.post("/records/{record_id}/escalate")
     def post_escalate(

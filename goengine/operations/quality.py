@@ -571,3 +571,303 @@ def repository_health(conn: sqlite3.Connection, settings: Settings) -> dict:
         "department_readiness": readiness_counts,
         "publication_confidence_distribution": confidence_counts,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8 Initiatives 1, 3 & 5 -- Department Certification Matrix
+#
+# A 5-level maturity ladder per department, built entirely from signals that
+# already exist (department_health's total_gos, department_readiness's
+# Ready/Partially Ready/Needs Attention check) rather than new criteria.
+# Levels are ORDERED: a department only reaches a level if every lower one
+# also holds.
+# ---------------------------------------------------------------------------
+CERT_LEVEL_LABELS: dict[int, str] = {
+    1: "Reachable",
+    2: "Extractable",
+    3: "Parsable",
+    4: "Publishable",
+    5: "Searchable & Production Ready",
+}
+
+# Phase 3.9 Initiative 2 -- Publication Yield KPI thresholds.
+YIELD_GREEN = "Green"
+YIELD_AMBER = "Amber"
+YIELD_RED = "Red"
+_YIELD_GREEN_THRESHOLD = 70.0
+_YIELD_AMBER_THRESHOLD = 40.0
+
+
+def _yield_status(yield_pct: float) -> str:
+    if yield_pct >= _YIELD_GREEN_THRESHOLD:
+        return YIELD_GREEN
+    if yield_pct >= _YIELD_AMBER_THRESHOLD:
+        return YIELD_AMBER
+    return YIELD_RED
+
+
+def _certification_level(
+    *, documents_downloaded: int, records_parsed: int, records_approved: int, readiness_status: str
+) -> int:
+    if readiness_status == STATUS_READY:
+        return 5
+    if records_approved > 0:
+        return 4
+    if records_parsed > 0:
+        return 3
+    if documents_downloaded > 0:
+        return 2
+    return 1
+
+
+def department_certification(conn: sqlite3.Connection, settings: Settings) -> list[dict]:
+    """One row per real configured department (registry.list_departments),
+    combining Initiative 1's certification ladder, Initiative 3's adapter
+    info, and Initiative 5's benchmarking KPIs into a single table -- these
+    are the same per-department columns, not three separate concerns.
+
+    "Records Approved" and "Records Published" are reported as one number
+    (`records_approved`): public.search()'s only citizen-visibility gate is
+    go_records.status='approved', so today those are the same signal -- this
+    reports one honest number rather than inventing a second, fake one.
+    """
+    import json
+
+    from .. import registry
+
+    health_by_department = {h["department"]: h for h in department_health(conn, settings)}
+    readiness_by_department = {r["department"]: r["status"] for r in department_readiness(conn, settings)}
+
+    # One pass over every request, fanned out to each department it scoped --
+    # avoids an N-query loop over ~40 departments (a request can span several).
+    requests_by_department: dict[str, list[sqlite3.Row]] = {}
+    for row in conn.execute(
+        "SELECT department_filter, status, started_at, finished_at FROM extraction_requests"
+        " WHERE department_filter IS NOT NULL"
+    ).fetchall():
+        for department in json.loads(row["department_filter"]):
+            requests_by_department.setdefault(department, []).append(row)
+
+    source_rows = {
+        r["department"]: r
+        for r in conn.execute("SELECT department, url, adapter FROM sources GROUP BY department").fetchall()
+    }
+    documents_found_by_department = {
+        r["department"]: int(r["n"]) for r in conn.execute(
+            """
+            SELECT s.department AS department, COUNT(*) AS n FROM discovered_documents dd
+              JOIN sources s ON s.id = dd.source_id
+             GROUP BY s.department
+            """
+        ).fetchall()
+    }
+    documents_downloaded_by_department = {
+        r["department"]: int(r["n"]) for r in conn.execute(
+            """
+            SELECT s.department AS department, COUNT(*) AS n FROM documents d
+              JOIN sources s ON s.id = d.source_id
+             GROUP BY s.department
+            """
+        ).fetchall()
+    }
+    records_approved_by_department = {
+        r["department"]: int(r["n"]) for r in conn.execute(
+            """
+            SELECT s.department AS department, COUNT(*) AS n FROM go_records r
+              JOIN sources s ON s.id = r.source_id
+             WHERE r.status = 'approved'
+             GROUP BY s.department
+            """
+        ).fetchall()
+    }
+
+    result = []
+    for department in registry.list_departments(conn):
+        source_row = source_rows.get(department)
+        documents_found = documents_found_by_department.get(department, 0)
+        documents_downloaded = documents_downloaded_by_department.get(department, 0)
+        records_approved = records_approved_by_department.get(department, 0)
+        records_parsed = health_by_department.get(department, {}).get("total_gos", 0)
+        readiness_status = readiness_by_department.get(department, STATUS_NEEDS_ATTENTION)
+
+        request_rows = requests_by_department.get(department, [])
+        failed_requests = [r for r in request_rows if r["status"] == "FAILED"]
+        durations = [
+            (datetime.fromisoformat(r["finished_at"]) - datetime.fromisoformat(r["started_at"])).total_seconds()
+            for r in request_rows
+            if r["status"] == "COMPLETED" and r["started_at"] and r["finished_at"]
+        ]
+
+        level = _certification_level(
+            documents_downloaded=documents_downloaded, records_parsed=records_parsed,
+            records_approved=records_approved, readiness_status=readiness_status,
+        )
+        # Publication Yield = Published Records / Downloaded Documents --
+        # distinct from success_rate_pct above (parsed/downloaded): yield
+        # measures how much of what was downloaded actually made it all the
+        # way to citizen-visible, not just how much parsed cleanly.
+        publication_yield_pct = min(_pct(records_approved, documents_downloaded), 100.0)
+
+        result.append({
+            "department": department,
+            "source_url": source_row["url"] if source_row else None,
+            "adapter": source_row["adapter"] if source_row else None,
+            "documents_found": documents_found,
+            "documents_downloaded": documents_downloaded,
+            "records_parsed": records_parsed,
+            "records_approved": records_approved,
+            "records_published": records_approved,
+            # Capped at 100: reprocess_record() can create more than one
+            # go_record from the same downloaded document (a fresh pending
+            # record per re-parse attempt), so the raw ratio can otherwise
+            # exceed 100% -- a rate should never read as more than complete.
+            "success_rate_pct": min(_pct(records_parsed, documents_downloaded), 100.0),
+            "failure_rate_pct": _pct(len(failed_requests), len(request_rows)),
+            "publication_yield_pct": publication_yield_pct,
+            "yield_status": _yield_status(publication_yield_pct),
+            "avg_processing_time_seconds": round(sum(durations) / len(durations), 1) if durations else None,
+            "last_successful_run": health_by_department.get(department, {}).get("last_extraction_date"),
+            "certification_level": level,
+            "certification_label": CERT_LEVEL_LABELS[level],
+        })
+    return result
+
+
+def campaign_summary(certification_rows: list[dict]) -> dict:
+    """Initiative 6 -- pure aggregation over department_certification()'s own
+    rows, passed in rather than recomputed (same pattern as
+    department_coverage_kpis()). `total_published_gos` is intentionally NOT
+    included here -- callers that also have repository_analytics() (route
+    level, to avoid this module's documented circular import with
+    analytics.py) should add it alongside this dict.
+
+    Phase 3.9 Initiative 5 (Extraction Completion Monitoring) adds
+    departments_extracted/publishable/production_ready -- named counts over
+    the SAME certification ladder Phase 3.8 already built (level >= 2/4/5),
+    not a second ladder."""
+    total = len(certification_rows)
+    certified = sum(1 for r in certification_rows if r["certification_level"] == 5)
+    requiring_attention = sum(1 for r in certification_rows if r["certification_level"] == 1)
+    in_progress = total - certified - requiring_attention
+    overall_success_rate = (
+        round(sum(r["success_rate_pct"] for r in certification_rows) / total, 1) if total else 0.0
+    )
+    return {
+        "total_departments": total,
+        "certified_departments": certified,
+        "departments_in_progress": in_progress,
+        "departments_requiring_attention": requiring_attention,
+        "overall_success_rate_pct": overall_success_rate,
+        "departments_extracted": sum(1 for r in certification_rows if r["certification_level"] >= 2),
+        "departments_publishable": sum(1 for r in certification_rows if r["certification_level"] >= 4),
+        "departments_production_ready": certified,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8 Initiative 4 -- Historical Coverage Analysis
+#
+# Same query shape as analytics._department_year_matrix(), but unfiltered by
+# status: this measures how far extraction has actually reached historically
+# for a department, not how much has been published.
+# ---------------------------------------------------------------------------
+def historical_coverage(conn: sqlite3.Connection) -> list[dict]:
+    from .. import registry
+
+    rows = conn.execute(
+        """
+        SELECT s.department AS department, r.go_year AS year, COUNT(*) AS n
+          FROM go_records r
+          JOIN sources s ON s.id = r.source_id
+         WHERE r.go_year IS NOT NULL
+         GROUP BY s.department, r.go_year
+        """
+    ).fetchall()
+
+    by_department: dict[str, list[dict]] = {}
+    for row in rows:
+        by_department.setdefault(row["department"], []).append(
+            {"year": int(row["year"]), "count": int(row["n"])}
+        )
+
+    result = []
+    for department in registry.list_departments(conn):
+        trend = sorted(by_department.get(department, []), key=lambda t: t["year"])
+        if not trend:
+            result.append({
+                "department": department, "earliest_year": None, "latest_year": None,
+                "years_covered": 0, "missing_years": [], "coverage_trend": [],
+            })
+            continue
+        years_present = {t["year"] for t in trend}
+        earliest, latest = trend[0]["year"], trend[-1]["year"]
+        missing = [y for y in range(earliest, latest + 1) if y not in years_present]
+        result.append({
+            "department": department, "earliest_year": earliest, "latest_year": latest,
+            "years_covered": len(years_present), "missing_years": missing, "coverage_trend": trend,
+        })
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.9 Initiative 3 -- Extraction Funnel Analytics
+#
+# Downloaded -> Parsed -> Review -> Approved -> Published, plus Rejected/
+# Duplicate/OCR Failed/Parse Failed. Every number already exists somewhere
+# else (go_records.status counts, operations/failures.py) -- this just puts
+# them in one funnel-shaped dict, optionally scoped to one real department.
+# ---------------------------------------------------------------------------
+def extraction_funnel(conn: sqlite3.Connection, *, department: str | None = None) -> dict:
+    from . import failures as ops_failures
+
+    dept_clause = " AND s.department = ?" if department else ""
+    dept_params = (department,) if department else ()
+
+    documents_downloaded = conn.execute(
+        f"SELECT COUNT(*) AS n FROM documents d JOIN sources s ON s.id = d.source_id WHERE 1=1{dept_clause}",
+        dept_params,
+    ).fetchone()["n"]
+
+    status_rows = conn.execute(
+        f"""
+        SELECT r.status AS status, COUNT(*) AS n FROM go_records r
+          JOIN sources s ON s.id = r.source_id
+         WHERE 1=1{dept_clause}
+         GROUP BY r.status
+        """,
+        dept_params,
+    ).fetchall()
+    by_status = {row["status"]: int(row["n"]) for row in status_rows}
+    records_parsed = sum(by_status.values())
+
+    # Real-department variant of dedup.py's duplicate detection (which keys
+    # by categorize.py's coarse content bucket, not a real department name)
+    # -- same fix already applied to the Review Center's department filter,
+    # applied consistently here rather than mixing two vocabularies.
+    duplicate_rows = conn.execute(
+        f"""
+        SELECT r.document_id AS document_id, COUNT(*) AS n FROM go_records r
+          JOIN sources s ON s.id = r.source_id
+         WHERE r.status = 'pending'{dept_clause}
+         GROUP BY r.document_id, s.department
+        HAVING COUNT(*) > 1
+        """,
+        dept_params,
+    ).fetchall()
+    duplicate_count = sum(int(row["n"]) - 1 for row in duplicate_rows)
+
+    dept_failures = ops_failures.pipeline_failures(conn, department=department, limit=100_000)
+    ocr_failed = sum(1 for f in dept_failures if f["stage"] == ops_failures.STAGE_OCR)
+    parse_failed = sum(1 for f in dept_failures if f["stage"] == ops_failures.STAGE_PARSING)
+
+    return {
+        "documents_downloaded": documents_downloaded,
+        "records_parsed": records_parsed,
+        "pending_review": by_status.get("pending", 0),
+        "approved": by_status.get("approved", 0),
+        "published": by_status.get("approved", 0),
+        "rejected": by_status.get("rejected", 0),
+        "duplicate": duplicate_count,
+        "ocr_failed": ocr_failed,
+        "parse_failed": parse_failed,
+    }

@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Department Certification · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center · Phase 3.8 · 3.9</div>
+    <h1 class="occ-page-title">Department Certification Center</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Every department tracked through a 5-level maturity ladder -- Reachable, Extractable, Parsable,
+      Publishable, Searchable &amp; Production Ready -- computed live from real extraction data. This page
+      is the statewide readiness view: always current, never a stale snapshot.
+    </p>
+  </div>
+</div>
+
+<h2 style="margin-bottom:8px;">Extraction Campaign Dashboard</h2>
+<div class="grid cols-3" style="margin-bottom:12px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ campaign.total_departments }}</div>
+    <div class="kpi-l">Total Departments</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ campaign.certified_departments }}</div>
+    <div class="kpi-l">Certified Departments</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ campaign.departments_in_progress }}</div>
+    <div class="kpi-l">Departments In Progress</div>
+  </div>
+</div>
+<div class="grid cols-3" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ campaign.departments_requiring_attention }}</div>
+    <div class="kpi-l">Requiring Attention</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ campaign.overall_success_rate_pct }}%</div>
+    <div class="kpi-l">Overall Success Rate</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ campaign.total_published_gos }}</div>
+    <div class="kpi-l">Total Published GOs</div>
+  </div>
+</div>
+
+<h2 style="margin-bottom:8px;">Readiness Exit Criteria</h2>
+<p class="muted" style="margin-bottom:12px;">
+  Before Phase 4's citizen-intelligence features, per the Phase 3.9 blueprint's guiding principle: build the
+  most trusted Government Order Repository first.
+</p>
+<div class="panel" style="margin-bottom:24px;">
+  <table>
+    <tr><th>All 40 departments configured</th><td>{{ campaign.total_departments }} configured</td><td>{{ '✅' if campaign.total_departments >= 40 else '⏳' }}</td></tr>
+    <tr><th>Extraction run for all departments</th><td>{{ campaign.departments_extracted }}/{{ campaign.total_departments }} extracted</td><td>{{ '✅' if campaign.departments_extracted >= campaign.total_departments and campaign.total_departments > 0 else '⏳' }}</td></tr>
+    <tr><th>Certification dashboard populated</th><td>This page</td><td>✅</td></tr>
+    <tr><th>Failure workbench operational</th><td><a href="/ops/failures">Extraction Failures</a></td><td>✅</td></tr>
+    <tr><th>Publication yield operational</th><td>Yield column below</td><td>✅</td></tr>
+    <tr><th>Department drilldown operational</th><td>Click any department below</td><td>✅</td></tr>
+    <tr><th>Republishing workflow operational</th><td>Available from a published record's page</td><td>✅</td></tr>
+  </table>
+</div>
+
+<h2 style="margin-bottom:8px;">Extraction Funnel (Statewide)</h2>
+<div class="panel" style="margin-bottom:24px;">
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <span class="pill neutral">Downloaded: {{ funnel.documents_downloaded }}</span>
+    <span class="pill neutral">Parsed: {{ funnel.records_parsed }}</span>
+    <span class="pill warn">Pending Review: {{ funnel.pending_review }}</span>
+    <span class="pill ok">Approved: {{ funnel.approved }}</span>
+    <span class="pill ok">Published: {{ funnel.published }}</span>
+    <span class="pill bad">Rejected: {{ funnel.rejected }}</span>
+    <span class="pill bad">Duplicate: {{ funnel.duplicate }}</span>
+    <span class="pill bad">OCR Failed: {{ funnel.ocr_failed }}</span>
+    <span class="pill bad">Parse Failed: {{ funnel.parse_failed }}</span>
+  </div>
+</div>
+
+<h2 style="margin-bottom:8px;">Department Certification Matrix</h2>
+<p class="muted" style="margin-bottom:12px;">
+  Levels are ordered -- a department only reaches a level once every lower one also holds. "Records
+  Approved" and "Records Published" are the same signal today (public search only ever returns approved
+  records), so this table reports one honest number, not two invented ones. Expand a row for its
+  historical year coverage.
+</p>
+<div class="panel">
+  <div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Department</th><th>Level</th><th>Adapter</th>
+        <th>Found</th><th>Downloaded</th><th>Parsed</th><th>Approved / Published</th>
+        <th>Yield</th><th>Success</th><th>Failure</th><th>Avg Processing Time</th><th>Last Successful Run</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in certification %}
+      <tr>
+        <td>
+          <a href="/ops/departments/{{ row.department|urlencode }}">{{ row.department }}</a>
+          {% if row.source_url %}<a href="{{ row.source_url }}" target="_blank" rel="noopener" title="Source website" style="margin-left:4px;">🔗</a>{% endif %}
+        </td>
+        <td>
+          <span class="pill {{ 'ok' if row.certification_level == 5 else ('warn' if row.certification_level >= 3 else 'neutral') }}">
+            {{ row.certification_level }} · {{ row.certification_label }}
+          </span>
+        </td>
+        <td class="mono" style="font-size:12px;">{{ row.adapter or '—' }}</td>
+        <td>{{ row.documents_found }}</td>
+        <td>{{ row.documents_downloaded }}</td>
+        <td>{{ row.records_parsed }}</td>
+        <td>{{ row.records_approved }}</td>
+        <td><span class="pill {{ 'ok' if row.yield_status == 'Green' else ('warn' if row.yield_status == 'Amber' else 'bad') }}">{{ row.publication_yield_pct }}%</span></td>
+        <td>{{ row.success_rate_pct }}%</td>
+        <td>{{ row.failure_rate_pct }}%</td>
+        <td>{{ (row.avg_processing_time_seconds ~ 's') if row.avg_processing_time_seconds is not none else '—' }}</td>
+        <td class="mono" style="font-size:12px;">{{ row.last_successful_run or '—' }}</td>
+      </tr>
+      <tr>
+        <td colspan="12" style="padding:0 0 8px 0; border-top:none;">
+          <details>
+            <summary class="muted" style="cursor:pointer; font-size:12px;">Historical coverage</summary>
+            {% if row.historical and row.historical.years_covered > 0 %}
+            <div style="padding:8px 0 0 16px; font-size:13px;">
+              <span class="pill neutral">Earliest: {{ row.historical.earliest_year }}</span>
+              <span class="pill neutral">Latest: {{ row.historical.latest_year }}</span>
+              <span class="pill neutral">Years Covered: {{ row.historical.years_covered }}</span>
+              {% if row.historical.missing_years %}
+              <span class="pill warn">Missing: {{ row.historical.missing_years|join(', ') }}</span>
+              {% endif %}
+              <div style="margin-top:6px;">
+                {% for t in row.historical.coverage_trend %}
+                <span class="pill neutral" style="margin:2px;">{{ t.year }}: {{ t.count }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% else %}
+            <p class="muted" style="padding:8px 0 0 16px; margin:0;">No extracted records yet.</p>
+            {% endif %}
+          </details>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="12" class="muted">No departments configured yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<p class="muted" style="margin-top:16px;">
+  See also <a href="/ops/failures">Extraction Failures</a> for a troubleshooting view of what's currently
+  blocking a department from advancing.
+</p>
+
+{% endblock %}

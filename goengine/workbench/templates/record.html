@@ -158,6 +158,87 @@
   {% endif %}
 </div>
 
+{% if record.status == 'approved' %}
+<!-- Republishing (Phase 3.9 Initiatives 6 & 7) -->
+<div class="panel">
+  <h2>Republishing</h2>
+  <p class="muted">
+    This GO is published. Corrections to <span class="mono">{{ revision_editable_fields|join(', ') }}</span> go
+    through a Draft &rarr; Review &rarr; Republish cycle so the audit trail is never lost. GO number, date, and
+    department cannot be changed here &mdash; they're frozen once published so the permanent URL never breaks.
+  </p>
+
+  {% set pending_revision = revisions|selectattr('status', 'in', ['REVISION_DRAFT', 'REVISION_PENDING_REVIEW'])|list|first %}
+  {% if can_review and not pending_revision %}
+  <form method="post" action="/records/{{ record.record_id }}/revisions">
+    <table>
+      {% for name in revision_editable_fields %}
+      <tr>
+        <th style="width:120px;">{{ name }}</th>
+        <td>
+          <input type="hidden" name="field_name" value="{{ name }}">
+          <input type="text" name="new_value" placeholder="New value for {{ name }} (leave blank to skip)"
+                 value="" style="width:100%; max-width:420px;">
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+      <input type="text" name="reason" placeholder="reason for this correction (required)" required style="min-width:280px;">
+      <button type="submit">Request Revision</button>
+    </div>
+  </form>
+  {% elif pending_revision %}
+  <p class="muted">A revision is already {{ 'in draft' if pending_revision.status == 'REVISION_DRAFT' else 'pending review' }} below &mdash; resolve it before requesting another.</p>
+  {% endif %}
+
+  {% if revisions %}
+  <h3 style="font-size:13px; color:var(--muted); margin:16px 0 6px;">Revision History</h3>
+  <table>
+    <tr><th>Version</th><th>Status</th><th>Requested by</th><th>Changes</th><th>Reason</th><th>Reviewed by</th><th></th></tr>
+    {% for rev in revisions %}
+    <tr>
+      <td>v{{ rev.version }}</td>
+      <td>
+        <span class="pill {{ 'ok' if rev.status == 'REPUBLISHED' else ('bad' if rev.status == 'REJECTED' else 'warn') }}">{{ rev.status }}</span>
+      </td>
+      <td>{{ rev.requested_by }}<div class="muted" style="font-size:11px;">{{ rev.requested_at }}</div></td>
+      <td>
+        {% for c in rev.changes %}
+        <div class="mono" style="font-size:12px;">{{ c.field_name }}: &ldquo;{{ c.old_value or '' }}&rdquo; &rarr; &ldquo;{{ c.new_value }}&rdquo;</div>
+        {% endfor %}
+      </td>
+      <td>{{ rev.reason }}</td>
+      <td>{% if rev.reviewed_by %}{{ rev.reviewed_by }}<div class="muted" style="font-size:11px;">{{ rev.reviewed_at }}</div>{% else %}&mdash;{% endif %}</td>
+      <td>
+        {% if can_review and rev.status in ('REVISION_DRAFT', 'REVISION_PENDING_REVIEW') %}
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          {% if rev.status == 'REVISION_DRAFT' %}
+          <form method="post" action="/records/{{ record.record_id }}/revisions/{{ rev.id }}/submit">
+            <button class="ghost" type="submit">Submit for review</button>
+          </form>
+          {% endif %}
+          {% if rev.requested_by != current_user.username %}
+          <form method="post" action="/records/{{ record.record_id }}/revisions/{{ rev.id }}/approve">
+            <button type="submit">Approve &amp; Republish</button>
+          </form>
+          {% else %}
+          <span class="muted" style="font-size:11px;">can't approve your own revision</span>
+          {% endif %}
+          <form method="post" action="/records/{{ record.record_id }}/revisions/{{ rev.id }}/reject">
+            <input type="text" name="reason" placeholder="reject reason" required style="width:120px;">
+            <button class="danger" type="submit">Reject</button>
+          </form>
+        </div>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
 <!-- Extracted text -->
 <div class="panel">
   <h2>Extracted text by page</h2>

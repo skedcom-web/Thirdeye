@@ -448,6 +448,249 @@ def test_repository_health_reflects_real_data(conn, settings, records):
     assert sum(health["publication_confidence_distribution"].values()) == 1  # exactly one approved record
 
 
+# ---------------------------------------------------------------------------
+# Phase 3.8 Initiatives 1, 3 & 5 -- Department Certification Matrix
+# ---------------------------------------------------------------------------
+def test_certification_level_1_reachable_with_no_extraction_attempted(conn, settings):
+    from goengine import registry
+
+    registry.add_source(
+        conn, name="Untouched Dept Source", department="Untouched Department",
+        url="https://www.tn.gov.in/go.php?dep_id=untouched", source_type="department_site",
+    )
+    rows = {r["department"]: r for r in quality.department_certification(conn, settings)}
+    row = rows["Untouched Department"]
+    assert row["certification_level"] == 1
+    assert row["certification_label"] == "Reachable"
+    assert row["documents_downloaded"] == 0
+    assert row["records_parsed"] == 0
+    assert row["avg_processing_time_seconds"] is None
+
+
+def test_certification_level_3_parsable_before_anything_approved(conn, settings, records):
+    rows = {r["department"]: r for r in quality.department_certification(conn, settings)}
+    row = rows["All Departments"]
+    assert row["records_parsed"] == 3
+    assert row["records_approved"] == 0
+    assert row["certification_level"] == 3
+    assert row["certification_label"] == "Parsable"
+
+
+def test_certification_level_4_publishable_once_approved_but_not_yet_searchable_ready(conn, settings, records):
+    # Approving one of three records makes it "Publishable" (records_approved > 0)
+    # but department_readiness only reaches STATUS_READY once metadata/pdf/url
+    # checks all pass across the department -- that's covered by the level-5 test.
+    review.approve(conn, records[0], reviewer="admin")
+    rows = {r["department"]: r for r in quality.department_certification(conn, settings)}
+    row = rows["All Departments"]
+    assert row["records_approved"] == 1
+    assert row["records_published"] == 1
+    assert row["certification_level"] >= 4
+
+
+def test_certification_level_5_matches_department_readiness_ready(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+    readiness = {r["department"]: r["status"] for r in quality.department_readiness(conn, settings)}
+    rows = {r["department"]: r for r in quality.department_certification(conn, settings)}
+    row = rows["All Departments"]
+    assert readiness["All Departments"] == quality.STATUS_READY
+    assert row["certification_level"] == 5
+    assert row["certification_label"] == "Searchable & Production Ready"
+
+
+def test_certification_reports_source_url_and_adapter(conn, settings, records):
+    rows = {r["department"]: r for r in quality.department_certification(conn, settings)}
+    row = rows["All Departments"]
+    assert row["source_url"] == "https://cms.tn.gov.in/go-search"
+    assert row["adapter"] == "tn_go_portal"
+
+
+def test_certification_success_rate_is_capped_at_100_after_reprocessing(conn, settings, fetcher, source_id):
+    # reprocess_record() creates a fresh go_record from the SAME already-
+    # downloaded document -- documents_downloaded stays 3 but records_parsed
+    # can exceed it, so the rate must be capped, not left free to read >100%.
+    client = TestClient(create_app(settings))
+    login_as(client, conn)
+    run_all(conn, settings, fetcher, only_due=False)
+    record_id = int(conn.execute("SELECT id FROM go_records ORDER BY id LIMIT 1").fetchone()["id"])
+    client.post(f"/records/{record_id}/reprocess", follow_redirects=False)
+
+    rows = {r["department"]: r for r in quality.department_certification(conn, settings)}
+    row = rows["All Departments"]
+    assert row["records_parsed"] > row["documents_downloaded"]
+    assert row["success_rate_pct"] == 100.0
+
+
+def test_campaign_summary_aggregates_certification_rows():
+    rows = [
+        {"certification_level": 5, "success_rate_pct": 100.0},
+        {"certification_level": 3, "success_rate_pct": 50.0},
+        {"certification_level": 1, "success_rate_pct": 0.0},
+    ]
+    summary = quality.campaign_summary(rows)
+    assert summary["total_departments"] == 3
+    assert summary["certified_departments"] == 1
+    assert summary["departments_in_progress"] == 1
+    assert summary["departments_requiring_attention"] == 1
+    assert summary["overall_success_rate_pct"] == 50.0
+    # Phase 3.9 Initiative 5 -- named counts over the same ladder.
+    assert summary["departments_extracted"] == 2  # levels 5 and 3 are both >= 2
+    assert summary["departments_publishable"] == 1  # only the level-5 row is >= 4
+    assert summary["departments_production_ready"] == 1
+
+
+def test_campaign_summary_with_no_departments_does_not_crash():
+    summary = quality.campaign_summary([])
+    assert summary["total_departments"] == 0
+    assert summary["overall_success_rate_pct"] == 0.0
+    assert summary["departments_extracted"] == 0
+    assert summary["departments_publishable"] == 0
+    assert summary["departments_production_ready"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.9 Initiative 2 -- Publication Yield KPI
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "yield_pct, expected",
+    [(100, "Green"), (70, "Green"), (69.9, "Amber"), (40, "Amber"), (39.9, "Red"), (0, "Red")],
+)
+def test_yield_status_thresholds(yield_pct, expected):
+    assert quality._yield_status(yield_pct) == expected
+
+
+def test_certification_reports_publication_yield(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+    rows = {r["department"]: r for r in quality.department_certification(conn, settings)}
+    row = rows["All Departments"]
+    # 1 approved out of 3 downloaded documents.
+    assert row["publication_yield_pct"] == pytest.approx(33.3, abs=0.1)
+    assert row["yield_status"] == "Red"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.9 Initiative 3 -- Extraction Funnel Analytics
+# ---------------------------------------------------------------------------
+def test_extraction_funnel_statewide_with_no_data(conn, settings):
+    funnel = quality.extraction_funnel(conn)
+    assert funnel["documents_downloaded"] == 0
+    assert funnel["records_parsed"] == 0
+    assert funnel["duplicate"] == 0
+    assert funnel["ocr_failed"] == 0
+
+
+def test_extraction_funnel_reflects_real_pipeline_state(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+    review.reject(conn, records[1], reviewer="admin", reason="wrong department")
+
+    funnel = quality.extraction_funnel(conn)
+    assert funnel["documents_downloaded"] == 3
+    assert funnel["records_parsed"] == 3
+    assert funnel["approved"] == 1
+    assert funnel["published"] == 1
+    assert funnel["rejected"] == 1
+    assert funnel["pending_review"] == 1
+
+
+def test_extraction_funnel_scoped_to_a_department_excludes_others(conn, settings, records):
+    from goengine import registry
+
+    other_source_id = registry.add_source(
+        conn, name="Energy Portal", department="Energy",
+        url="https://cms.tn.gov.in/energy", source_type="go_portal",
+    )
+    conn.execute("UPDATE go_records SET source_id = ? WHERE id = ?", (other_source_id, records[0]))
+
+    scoped = quality.extraction_funnel(conn, department="Energy")
+    assert scoped["records_parsed"] == 1
+
+    remaining = quality.extraction_funnel(conn, department="All Departments")
+    assert remaining["records_parsed"] == 2
+
+
+def test_extraction_funnel_counts_duplicate_pending_records(conn, settings, records):
+    # Simulate a resync duplicate: two pending go_records for the same document.
+    row = conn.execute("SELECT * FROM go_records WHERE id = ?", (records[0],)).fetchone()
+    conn.execute(
+        """
+        INSERT INTO go_records (extraction_id, document_id, source_id, extractor_version, status, created_at)
+        VALUES (?, ?, ?, ?, 'pending', ?)
+        """,
+        (row["extraction_id"], row["document_id"], row["source_id"], row["extractor_version"] + "-dup", row["created_at"]),
+    )
+    funnel = quality.extraction_funnel(conn)
+    assert funnel["duplicate"] == 1
+
+
+def test_extraction_funnel_counts_ocr_and_parse_failures(conn, settings, fetcher, source_id):
+    from goengine import audit
+    from goengine.pipeline import run_all
+
+    run_all(conn, settings, fetcher, only_due=False)
+    document_id = conn.execute("SELECT id FROM documents ORDER BY id LIMIT 1").fetchone()["id"]
+    extraction_id = conn.execute(
+        "SELECT id FROM extractions WHERE document_id = ?", (document_id,)
+    ).fetchone()["id"]
+    audit.record(
+        conn, action="extraction.ocr_failed", entity_type="extraction", entity_id=extraction_id,
+        detail={"error": "tesseract not available"},
+    )
+    audit.record(
+        conn, action="parse.failed", entity_type="document", entity_id=document_id,
+        detail={"error": "corrupt PDF"},
+    )
+    funnel = quality.extraction_funnel(conn)
+    assert funnel["ocr_failed"] == 1
+    assert funnel["parse_failed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8 Initiative 4 -- Historical Coverage Analysis
+# ---------------------------------------------------------------------------
+def test_historical_coverage_with_no_records_is_honestly_empty(conn, settings):
+    from goengine import registry
+
+    registry.add_source(
+        conn, name="Untouched Dept Source", department="Untouched Department",
+        url="https://www.tn.gov.in/go.php?dep_id=untouched", source_type="department_site",
+    )
+    rows = {r["department"]: r for r in quality.historical_coverage(conn)}
+    row = rows["Untouched Department"]
+    assert row["earliest_year"] is None
+    assert row["latest_year"] is None
+    assert row["years_covered"] == 0
+    assert row["missing_years"] == []
+    assert row["coverage_trend"] == []
+
+
+def test_historical_coverage_computes_range_and_gaps(conn, settings, records):
+    # sampledata's 3 GOs are all dated 2026 (see sampledata.py) -- a single
+    # year, no gap. The gap case is exercised directly below via a synthetic
+    # year edit.
+    rows = {r["department"]: r for r in quality.historical_coverage(conn)}
+    row = rows["All Departments"]
+    assert row["earliest_year"] == 2026
+    assert row["latest_year"] == 2026
+    assert row["years_covered"] == 1
+    assert row["missing_years"] == []
+    assert row["coverage_trend"] == [{"year": 2026, "count": 3}]
+
+
+def test_historical_coverage_reports_missing_years_in_the_gap(conn, settings, records):
+    years = [r["go_year"] for r in conn.execute("SELECT go_year FROM go_records ORDER BY id").fetchall()]
+    assert len(years) == 3
+    # Force a real gap: 2020, 2022, 2024 -- 2021 and 2023 are missing.
+    for record_id, year in zip(records, (2020, 2022, 2024)):
+        conn.execute("UPDATE go_records SET go_year = ? WHERE id = ?", (year, record_id))
+
+    rows = {r["department"]: r for r in quality.historical_coverage(conn)}
+    row = rows["All Departments"]
+    assert row["earliest_year"] == 2020
+    assert row["latest_year"] == 2024
+    assert row["years_covered"] == 3
+    assert row["missing_years"] == [2021, 2023]
+
+
 def test_repository_health_confidence_distribution_matches_per_record_labels(conn, settings, records):
     for record_id in records:
         review.approve(conn, record_id, reviewer="admin")
@@ -471,6 +714,54 @@ def test_repository_page_renders(conn, settings, fetcher, source_id):
     assert "Repository Analytics Center" in response.text
     assert "Department Readiness Certification" in response.text
     assert "Repository Health Dashboard" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8 -- Department Certification Center (HTTP)
+# ---------------------------------------------------------------------------
+def test_certification_page_renders(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+
+    client = TestClient(create_app(settings))
+    login_as(client, conn)
+    response = client.get("/ops/certification")
+    assert response.status_code == 200
+    assert "Department Certification Matrix" in response.text
+    assert "Searchable &amp; Production Ready" in response.text or "Searchable & Production Ready" in response.text
+    # Phase 3.9 additions on the same page.
+    assert "Readiness Exit Criteria" in response.text
+    assert "Extraction Funnel (Statewide)" in response.text
+    assert 'href="/ops/departments/All%20Departments"' in response.text
+
+
+def test_department_drilldown_page_renders(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+    client = TestClient(create_app(settings))
+    login_as(client, conn)
+    response = client.get("/ops/departments/All Departments")
+    assert response.status_code == 200
+    assert "All Departments" in response.text
+    assert "Extraction Funnel" in response.text
+    assert "Historical Coverage" in response.text
+
+
+def test_department_drilldown_unknown_department_404s(conn, settings, records):
+    client = TestClient(create_app(settings))
+    login_as(client, conn)
+    response = client.get("/ops/departments/Not A Real Department")
+    assert response.status_code == 404
+
+
+def test_jobs_page_preselects_department_from_query_param(conn, settings, records):
+    import re
+
+    client = TestClient(create_app(settings))
+    login_as(client, conn)
+    response = client.get("/ops/jobs", params={"department": "All Departments"})
+    assert response.status_code == 200
+    checkbox = re.search(r'value="All Departments"[^>]*>', response.text)
+    assert checkbox is not None
+    assert "checked" in checkbox.group()
     assert "All Departments" in response.text  # a real department appearing in the tables
 
 

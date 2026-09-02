@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ department }} · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center · Phase 3.9</div>
+    <h1 class="occ-page-title">{{ department }}</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      <a href="/ops/certification">← Back to Department Certification Center</a>
+    </p>
+  </div>
+</div>
+
+{% if certification %}
+<div class="grid cols-3" style="margin-bottom:12px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">
+      <span class="pill {{ 'ok' if certification.certification_level == 5 else ('warn' if certification.certification_level >= 3 else 'neutral') }}">
+        {{ certification.certification_level }} · {{ certification.certification_label }}
+      </span>
+    </div>
+    <div class="kpi-l">Certification Level</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">
+      <span class="pill {{ 'ok' if certification.yield_status == 'Green' else ('warn' if certification.yield_status == 'Amber' else 'bad') }}">
+        {{ certification.publication_yield_pct }}%
+      </span>
+    </div>
+    <div class="kpi-l">Publication Yield ({{ certification.yield_status }})</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-n">{{ certification.last_successful_run or '—' }}</div>
+    <div class="kpi-l">Latest Extraction</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3 style="margin-top:0;">Readiness</h3>
+  <table>
+    <tr><th>Source URL</th><td>{% if certification.source_url %}<a href="{{ certification.source_url }}" target="_blank" rel="noopener">{{ certification.source_url }}</a>{% else %}—{% endif %}</td></tr>
+    <tr><th>Adapter</th><td class="mono">{{ certification.adapter or '—' }}</td></tr>
+    <tr><th>Documents Found</th><td>{{ certification.documents_found }}</td></tr>
+    <tr><th>Documents Downloaded</th><td>{{ certification.documents_downloaded }}</td></tr>
+    <tr><th>Records Parsed</th><td>{{ certification.records_parsed }}</td></tr>
+    <tr><th>Records Approved</th><td>{{ certification.records_approved }}</td></tr>
+    <tr><th>Records Published</th><td>{{ certification.records_published }}</td></tr>
+    <tr><th>Success Rate</th><td>{{ certification.success_rate_pct }}%</td></tr>
+    <tr><th>Failure Rate</th><td>{{ certification.failure_rate_pct }}%</td></tr>
+    <tr><th>Avg Processing Time</th><td>{{ (certification.avg_processing_time_seconds ~ 's') if certification.avg_processing_time_seconds is not none else '—' }}</td></tr>
+  </table>
+</div>
+{% else %}
+<p class="muted">No extraction data yet for this department.</p>
+{% endif %}
+
+<h2 style="margin-bottom:8px;">Extraction Funnel</h2>
+<div class="panel">
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <span class="pill neutral">Downloaded: {{ funnel.documents_downloaded }}</span>
+    <span class="pill neutral">Parsed: {{ funnel.records_parsed }}</span>
+    <span class="pill warn">Pending Review: {{ funnel.pending_review }}</span>
+    <span class="pill ok">Approved: {{ funnel.approved }}</span>
+    <span class="pill ok">Published: {{ funnel.published }}</span>
+    <span class="pill bad">Rejected: {{ funnel.rejected }}</span>
+    <span class="pill bad">Duplicate: {{ funnel.duplicate }}</span>
+    <span class="pill bad">OCR Failed: {{ funnel.ocr_failed }}</span>
+    <span class="pill bad">Parse Failed: {{ funnel.parse_failed }}</span>
+  </div>
+</div>
+
+<h2 style="margin-bottom:8px;">Historical Coverage</h2>
+<div class="panel">
+  {% if historical and historical.years_covered > 0 %}
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+    <span class="pill neutral">Earliest: {{ historical.earliest_year }}</span>
+    <span class="pill neutral">Latest: {{ historical.latest_year }}</span>
+    <span class="pill neutral">Years Covered: {{ historical.years_covered }}</span>
+    {% if historical.missing_years %}
+    <span class="pill warn">Missing: {{ historical.missing_years|join(', ') }}</span>
+    {% endif %}
+  </div>
+  <div>
+    {% for t in historical.coverage_trend %}
+    <span class="pill neutral" style="margin:2px;">{{ t.year }}: {{ t.count }}</span>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted" style="margin:0;">No extracted records yet.</p>
+  {% endif %}
+</div>
+
+<h2 style="margin-bottom:8px;">Failures</h2>
+<div class="panel">
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Stage</th><th>Error</th><th>Timestamp</th></tr>
+    </thead>
+    <tbody>
+      {% for f in failures %}
+      <tr>
+        <td>{{ f.source_name }}</td>
+        <td><span class="pill warn">{{ f.stage }}</span></td>
+        <td style="max-width:360px;">{{ f.error_message }}</td>
+        <td class="mono" style="font-size:12px;">{{ f.timestamp or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">No pipeline failures recorded for this department.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

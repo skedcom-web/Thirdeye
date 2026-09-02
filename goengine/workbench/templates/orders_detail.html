@@ -32,6 +32,19 @@
       <span class="muted">{{ record.department }}</span>
     </div>
     {% if record.subject %}<p style="margin:10px 0 0; font-size:16px;">{{ record.subject }}</p>{% endif %}
+    {% if republish_status and republish_status.has_history %}
+    <p class="muted" style="margin:8px 0 0; font-size:13px;">
+      Updated on: {{ republish_status.last_republished_at[:10] }}
+      <details style="display:inline; margin-left:6px;">
+        <summary style="display:inline; cursor:pointer;">Revision History Available</summary>
+        <div style="margin-top:6px;">
+          {% for h in republish_history %}
+          <div>v{{ h.version }} &mdash; {{ h.republished_at[:10] }}</div>
+          {% endfor %}
+        </div>
+      </details>
+    </p>
+    {% endif %}
     <table style="margin-top:14px;">
       <tr><th style="width:150px;">Date</th><td>{{ record.go_date or 'Not stated' }}</td></tr>
       {% if record.district %}<tr><th>District</th><td>{{ record.district }}</td></tr>{% endif %}

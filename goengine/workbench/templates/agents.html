@@ -50,6 +50,40 @@
   </table>
 </div>
 
+<div class="panel" style="margin-top:16px;">
+  <h3>Agent Performance</h3>
+  <p class="muted" style="font-size:13px;">
+    Per-run start/completion time and duration are on <a href="/ops/jobs">Run Extraction</a>. This is
+    agent-key activity and sync reliability instead. "Idle exit" isn't shown as a status here: the local
+    daemon's auto-exit happens entirely on your own machine, so the server can only see time since its
+    last authenticated request -- reporting anything more specific would be a guess, not a fact.
+  </p>
+  <div class="grid cols-3" style="margin:12px 0;">
+    <div class="kpi-card occ-kpi">
+      <div class="kpi-n">{{ performance.queue_depth }}</div>
+      <div class="kpi-l">Queue Depth (Queued/Claimed/Running)</div>
+    </div>
+  </div>
+  <table style="margin-top:8px;">
+    <thead>
+      <tr><th>Label</th><th>Key prefix</th><th>Last activity</th><th>Successful syncs</th><th>Failed syncs</th></tr>
+    </thead>
+    <tbody>
+      {% for k in performance.per_key %}
+      <tr>
+        <td>{{ k.label }}</td>
+        <td class="mono">{{ k.key_prefix }}&hellip;</td>
+        <td class="mono" style="font-size:12px;">{{ k.last_activity or '—' }}</td>
+        <td>{{ k.successful_syncs }}</td>
+        <td>{{ k.failed_syncs }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">No agent keys yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
 {% if can_manage %}
 <div class="panel" style="margin-top:16px;">
   <h3>Generate key</h3>

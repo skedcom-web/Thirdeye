@@ -139,3 +139,50 @@ def list_keys(conn: sqlite3.Connection) -> list[AgentKey]:
 def get_key(conn: sqlite3.Connection, agent_key_id: int) -> AgentKey | None:
     row = conn.execute("SELECT * FROM agent_keys WHERE id = ?", (agent_key_id,)).fetchone()
     return _row_to_agent_key(row) if row is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.8 Initiative 7 -- Agent Performance Validation
+#
+# Per-run start/completion time and processing duration already live on
+# /ops/jobs (extraction_requests.started_at/finished_at) -- not repeated
+# here. This is what's genuinely new: agent-key-scoped activity and sync
+# reliability. "Idle exit" itself is never reported here as a boolean: the
+# local daemon's auto-exit (--idle-exit-after) is a decision made and acted
+# on entirely on the admin's own machine -- the server only ever sees "no
+# more claim requests," which is indistinguishable from the agent being
+# offline, still running, or having crashed. Reporting a fabricated
+# "idle-exited" status would violate the zero-hallucination principle this
+# whole dashboard is built on, so this reports the one thing the server can
+# actually observe: time since the key's last authenticated request.
+# ---------------------------------------------------------------------------
+def agent_performance(conn: sqlite3.Connection) -> dict:
+    queue_depth = conn.execute(
+        "SELECT COUNT(*) AS n FROM extraction_requests WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING')"
+    ).fetchone()["n"]
+
+    sync_counts = {
+        int(r["agent_key_id"]): {"successful_syncs": int(r["successful"]), "failed_syncs": int(r["failed"])}
+        for r in conn.execute(
+            """
+            SELECT agent_key_id,
+                   SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS successful,
+                   SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed
+              FROM agent_sync_log
+             GROUP BY agent_key_id
+            """
+        ).fetchall()
+    }
+
+    per_key = []
+    for key in list_keys(conn):
+        counts = sync_counts.get(key.id, {"successful_syncs": 0, "failed_syncs": 0})
+        per_key.append({
+            "label": key.label,
+            "key_prefix": key.key_prefix,
+            "active": key.active,
+            "last_activity": key.last_used_at,
+            **counts,
+        })
+
+    return {"queue_depth": queue_depth, "per_key": per_key}
