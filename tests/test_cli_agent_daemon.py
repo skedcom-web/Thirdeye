@@ -8,13 +8,22 @@ consecutive polls, instead of looping forever until Ctrl+C (see
 cmd_agent_daemon's own docstring for why "launch a process on the admin's
 separate machine" isn't achievable here -- this is the part that is).
 
-Also covers a real production performance bug found and fixed after a live
-run: _run_claimed_request used to re-run full page discovery on every
-single download/parse batch (pipeline.run_all() inside the batch loop),
-re-crawling the same listing pages dozens of times over for a large
-department and paying the 1.5s per-host politeness delay each time for
-pages that had already been fully seen. Discovery now runs exactly once per
-source, before the batch loop."""
+Also covers two real production performance bugs found and fixed after live
+runs:
+
+1. _run_claimed_request used to re-run full page discovery on every single
+   download/parse batch (pipeline.run_all() inside the batch loop),
+   re-crawling the same listing pages dozens of times over for a large
+   department and paying the 1.5s per-host politeness delay each time for
+   pages that had already been fully seen. Discovery now runs exactly once
+   per source, before the batch loop.
+
+2. Progress was only reported to the server once a whole _BATCH_SIZE=10-wide
+   parse batch finished -- parsing includes OCR, and a single heavily-scanned
+   multi-page GO can take several minutes by itself, so the dashboard could
+   sit at 0 parsed for 15+ minutes of real, ongoing work (confirmed live: a
+   24-page scanned document took ~6 minutes alone). Parsing is now done and
+   reported one document at a time (_PARSE_BATCH_SIZE=1)."""
 
 from __future__ import annotations
 
@@ -241,3 +250,43 @@ def test_discovery_stops_once_exhausted_instead_of_repeating_per_batch(conn, set
     # actually discovered, downloaded, and parsed via this one pass.
     assert conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"] == 3
     assert conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"] == 3
+
+
+class _CountingProgressHttpxClient:
+    """Same real-work acceptance as _FakeRealWorkHttpxClient, but records
+    every /progress POST's documents_parsed value so a test can see how
+    granular progress reporting actually was during the run."""
+
+    def __init__(self):
+        self.progress_calls: list[dict] = []
+
+    def post(self, url: str, headers=None, json=None, files=None, data=None):
+        if url.endswith("/sync/document"):
+            return _FakeSyncResponse()
+        if url.endswith("/progress"):
+            self.progress_calls.append(dict(json))
+        return _FakeResponse({"ok": True})
+
+
+def test_progress_reports_after_every_parsed_document_not_once_per_batch(conn, settings, fetcher, source_id):
+    """The actual production incident, reproduced directly: parsing used to
+    run as one _BATCH_SIZE=10-wide call, so the dashboard showed 0 parsed for
+    however long the WHOLE batch's OCR took -- a batch of heavily-scanned
+    documents could mean 15+ minutes of real progress with nothing visible.
+    With sampledata's 3 documents, the fix must post progress once per
+    parsed document (documents_parsed climbing 0->1->2->3), not jump straight
+    from 0 to 3 in a single post."""
+    client = _CountingProgressHttpxClient()
+    req = {
+        "id": 1, "kind": "extraction", "state_name": None, "district_name": None, "department_filter": None,
+    }
+    cli._run_claimed_request(conn, settings, fetcher, client, "https://example.invalid", {}, req)
+
+    parsed_progression = [c["documents_parsed"] for c in client.progress_calls if "documents_parsed" in c]
+    # Every distinct step from 0 up to 3 must appear as its OWN post --
+    # proof that a report went out after each individual parse, not once for
+    # the whole batch of 3.
+    assert 0 in parsed_progression
+    assert 1 in parsed_progression
+    assert 2 in parsed_progression
+    assert 3 in parsed_progression

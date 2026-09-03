@@ -422,6 +422,14 @@ def _mirror_sources_from_server(conn, http_client, server_url: str, auth_headers
 
 
 _BATCH_SIZE = 10  # small on purpose -- see _run_claimed_request docstring
+# Parsing (which includes OCR) is far slower per document than downloading --
+# a single heavily-scanned multi-page GO can take several minutes of OCR
+# alone. Reporting progress only after a full _BATCH_SIZE=10 parse batch
+# meant the dashboard could sit at 0 parsed for 15+ minutes of real, ongoing
+# OCR work (confirmed live: a 24-page scanned document took ~6 minutes by
+# itself). Parsing one document at a time and reporting after each keeps the
+# dashboard live during exactly the phase that most needs it.
+_PARSE_BATCH_SIZE = 1
 
 # Each discovery attempt stays small and bounded, exactly as it always was
 # -- see the perf note below for why the fix is "stop repeating it once
@@ -511,12 +519,8 @@ def _run_claimed_request(
             batch_started = time.monotonic()
             download_report = pipeline.run_downloads(conn, settings, fetcher, limit=_BATCH_SIZE, source_id=sid)
             download_elapsed = time.monotonic() - batch_started
-            parse_started = time.monotonic()
-            parse_report = pipeline.run_parsing(conn, settings, limit=_BATCH_SIZE, source_id=sid)
-            parse_elapsed = time.monotonic() - parse_started
             documents_downloaded += download_report.succeeded
-            documents_parsed += parse_report.succeeded
-            documents_failed += download_report.failed + parse_report.failed
+            documents_failed += download_report.failed
 
             sync_results = _sync_documents(
                 conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
@@ -526,14 +530,8 @@ def _run_claimed_request(
             synced_total += batch_synced
             sync_failed_total += batch_sync_failed
 
-            # Per-stage timing so a slow run is diagnosable from the printed
-            # log alone -- e.g. a high parse time here almost always means
-            # OCR (Tesseract) is doing real work on scanned documents, not a
-            # bug; a high download time points at the government host itself
-            # being slow, not this code.
             print(
-                f"  source {sid}, batch: {download_report.succeeded} downloaded ({download_elapsed:.1f}s), "
-                f"{parse_report.succeeded} parsed ({parse_elapsed:.1f}s), "
+                f"  source {sid}, downloaded {download_report.succeeded} ({download_elapsed:.1f}s), "
                 f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
                 f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
             )
@@ -546,9 +544,52 @@ def _run_claimed_request(
                 },
             )
 
+            # Parsed (and reported) one document at a time, not as a single
+            # _BATCH_SIZE-wide call -- see _PARSE_BATCH_SIZE's docstring.
+            # Keeps going until nothing is left to parse for this source
+            # right now (a fresh download batch next time around may add
+            # more), not just once.
+            parse_succeeded_this_round = parse_failed_this_round = 0
+            while True:
+                parse_started = time.monotonic()
+                parse_report = pipeline.run_parsing(conn, settings, limit=_PARSE_BATCH_SIZE, source_id=sid)
+                parse_elapsed = time.monotonic() - parse_started
+                if parse_report.processed == 0:
+                    break
+                documents_parsed += parse_report.succeeded
+                documents_failed += parse_report.failed
+                parse_succeeded_this_round += parse_report.succeeded
+                parse_failed_this_round += parse_report.failed
+
+                sync_results = _sync_documents(
+                    conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
+                )
+                batch_synced = len(sync_results)
+                batch_sync_failed = sum(1 for r in sync_results if r[1] == "failed")
+                synced_total += batch_synced
+                sync_failed_total += batch_sync_failed
+
+                # Per-document timing so a slow run is diagnosable from the
+                # printed log alone -- a high parse time here almost always
+                # means OCR (Tesseract) doing real work on a scanned
+                # document, not a bug.
+                print(
+                    f"  source {sid}: parsed 1 document ({parse_elapsed:.1f}s), "
+                    f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
+                    f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
+                )
+                http_client.post(
+                    f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+                    json={
+                        "sources_completed": sources_completed, "documents_found": documents_found,
+                        "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
+                        "documents_failed": documents_failed,
+                    },
+                )
+
             # Discovery is exhausted and nothing downloaded or parsed this
-            # batch -- this source's backlog is fully drained, move on.
-            if discovery_exhausted and download_report.succeeded == 0 and parse_report.succeeded == 0:
+            # round -- this source's backlog is fully drained, move on.
+            if discovery_exhausted and download_report.succeeded == 0 and parse_succeeded_this_round == 0:
                 break
 
         sources_completed += 1
