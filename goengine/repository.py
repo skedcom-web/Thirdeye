@@ -127,7 +127,13 @@ def is_available(settings: Settings, conn: sqlite3.Connection, document_id: int)
     """Cheap existence check for the GO Quality Scoring Engine's "PDF
     Availability" criterion -- same two-tier logic as read_bytes() (durable
     blob first, local disk fallback) but never reads the payload into
-    memory, since a department health-table pass may check many documents."""
+    memory, since a department health-table pass may check many documents.
+
+    Callers checking MANY documents in a loop should use is_available_bulk()
+    instead -- one call to this function is one DB round trip, and hundreds
+    of them in a per-record loop is fine against a local SQLite file but
+    turns into many real seconds against a remote connection (e.g. Turso in
+    production) once there are hundreds of records to check."""
     has_blob = conn.execute(
         "SELECT 1 FROM document_blobs WHERE document_id = ?", (document_id,)
     ).fetchone() is not None
@@ -135,6 +141,43 @@ def is_available(settings: Settings, conn: sqlite3.Connection, document_id: int)
         return True
     row = conn.execute("SELECT stored_path FROM documents WHERE id = ?", (document_id,)).fetchone()
     return row is not None and absolute_path(settings, row["stored_path"]).exists()
+
+
+def is_available_bulk(
+    settings: Settings, conn: sqlite3.Connection, document_ids: list[int]
+) -> dict[int, bool]:
+    """Batched is_available(): 1-2 queries total instead of 1-2 per document.
+    Same two-tier logic (durable blob first, local disk fallback) -- a
+    document with a durable blob never needs the second query at all, which
+    covers most production documents (Render's disk doesn't survive a
+    redeploy, so document_blobs is the primary store there)."""
+    unique_ids = list(dict.fromkeys(document_ids))
+    if not unique_ids:
+        return {}
+
+    placeholders = ",".join("?" * len(unique_ids))
+    with_blob = {
+        int(r["document_id"])
+        for r in conn.execute(
+            f"SELECT document_id FROM document_blobs WHERE document_id IN ({placeholders})", unique_ids
+        ).fetchall()
+    }
+    result: dict[int, bool] = {doc_id: True for doc_id in with_blob}
+
+    remaining = [doc_id for doc_id in unique_ids if doc_id not in with_blob]
+    if remaining:
+        placeholders = ",".join("?" * len(remaining))
+        stored_paths = {
+            int(r["id"]): r["stored_path"]
+            for r in conn.execute(
+                f"SELECT id, stored_path FROM documents WHERE id IN ({placeholders})", remaining
+            ).fetchall()
+        }
+        for doc_id in remaining:
+            stored_path = stored_paths.get(doc_id)
+            result[doc_id] = stored_path is not None and absolute_path(settings, stored_path).exists()
+
+    return result
 
 
 def ensure_file_on_disk(settings: Settings, conn: sqlite3.Connection, document_id: int) -> Path:

@@ -310,6 +310,23 @@ def test_search_by_department_code_and_go_number(conn, settings):
     assert total_wrong == 0
 
 
+def test_search_count_matches_searchs_own_total_without_building_records(conn, settings):
+    """search_count() must always agree with search()'s own total -- and,
+    unlike search(), do it without ever loading a record's fields (the fix
+    for department_readiness()'s "searchable" check, which used to call
+    search() just to check total > 0, paying for up to 20 full
+    PublicRecords -- each its own go_fields query -- it never used)."""
+    from goengine import public
+
+    _approved_record_under(conn, department="Health and Family Welfare", go_number="G.O.(Ms) No.41", go_date="2022-06-01")
+
+    _, expected_total = public.search(conn, q="Health and Family Welfare")
+    assert public.search_count(conn, q="Health and Family Welfare") == expected_total
+    assert expected_total == 1
+
+    assert public.search_count(conn, q="No Such Department") == 0
+
+
 def test_search_by_department_code_go_number_and_year(conn, settings):
     from goengine import public
 

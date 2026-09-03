@@ -118,7 +118,7 @@ def _bulk_quality_rows(
     params: list = [department] if department else []
     base = conn.execute(
         f"""
-        SELECT r.id AS record_id, r.document_id, s.department AS department,
+        SELECT r.id AS record_id, r.document_id, r.status AS status, s.department AS department,
                e.confidence AS extraction_confidence
           FROM go_records r
           JOIN sources s ON s.id = r.source_id
@@ -132,15 +132,21 @@ def _bulk_quality_rows(
     for row in conn.execute("SELECT record_id, field_name FROM go_fields WHERE superseded_by IS NULL").fetchall():
         fields_by_record.setdefault(int(row["record_id"]), set()).add(row["field_name"])
 
+    # Batched (not one is_available() call per record): at real production
+    # scale (hundreds+ of records) that was 1 DB round trip per record --
+    # fine locally, but many real seconds against a remote connection.
+    pdf_availability = repository.is_available_bulk(settings, conn, [int(r["document_id"]) for r in base])
+
     results = []
     for row in base:
         record_id = int(row["record_id"])
         present = fields_by_record.get(record_id, set())
-        pdf_ok = repository.is_available(settings, conn, int(row["document_id"]))
+        pdf_ok = pdf_availability.get(int(row["document_id"]), False)
         score, breakdown = _score_from_parts(present, float(row["extraction_confidence"] or 0.0), pdf_ok)
         results.append({
             "record_id": record_id,
             "department": row["department"],
+            "status": row["status"],
             "score": score,
             "category": quality_category(score),
         })
@@ -159,35 +165,39 @@ def department_health(conn: sqlite3.Connection, settings: Settings) -> list[dict
     for row in _bulk_quality_rows(conn, settings):
         scores_by_department.setdefault(row["department"], []).append(row["score"])
 
+    # One pass over every go_record, not two queries per department (~40
+    # departments used to mean 80 sequential round trips here alone).
+    # Ascending id order means each department's entry naturally ends up
+    # holding its highest-id (newest) row once the loop finishes.
+    stats_by_department: dict[str, dict] = {}
+    for row in conn.execute(
+        """
+        SELECT s.department AS department, r.go_identifier AS go_identifier,
+               r.go_number_raw AS go_number_raw, r.created_at AS created_at
+          FROM go_records r JOIN sources s ON s.id = r.source_id
+         ORDER BY r.id
+        """
+    ).fetchall():
+        entry = stats_by_department.setdefault(
+            row["department"], {"total": 0, "last_extraction": None, "latest_go": None}
+        )
+        entry["total"] += 1
+        if entry["last_extraction"] is None or row["created_at"] > entry["last_extraction"]:
+            entry["last_extraction"] = row["created_at"]
+        entry["latest_go"] = row["go_identifier"] or row["go_number_raw"]
+
     result = []
     for department in registry.list_departments(conn):
-        stats = conn.execute(
-            """
-            SELECT COUNT(*) AS total, MAX(r.created_at) AS last_extraction
-              FROM go_records r JOIN sources s ON s.id = r.source_id
-             WHERE s.department = ?
-            """,
-            (department,),
-        ).fetchone()
-        latest = conn.execute(
-            """
-            SELECT r.go_identifier, r.go_number_raw FROM go_records r
-              JOIN sources s ON s.id = r.source_id
-             WHERE s.department = ?
-             ORDER BY r.id DESC LIMIT 1
-            """,
-            (department,),
-        ).fetchone()
-
+        stats = stats_by_department.get(department, {"total": 0, "last_extraction": None, "latest_go": None})
         dept_scores = scores_by_department.get(department, [])
-        total = int(stats["total"])
+        total = stats["total"]
         avg_score = round(sum(dept_scores) / len(dept_scores), 1) if dept_scores else None
         status = CATEGORY_NO_DATA if total == 0 else quality_category(avg_score)
 
         result.append({
             "department": department,
             "total_gos": total,
-            "latest_go": (latest["go_identifier"] or latest["go_number_raw"]) if latest else None,
+            "latest_go": stats["latest_go"],
             "last_extraction_date": stats["last_extraction"],
             "quality_score": avg_score,
             "status": status,
@@ -263,37 +273,46 @@ def department_readiness(conn: sqlite3.Connection, settings: Settings) -> list[d
 
     health_by_department = {h["department"]: h for h in department_health(conn, settings)}
 
+    # Precomputed once, globally, rather than per-record inside the
+    # department loop below (~40 departments * however many records each --
+    # at demo scale a per-record DB round trip is invisible, but at real
+    # production scale, hundreds of sequential round trips is many real
+    # seconds, especially against a remote connection).
+    all_records = conn.execute(
+        """
+        SELECT r.id AS record_id, r.document_id, r.go_url_slug, s.department AS department
+          FROM go_records r JOIN sources s ON s.id = r.source_id
+        """
+    ).fetchall()
+    records_by_department: dict[str, list[sqlite3.Row]] = {}
+    for r in all_records:
+        records_by_department.setdefault(r["department"], []).append(r)
+    pdf_availability = repository.is_available_bulk(
+        settings, conn, [int(r["document_id"]) for r in all_records]
+    )
+    fields_by_record: dict[int, set[str]] = {}
+    for row in conn.execute("SELECT record_id, field_name FROM go_fields WHERE superseded_by IS NULL").fetchall():
+        fields_by_record.setdefault(int(row["record_id"]), set()).add(row["field_name"])
+
     result = []
     for department in registry.list_departments(conn):
         total_gos = health_by_department.get(department, {}).get("total_gos", 0)
+        records = records_by_department.get(department, [])
 
-        records = conn.execute(
-            """
-            SELECT r.id AS record_id, r.document_id, r.go_url_slug FROM go_records r
-              JOIN sources s ON s.id = r.source_id
-             WHERE s.department = ?
-            """,
-            (department,),
-        ).fetchall()
-
-        pdf_available = any(repository.is_available(settings, conn, int(r["document_id"])) for r in records)
+        pdf_available = any(pdf_availability.get(int(r["document_id"]), False) for r in records)
         permanent_url_available = any(r["go_url_slug"] for r in records)
 
-        metadata_complete = False
-        for r in records:
-            present = {
-                f["field_name"] for f in conn.execute(
-                    "SELECT field_name FROM go_fields WHERE record_id = ? AND superseded_by IS NULL",
-                    (r["record_id"],),
-                ).fetchall()
-            }
-            if all(field in present for field in CORE_FIELDS):
-                metadata_complete = True
-                break
+        metadata_complete = any(
+            all(field in fields_by_record.get(int(r["record_id"]), set()) for field in CORE_FIELDS)
+            for r in records
+        )
 
         # A real functional check, not a data-shape guess: does searching
         # for this department by name actually surface its own GOs.
-        searchable = total_gos > 0 and public.search(conn, q=department)[1] > 0
+        # search_count() (not search() itself) -- this only needs to know
+        # whether anything matches, not up to 20 fully-built PublicRecords
+        # (each its own go_fields query) per department.
+        searchable = total_gos > 0 and public.search_count(conn, q=department) > 0
 
         checklist = {
             "latest_go_extracted": total_gos > 0,
@@ -500,13 +519,14 @@ def missing_metadata_queue(
     fields_by_record: dict[int, set[str]] = {}
     for row in conn.execute("SELECT record_id, field_name FROM go_fields WHERE superseded_by IS NULL").fetchall():
         fields_by_record.setdefault(int(row["record_id"]), set()).add(row["field_name"])
+    pdf_availability = repository.is_available_bulk(settings, conn, [int(r["document_id"]) for r in candidates])
 
     result = []
     for row in candidates:
         record_id = int(row["record_id"])
         present = fields_by_record.get(record_id, set())
         missing_fields = [f for f in CORE_FIELDS if f not in present]
-        pdf_missing = not repository.is_available(settings, conn, int(row["document_id"]))
+        pdf_missing = not pdf_availability.get(int(row["document_id"]), False)
         if not missing_fields and not pdf_missing:
             continue
         result.append({
@@ -545,7 +565,8 @@ def repository_health(conn: sqlite3.Connection, settings: Settings) -> dict:
     metadata_completeness_pct = extraction_success_rate(conn)["rate"]
 
     document_ids = [int(r["document_id"]) for r in conn.execute("SELECT DISTINCT document_id FROM go_records").fetchall()]
-    pdf_available_count = sum(1 for doc_id in document_ids if repository.is_available(settings, conn, doc_id))
+    pdf_availability = repository.is_available_bulk(settings, conn, document_ids)
+    pdf_available_count = sum(1 for available in pdf_availability.values() if available)
     pdf_availability_pct = _pct(pdf_available_count, len(document_ids))
 
     readiness = department_readiness(conn, settings)
@@ -557,12 +578,15 @@ def repository_health(conn: sqlite3.Connection, settings: Settings) -> dict:
     for d in readiness:
         readiness_counts[d["status"]] += 1
 
+    # Reuses _bulk_quality_rows()'s already-batched scores (same score
+    # go_quality_score()/publication_confidence() would compute per record)
+    # instead of a second per-record pass -- this used to call
+    # publication_confidence() once per approved record, each one its own
+    # go_quality_score() with its own is_available() DB round trip.
     confidence_counts = {CONFIDENCE_HIGH: 0, CONFIDENCE_MEDIUM: 0, CONFIDENCE_REVIEW_RECOMMENDED: 0}
-    approved_ids = [
-        int(r["id"]) for r in conn.execute("SELECT id FROM go_records WHERE status = 'approved'").fetchall()
-    ]
-    for record_id in approved_ids:
-        confidence_counts[publication_confidence(conn, settings, record_id)] += 1
+    for row in _bulk_quality_rows(conn, settings):
+        if row["status"] == "approved":
+            confidence_counts[publication_confidence_label(row["score"])] += 1
 
     return {
         "metadata_completeness_pct": metadata_completeness_pct,

@@ -174,6 +174,23 @@ def _filters(
     return joins, " AND ".join(where), params
 
 
+def search_count(
+    conn: sqlite3.Connection, *, department_bucket: str | None = None, district: str | None = None,
+    q: str | None = None,
+) -> int:
+    """search()'s total-match count alone, with none of the per-row
+    PublicRecord/field-loading work -- for callers (department_readiness()'s
+    "searchable" check) that only need to know whether anything matches, not
+    the matches themselves. search() itself already computes this count
+    cheaply before it ever builds a record; this reuses the exact same
+    _filters() so the two can never drift apart."""
+    joins, where_sql, params = _filters(department_bucket=department_bucket, district=district, q=q)
+    return conn.execute(
+        f"SELECT COUNT(*) AS n FROM go_records r JOIN documents d ON d.id = r.document_id{joins} WHERE {where_sql}",
+        params,
+    ).fetchone()["n"]
+
+
 def search(
     conn: sqlite3.Connection,
     *,

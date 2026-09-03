@@ -438,6 +438,94 @@ def test_repository_health_with_no_records(conn, settings):
     assert sum(health["publication_confidence_distribution"].values()) == 0
 
 
+def _clone_records_for_query_count_test(conn, records, *, copies: int) -> None:
+    """Multiplies the fixture's real go_records by reusing their existing
+    extraction_id/document_id/source_id (varying only extractor_version to
+    satisfy the UNIQUE constraint) -- enough rows for a per-record query
+    loop to visibly blow up the query count, without needing to fabricate
+    whole new documents/extractions per copy."""
+    base_rows = conn.execute(
+        "SELECT extraction_id, document_id, source_id, status, created_at FROM go_records WHERE id IN ({})".format(
+            ",".join("?" * len(records))
+        ),
+        records,
+    ).fetchall()
+    for i in range(copies):
+        for row in base_rows:
+            conn.execute(
+                """
+                INSERT INTO go_records (extraction_id, document_id, source_id, extractor_version, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (row["extraction_id"], row["document_id"], row["source_id"], f"v1-clone{i}", row["status"], row["created_at"]),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Regression guard for a real production incident: department_health(),
+# department_readiness(), and repository_health() each used to call
+# repository.is_available() (and, for repository_health, go_quality_score())
+# once per go_record with no batching -- invisible at demo scale (a handful
+# of records) but many seconds of sequential DB round trips at real
+# production scale (hundreds of records), which read to the user as
+# /ops/quality and /ops/certification "circling" forever.
+# ---------------------------------------------------------------------------
+def _query_count(conn, fn) -> int:
+    queries = []
+    conn.set_trace_callback(lambda sql: queries.append(sql))
+    try:
+        fn()
+    finally:
+        conn.set_trace_callback(None)
+    return len(queries)
+
+
+def test_department_health_query_count_does_not_scale_with_record_count(conn, settings, records):
+    _clone_records_for_query_count_test(conn, records, copies=10)  # 3 -> 33 go_records
+    total_records = conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"]
+    assert total_records >= 30
+
+    count = _query_count(conn, lambda: quality.department_health(conn, settings))
+    assert count < 30, f"department_health() ran {count} queries for {total_records} records -- looks like a per-record loop"
+
+
+def test_department_readiness_query_count_does_not_scale_with_record_count(conn, settings, records):
+    _clone_records_for_query_count_test(conn, records, copies=10)
+    total_records = conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"]
+    assert total_records >= 30
+
+    count = _query_count(conn, lambda: quality.department_readiness(conn, settings))
+    assert count < 30, f"department_readiness() ran {count} queries for {total_records} records -- looks like a per-record loop"
+
+
+def test_department_health_query_count_does_not_scale_with_department_count(conn, settings, records):
+    """Separate scaling dimension from record count: department_health()
+    used to run 2 queries PER DEPARTMENT (~40 real departments meant 80
+    sequential round trips) to find each department's latest GO / totals."""
+    from goengine import registry
+
+    for i in range(30):
+        registry.add_source(
+            conn, name=f"Synthetic Dept Source {i}", department=f"Synthetic Department {i}",
+            url=f"https://www.tn.gov.in/go.php?dep_id=synthetic{i}", source_type="department_site",
+        )
+    total_departments = len(registry.list_departments(conn))
+    assert total_departments >= 30
+
+    count = _query_count(conn, lambda: quality.department_health(conn, settings))
+    assert count < 30, f"department_health() ran {count} queries for {total_departments} departments -- looks like a per-department loop"
+
+
+def test_repository_health_query_count_does_not_scale_with_record_count(conn, settings, records):
+    review.approve(conn, records[0], reviewer="admin")
+    _clone_records_for_query_count_test(conn, records, copies=10)
+    total_records = conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"]
+    assert total_records >= 30
+
+    count = _query_count(conn, lambda: quality.repository_health(conn, settings))
+    assert count < 30, f"repository_health() ran {count} queries for {total_records} records -- looks like a per-record loop"
+
+
 def test_repository_health_reflects_real_data(conn, settings, records):
     review.approve(conn, records[0], reviewer="admin")
 
