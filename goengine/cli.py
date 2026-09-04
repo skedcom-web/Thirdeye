@@ -544,10 +544,21 @@ def _run_claimed_request(
     continuously for 16.8 hours without exhausting -- during which the
     daemon's single-threaded poll loop (see cmd_agent_daemon) could not even
     glance at any other queued request, no matter how small. Once the budget
-    is hit, this returns early with honest partial progress already reported
-    and synced; the daemon goes back to polling, and a follow-up request for
-    the same scope resumes exactly where this one left off (discovery/
-    download/parse only ever act on not-yet-seen rows)."""
+    is hit, this yields (extraction_queue.yield_request(), via the /progress
+    endpoint's yield_and_requeue flag) instead of completing: the request
+    goes back to QUEUED with its real progress preserved, never COMPLETED
+    while sources remain -- an earlier version of this fix reported such a
+    request as "completed" after finishing only a fraction of its scope (a
+    real incident: 1 of 9 departments done, dashboard said COMPLETED). The
+    daemon's next poll can then serve whichever request is oldest -- this
+    one included, once its turn comes back around -- so a large multi-
+    department request still finishes entirely on its own, in fair
+    alternating slices with any other queued work, without the admin having
+    to notice a partial stop and manually resubmit. documents_downloaded/
+    documents_parsed/documents_found are seeded from the database itself at
+    the top of this function (not 0) precisely because a resumed slice is a
+    brand new call with fresh local variables -- ground truth is what keeps
+    the dashboard's counts from visibly regressing on each resume."""
     request_id = req["id"]
     source_ids = extraction_queue.resolve_local_source_ids(
         conn, state_name=req.get("state_name"), district_name=req.get("district_name"),
@@ -556,14 +567,35 @@ def _run_claimed_request(
     if not source_ids:
         raise RuntimeError("no local sources match this request's scope (state/district/department)")
 
-    sources_completed = documents_found = documents_downloaded = documents_parsed = documents_failed = 0
+    # Ground truth, not 0 -- this function is called fresh (all-new local
+    # variables) on every claim, including a RESUME after a previous slice
+    # yielded on the time budget. Starting these at 0 every time would make
+    # the dashboard's downloaded/parsed counts visibly regress backward the
+    # instant a resumed slice posts its first progress report, even though
+    # nothing was actually lost. Scoped to this request's own source_ids so
+    # a request never reports another request's documents as its own.
+    placeholders = ",".join("?" * len(source_ids))
+    documents_downloaded = conn.execute(
+        f"SELECT COUNT(*) AS n FROM documents WHERE source_id IN ({placeholders})", source_ids
+    ).fetchone()["n"]
+    documents_parsed = conn.execute(
+        f"SELECT COUNT(*) AS n FROM go_records WHERE source_id IN ({placeholders})", source_ids
+    ).fetchone()["n"]
+    documents_found = conn.execute(
+        f"SELECT COUNT(*) AS n FROM discovered_documents WHERE source_id IN ({placeholders})", source_ids
+    ).fetchone()["n"]
+    sources_completed = documents_failed = 0
     synced_total = sync_failed_total = 0
     source_errors: list[tuple[int, str]] = []
     request_started = time.monotonic()
     budget_exceeded = False
     _report_progress(
         http_client, server_url, request_id, auth_headers,
-        json={"sources_total": len(source_ids), "sources_completed": 0},
+        json={
+            "sources_total": len(source_ids), "sources_completed": 0,
+            "documents_found": documents_found, "documents_downloaded": documents_downloaded,
+            "documents_parsed": documents_parsed,
+        },
     )
     for sid in source_ids:
         if time.monotonic() - request_started > _REQUEST_TIME_BUDGET_SECONDS:
@@ -713,29 +745,39 @@ def _run_claimed_request(
         f"{documents_downloaded} downloaded, {documents_parsed} parsed, "
         f"{synced_total - sync_failed_total}/{synced_total} synced"
         + (f", {len(source_errors)} source(s) failed" if source_errors else "")
-        + (f", {sources_remaining} source(s) left for a follow-up request" if budget_exceeded else "")
+        + (f", {sources_remaining} source(s) left for the next slice" if budget_exceeded else "")
     )
+
+    if budget_exceeded:
+        # Not done -- yielded (see yield_request()'s docstring for why this
+        # must never be reported as COMPLETED). The daemon's own poll loop
+        # picks this same request back up fairly, alongside anything else
+        # queued, and cli.py's own docstring above explains why: a real
+        # incident where a 9-department request showed "COMPLETED" after
+        # only 1 department actually finished.
+        print(f"  yielding back to the queue -- {sources_remaining} source(s) still to go")
+        _post_with_retry(
+            http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+            json={
+                "yield_and_requeue": True,
+                "sources_completed": sources_completed, "documents_found": documents_found,
+                "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
+                "documents_failed": documents_failed,
+            },
+        )
+        return
 
     # Honest partial-success reporting: real progress elsewhere in the
     # request must not be reported as a total failure just because one
-    # source hit a problem, or because the time budget ran out with real
-    # departments still queued behind it. Only a request where NOTHING at
-    # all worked is reported as failed; anything else is "completed" with
-    # the specifics (failures, and/or how many sources are left for a
-    # follow-up request) visible in the error field -- surfaced today via
-    # the same "LAST ERROR" the admin dashboard already shows.
+    # source hit a problem. Only a request where NOTHING at all worked is
+    # reported as failed; a mix of successes and failures is "completed"
+    # with the specific failures visible in the error field -- surfaced
+    # today via the same "LAST ERROR" the admin dashboard already shows.
     made_real_progress = sources_completed > 0 or documents_downloaded > 0 or documents_parsed > 0
     ok = made_real_progress or not source_errors
-    notes = []
-    if source_errors:
-        notes.append("; ".join(f"source {sid}: {msg}" for sid, msg in source_errors))
-    if budget_exceeded:
-        notes.append(
-            f"time budget ({_REQUEST_TIME_BUDGET_SECONDS // 60} min) reached with {sources_remaining} of "
-            f"{len(source_ids)} source(s) not yet fully processed -- submit another request for the same "
-            "scope to continue; already-downloaded/parsed documents are not repeated"
-        )
-    error_summary = " | ".join(notes) if notes else None
+    error_summary = (
+        "; ".join(f"source {sid}: {msg}" for sid, msg in source_errors) if source_errors else None
+    )
     _post_with_retry(
         http_client, f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
         json={"ok": ok, **({"error": error_summary} if error_summary else {})},

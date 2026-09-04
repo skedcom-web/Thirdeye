@@ -335,17 +335,22 @@ def test_progress_reports_after_every_parsed_document_not_once_per_batch(conn, s
 # ---------------------------------------------------------------------------
 class _CompletionCapturingHttpxClient:
     """Real-work acceptance (like _FakeRealWorkHttpxClient) that also
-    records every /complete POST's body, so a test can inspect exactly what
-    was reported to the server at the end of a run."""
+    records every /complete and /progress POST's body, so a test can
+    inspect exactly what was reported to the server -- including a
+    yield_and_requeue progress call, which is how a request that hit its
+    time budget reports itself instead of via /complete."""
 
     def __init__(self):
         self.complete_calls: list[dict] = []
+        self.progress_calls: list[dict] = []
 
     def post(self, url: str, headers=None, json=None, files=None, data=None):
         if url.endswith("/sync/document"):
             return _FakeSyncResponse()
         if url.endswith("/complete"):
             self.complete_calls.append(dict(json))
+        elif url.endswith("/progress"):
+            self.progress_calls.append(dict(json) if json else {})
         return _FakeResponse({"ok": True})
 
 
@@ -454,8 +459,12 @@ def test_time_budget_yields_with_sources_left_for_a_followup_request(conn, setti
     other queued requests -- no matter how small their own scope was. Two
     sources in scope here; the fake clock jumps past the budget the instant
     the first source's backlog is fully drained, so the second is never
-    started. The request must still be reported as completed (real progress
-    happened), with an honest note that a source is left for a follow-up."""
+    started. This must NOT be reported via /complete (a second real
+    incident: a 9-department request showed "COMPLETED" after only 1 was
+    actually done) -- it goes back to the queue via a yield_and_requeue
+    progress report instead, with its real progress intact, so the daemon's
+    own poll loop naturally resumes it later alongside any other queued
+    work."""
     import time as time_module
 
     from goengine import registry
@@ -495,16 +504,18 @@ def test_time_budget_yields_with_sources_left_for_a_followup_request(conn, setti
         "SELECT COUNT(*) AS n FROM documents WHERE source_id = ?", (second_source_id,)
     ).fetchone()["n"] == 0
 
-    assert len(client.complete_calls) == 1
-    completion = client.complete_calls[0]
-    assert completion["ok"] is True  # real progress happened -- yielding is not a failure
-    assert "time budget" in completion["error"]
-    # The budget fires the instant the first source's backlog is drained,
-    # one round before the natural-exhaustion check would have confirmed
-    # and counted it -- an honest undercount (it says "2 of 2 remaining"
-    # rather than "1 of 2"), never an overcount or lost data: the real
-    # documents landed regardless (asserted above).
-    assert "2 of 2 source(s)" in completion["error"]
+    # No /complete call at all -- the request is not done, so nothing is
+    # reported as either a success or a failure.
+    assert client.complete_calls == []
+
+    yield_calls = [c for c in client.progress_calls if c.get("yield_and_requeue")]
+    assert len(yield_calls) == 1
+    yielded = yield_calls[0]
+    # documents_downloaded/parsed reflect the first source's real, landed
+    # work -- not reset to 0 -- so a resumed slice's dashboard numbers don't
+    # regress.
+    assert yielded["documents_downloaded"] == 3
+    assert yielded["documents_parsed"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -644,3 +655,76 @@ def test_cmd_agent_daemon_treats_cancellation_as_a_clean_stop_not_a_crash(monkey
     assert exit_code == 0
     assert fake_client.claim_calls == 1 + args.idle_exit_after
     assert fake_client.complete_calls == []  # no pointless /complete for an already-terminal request
+
+
+def test_yielded_request_resumes_and_eventually_completes_with_accurate_counts(
+    conn, settings, fetcher, source_id, monkeypatch,
+):
+    """The end-to-end "perfect completion" story: a request that yields
+    partway through must NOT require the admin to manually resubmit
+    anything -- the SAME request, re-claimed on a later poll (simulated
+    here as a second direct call, exactly like the daemon's own next loop
+    iteration would do), picks up exactly where it left off and eventually
+    reaches genuine COMPLETED with the true, non-regressed final counts --
+    not the misleading "COMPLETED after 1 of 9" from the real incident this
+    whole mechanism exists to prevent."""
+    import time as time_module
+
+    real_monotonic = time_module.monotonic
+    clock = {"offset": 0.0}
+    monkeypatch.setattr(time_module, "monotonic", lambda: real_monotonic() + clock["offset"])
+    monkeypatch.setattr(cli, "_REQUEST_TIME_BUDGET_SECONDS", 1000)
+
+    # Same proven hook as test_time_budget_yields_with_sources_left_for_a_
+    # followup_request: jump the clock once this round's parsing has
+    # nothing left to do (report.processed == 0) -- with a single source
+    # and only 3 sample documents, that lands right after all 3 are
+    # genuinely downloaded and parsed, but BEFORE the 2 additional discovery
+    # confirmation passes that would otherwise mark the source (and
+    # therefore the whole request) naturally exhausted.
+    original_run_parsing = pipeline.run_parsing
+
+    def parsing_that_exhausts_the_clock(*args, **kwargs):
+        report = original_run_parsing(*args, **kwargs)
+        if kwargs.get("source_id") == source_id and report.processed == 0:
+            clock["offset"] = 100_000
+        return report
+
+    monkeypatch.setattr(pipeline, "run_parsing", parsing_that_exhausts_the_clock)
+
+    req = {
+        "id": 1, "kind": "extraction", "state_name": None, "district_name": None, "department_filter": None,
+    }
+    first_slice_client = _CompletionCapturingHttpxClient()
+    cli._run_claimed_request(conn, settings, fetcher, first_slice_client, "https://example.invalid", {}, req)
+
+    # First slice: yielded, not completed -- but all 3 documents' real work
+    # already landed and was reported, even though the source isn't yet
+    # confirmed "complete" (sources_completed stays 0 until 2 more empty
+    # discovery passes confirm exhaustion -- see the sibling test above).
+    assert first_slice_client.complete_calls == []
+    yield_call = [c for c in first_slice_client.progress_calls if c.get("yield_and_requeue")][0]
+    assert yield_call["documents_parsed"] == 3
+    assert conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"] == 3
+
+    # Simulate the daemon's next poll: budget restored to normal, clock back
+    # to real time, the clock-jumping hook removed (it would otherwise
+    # re-trigger on this slice's own first exhausted parse call), request
+    # re-claimed and processed again from scratch (fresh local variables) --
+    # exactly what happens on a real resume.
+    monkeypatch.setattr(cli, "_REQUEST_TIME_BUDGET_SECONDS", 30 * 60)
+    monkeypatch.setattr(pipeline, "run_parsing", original_run_parsing)
+    clock["offset"] = 0.0
+    second_slice_client = _CompletionCapturingHttpxClient()
+    cli._run_claimed_request(conn, settings, fetcher, second_slice_client, "https://example.invalid", {}, req)
+
+    # Now genuinely done: a real /complete call, with the TRUE cumulative
+    # total (all 3), not just what happened in this second slice alone, and
+    # not regressed back below what the first slice had already achieved.
+    assert len(second_slice_client.complete_calls) == 1
+    assert second_slice_client.complete_calls[0]["ok"] is True
+    assert conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"] == 3
+
+    final_progress = second_slice_client.progress_calls[-1]
+    assert final_progress["documents_parsed"] == 3
+    assert final_progress["documents_downloaded"] == 3

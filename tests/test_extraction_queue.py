@@ -113,6 +113,73 @@ def test_complete_request_after_cancel_does_not_overwrite_the_cancellation(conn,
 
     eq.complete_request(conn, rid, ok=True)
 
+
+def test_yield_request_sends_a_running_request_back_to_queued(conn, agent_key):
+    """The actual fix for a real incident: a 9-department request showed
+    "COMPLETED" after only 1 department genuinely finished, because hitting
+    a time budget was reported the same way as real completion. yield_request()
+    is the distinct path for "made real progress, more work remains" --
+    QUEUED (claimable again), not a terminal status, with the real progress
+    preserved."""
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.report_progress(conn, rid, sources_total=9, sources_completed=0, documents_downloaded=30, documents_parsed=39)
+
+    status = eq.yield_request(conn, rid, sources_completed=0, documents_downloaded=30, documents_parsed=39)
+    assert status == eq.STATUS_QUEUED
+
+    row = eq.get_request(conn, rid)
+    assert row["status"] == eq.STATUS_QUEUED
+    assert row["claimed_by_agent_key_id"] is None
+    assert row["claimed_at"] is None
+    # Real progress made so far is preserved, not reset -- the whole point
+    # is that this is NOT a fresh, untouched request.
+    assert row["documents_downloaded"] == 30
+    assert row["documents_parsed"] == 39
+
+
+def test_yielded_request_can_be_reclaimed_and_continues_accumulating(conn, agent_key):
+    """Proves the actual "perfect completion" mechanism at the queue level:
+    a yielded request is claimable again (by the same or another agent) and
+    keeps accumulating from where it left off, eventually reaching
+    COMPLETED for real once genuinely done."""
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.report_progress(conn, rid, sources_total=2, documents_downloaded=3, documents_parsed=3)
+    eq.yield_request(conn, rid, sources_completed=0, documents_downloaded=3, documents_parsed=3)
+
+    reclaimed = eq.claim_next(conn, agent_key_id=key_id)
+    assert reclaimed is not None
+    assert reclaimed["id"] == rid
+    assert reclaimed["documents_downloaded"] == 3  # preserved across the reclaim
+
+    eq.report_progress(conn, rid, sources_completed=2, documents_downloaded=6, documents_parsed=6)
+    eq.complete_request(conn, rid, ok=True)
+
+    row = eq.get_request(conn, rid)
+    assert row["status"] == eq.STATUS_COMPLETED
+    assert row["documents_downloaded"] == 6
+
+
+def test_yield_request_after_cancel_is_a_no_op(conn, agent_key):
+    """Same terminal-state guard as report_progress()/complete_request() --
+    a cancellation must win over a stray yield from an agent that hasn't
+    noticed yet."""
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.cancel_request(conn, rid, actor="admin")
+
+    status = eq.yield_request(conn, rid, documents_downloaded=99)
+    assert status == eq.STATUS_FAILED
+
+    row = eq.get_request(conn, rid)
+    assert row["status"] == eq.STATUS_FAILED
+    assert row["error"] == "Cancelled by admin"
+    assert row["documents_downloaded"] == 0  # the post-cancel yield was never applied
+
     row = eq.get_request(conn, rid)
     assert row["status"] == eq.STATUS_FAILED
     assert row["error"] == "Cancelled by admin"

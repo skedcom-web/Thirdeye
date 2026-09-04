@@ -197,6 +197,43 @@ def report_progress(
     return new_status
 
 
+def yield_request(
+    conn: sqlite3.Connection, request_id: int, *,
+    sources_total: int | None = None, sources_completed: int | None = None,
+    documents_found: int | None = None, documents_downloaded: int | None = None,
+    documents_parsed: int | None = None, documents_failed: int | None = None,
+) -> str:
+    """Sends a request that's made real progress but still has work left
+    back to QUEUED (never COMPLETED) -- for cli.py's request-level time
+    budget, so a large multi-department request doesn't misreport itself as
+    "COMPLETED" after finishing only a fraction of its scope (a real
+    incident: 1 of 9 departments done, dashboard said COMPLETED). Clearing
+    the claim lets claim_next()'s FIFO-by-id ordering hand the next slice to
+    whichever request is now oldest -- this one included, once its turn
+    comes back around -- so a large backlog and other queued work make
+    fair, alternating progress instead of one blocking the other. The
+    request keeps accumulating its real progress fields across every slice
+    and only ever reaches COMPLETED once genuinely, entirely done. Same
+    terminal-state guard as report_progress()."""
+    row = get_request(conn, request_id)
+    if row is None:
+        raise LookupError(f"no extraction_request with id {request_id}")
+    if row["status"] in TERMINAL_STATUSES:
+        return row["status"]
+    updates = {
+        "sources_total": sources_total, "sources_completed": sources_completed,
+        "documents_found": documents_found, "documents_downloaded": documents_downloaded,
+        "documents_parsed": documents_parsed, "documents_failed": documents_failed,
+    }
+    set_clauses = [f"{k} = ?" for k, v in updates.items() if v is not None]
+    params = [v for v in updates.values() if v is not None]
+    set_clauses += ["status = ?", "claimed_by_agent_key_id = ?", "claimed_at = ?"]
+    params += [STATUS_QUEUED, None, None]
+    params.append(request_id)
+    conn.execute(f"UPDATE extraction_requests SET {', '.join(set_clauses)} WHERE id = ?", params)
+    return STATUS_QUEUED
+
+
 def complete_request(
     conn: sqlite3.Connection, request_id: int, *, ok: bool, error: str | None = None,
 ) -> None:

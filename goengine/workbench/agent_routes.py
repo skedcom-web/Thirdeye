@@ -182,10 +182,18 @@ def register(app: FastAPI) -> None:
         request_id: int, conn: Conn, agent_key: RequireAgentKey, body: Annotated[dict, Body()] = {},
     ):
         _require_claiming_agent(conn, request_id, agent_key)
+        fields = {k: body[k] for k in _PROGRESS_FIELDS if k in body}
         try:
-            status = extraction_queue.report_progress(
-                conn, request_id, **{k: body[k] for k in _PROGRESS_FIELDS if k in body}
-            )
+            # yield_and_requeue: this request hit cli.py's time budget with
+            # real work still left -- sent back to QUEUED (never COMPLETED)
+            # so claim_next() can hand the next slice out fairly (this
+            # request included, once its turn comes back around) instead of
+            # the request misreporting itself as fully done after only a
+            # fraction of its scope.
+            if body.get("yield_and_requeue"):
+                status = extraction_queue.yield_request(conn, request_id, **fields)
+            else:
+                status = extraction_queue.report_progress(conn, request_id, **fields)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         # `status` lets the agent notice an admin's Cancel click within one
