@@ -421,6 +421,28 @@ def _mirror_sources_from_server(conn, http_client, server_url: str, auth_headers
             print(f"  ! could not mirror source {spec['name']!r}: {exc}")
 
 
+def _post_with_retry(http_client, url: str, *, headers: dict, json: dict, attempts: int = 3, backoff_seconds: float = 2.0):
+    """POSTs with a couple of retries on failure. A many-hours, many-
+    department request makes hundreds of these calls (progress reports now
+    fire once per parsed document, not once per batch) -- without a retry,
+    a single transient network hiccup (a Render cold start, a dropped
+    connection) raises straight through to cmd_agent_daemon's broad
+    `except Exception`, which marks the ENTIRE request FAILED regardless of
+    how many hours of real, already-synced progress came before it. Real
+    failures (a broken government source, a bad URL) still propagate --
+    this only protects the calls back to our own server."""
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return http_client.post(url, headers=headers, json=json)
+        except Exception as exc:  # noqa: BLE001 -- deliberately broad, see docstring
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(backoff_seconds * (attempt + 1))
+    assert last_exc is not None
+    raise last_exc
+
+
 _BATCH_SIZE = 10  # small on purpose -- see _run_claimed_request docstring
 # Parsing (which includes OCR) is far slower per document than downloading --
 # a single heavily-scanned multi-page GO can take several minutes of OCR
@@ -486,80 +508,43 @@ def _run_claimed_request(
 
     sources_completed = documents_found = documents_downloaded = documents_parsed = documents_failed = 0
     synced_total = sync_failed_total = 0
-    http_client.post(
-        f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+    source_errors: list[tuple[int, str]] = []
+    _post_with_retry(
+        http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
         json={"sources_total": len(source_ids), "sources_completed": 0},
     )
     for sid in source_ids:
-        discovery_exhausted = False
-        consecutive_empty_discoveries = 0
+        try:
+            discovery_exhausted = False
+            consecutive_empty_discoveries = 0
 
-        while True:
-            if not discovery_exhausted:
-                discovery_started = time.monotonic()
-                crawl_results = pipeline.run_discovery(
-                    conn, fetcher, only_due=False, source_id=sid, max_pages=_DISCOVERY_MAX_PAGES,
-                )
-                discovery_elapsed = time.monotonic() - discovery_started
-                new_from_discovery = sum(r.new_documents for r in crawl_results)
-                documents_found += new_from_discovery
-                pages_fetched = sum(r.pages_fetched for r in crawl_results)
-                print(
-                    f"  source {sid}: discovery pass found {new_from_discovery} new document(s) "
-                    f"in {discovery_elapsed:.1f}s ({pages_fetched} pages fetched)"
-                )
-                if new_from_discovery == 0:
-                    consecutive_empty_discoveries += 1
-                    if consecutive_empty_discoveries >= _DISCOVERY_EXHAUSTED_AFTER:
-                        discovery_exhausted = True
-                        print(f"  source {sid}: discovery exhausted, switching to download/parse only")
-                else:
-                    consecutive_empty_discoveries = 0
-
-            batch_started = time.monotonic()
-            download_report = pipeline.run_downloads(conn, settings, fetcher, limit=_BATCH_SIZE, source_id=sid)
-            download_elapsed = time.monotonic() - batch_started
-            documents_downloaded += download_report.succeeded
-            documents_failed += download_report.failed
-
-            sync_results = _sync_documents(
-                conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
-            )
-            batch_synced = len(sync_results)
-            batch_sync_failed = sum(1 for r in sync_results if r[1] == "failed")
-            synced_total += batch_synced
-            sync_failed_total += batch_sync_failed
-
-            print(
-                f"  source {sid}, downloaded {download_report.succeeded} ({download_elapsed:.1f}s), "
-                f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
-                f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
-            )
-            http_client.post(
-                f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
-                json={
-                    "sources_completed": sources_completed, "documents_found": documents_found,
-                    "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
-                    "documents_failed": documents_failed,
-                },
-            )
-
-            # Parsed (and reported) one document at a time, not as a single
-            # _BATCH_SIZE-wide call -- see _PARSE_BATCH_SIZE's docstring.
-            # Keeps going until nothing is left to parse for this source
-            # right now (a fresh download batch next time around may add
-            # more), not just once.
-            parse_succeeded_this_round = parse_failed_this_round = 0
             while True:
-                parse_started = time.monotonic()
-                parse_report = pipeline.run_parsing(conn, settings, limit=_PARSE_BATCH_SIZE, source_id=sid)
-                parse_elapsed = time.monotonic() - parse_started
-                if parse_report.processed == 0:
-                    break
-                documents_parsed += parse_report.succeeded
-                documents_failed += parse_report.failed
-                parse_succeeded_this_round += parse_report.succeeded
-                parse_failed_this_round += parse_report.failed
+                if not discovery_exhausted:
+                    discovery_started = time.monotonic()
+                    crawl_results = pipeline.run_discovery(
+                        conn, fetcher, only_due=False, source_id=sid, max_pages=_DISCOVERY_MAX_PAGES,
+                    )
+                    discovery_elapsed = time.monotonic() - discovery_started
+                    new_from_discovery = sum(r.new_documents for r in crawl_results)
+                    documents_found += new_from_discovery
+                    pages_fetched = sum(r.pages_fetched for r in crawl_results)
+                    print(
+                        f"  source {sid}: discovery pass found {new_from_discovery} new document(s) "
+                        f"in {discovery_elapsed:.1f}s ({pages_fetched} pages fetched)"
+                    )
+                    if new_from_discovery == 0:
+                        consecutive_empty_discoveries += 1
+                        if consecutive_empty_discoveries >= _DISCOVERY_EXHAUSTED_AFTER:
+                            discovery_exhausted = True
+                            print(f"  source {sid}: discovery exhausted, switching to download/parse only")
+                    else:
+                        consecutive_empty_discoveries = 0
+
+                batch_started = time.monotonic()
+                download_report = pipeline.run_downloads(conn, settings, fetcher, limit=_BATCH_SIZE, source_id=sid)
+                download_elapsed = time.monotonic() - batch_started
+                documents_downloaded += download_report.succeeded
+                documents_failed += download_report.failed
 
                 sync_results = _sync_documents(
                     conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
@@ -569,17 +554,13 @@ def _run_claimed_request(
                 synced_total += batch_synced
                 sync_failed_total += batch_sync_failed
 
-                # Per-document timing so a slow run is diagnosable from the
-                # printed log alone -- a high parse time here almost always
-                # means OCR (Tesseract) doing real work on a scanned
-                # document, not a bug.
                 print(
-                    f"  source {sid}: parsed 1 document ({parse_elapsed:.1f}s), "
+                    f"  source {sid}, downloaded {download_report.succeeded} ({download_elapsed:.1f}s), "
                     f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
                     f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
                 )
-                http_client.post(
-                    f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+                _post_with_retry(
+                    http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
                     json={
                         "sources_completed": sources_completed, "documents_found": documents_found,
                         "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
@@ -587,30 +568,101 @@ def _run_claimed_request(
                     },
                 )
 
-            # Discovery is exhausted and nothing downloaded or parsed this
-            # round -- this source's backlog is fully drained, move on.
-            if discovery_exhausted and download_report.succeeded == 0 and parse_succeeded_this_round == 0:
-                break
+                # Parsed (and reported) one document at a time, not as a
+                # single _BATCH_SIZE-wide call -- see _PARSE_BATCH_SIZE's
+                # docstring. Keeps going until nothing is left to parse for
+                # this source right now (a fresh download batch next time
+                # around may add more), not just once.
+                parse_succeeded_this_round = parse_failed_this_round = 0
+                while True:
+                    parse_started = time.monotonic()
+                    parse_report = pipeline.run_parsing(conn, settings, limit=_PARSE_BATCH_SIZE, source_id=sid)
+                    parse_elapsed = time.monotonic() - parse_started
+                    if parse_report.processed == 0:
+                        break
+                    documents_parsed += parse_report.succeeded
+                    documents_failed += parse_report.failed
+                    parse_succeeded_this_round += parse_report.succeeded
+                    parse_failed_this_round += parse_report.failed
 
-        sources_completed += 1
-        http_client.post(
-            f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
-            json={
-                "sources_completed": sources_completed, "documents_found": documents_found,
-                "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
-                "documents_failed": documents_failed,
-            },
-        )
+                    sync_results = _sync_documents(
+                        conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
+                    )
+                    batch_synced = len(sync_results)
+                    batch_sync_failed = sum(1 for r in sync_results if r[1] == "failed")
+                    synced_total += batch_synced
+                    sync_failed_total += batch_sync_failed
+
+                    # Per-document timing so a slow run is diagnosable from
+                    # the printed log alone -- a high parse time here almost
+                    # always means OCR (Tesseract) doing real work on a
+                    # scanned document, not a bug.
+                    print(
+                        f"  source {sid}: parsed 1 document ({parse_elapsed:.1f}s), "
+                        f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
+                        f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
+                    )
+                    _post_with_retry(
+                        http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+                        json={
+                            "sources_completed": sources_completed, "documents_found": documents_found,
+                            "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
+                            "documents_failed": documents_failed,
+                        },
+                    )
+
+                # Discovery is exhausted and nothing downloaded or parsed
+                # this round -- this source's backlog is fully drained,
+                # move on.
+                if discovery_exhausted and download_report.succeeded == 0 and parse_succeeded_this_round == 0:
+                    break
+
+            sources_completed += 1
+            _post_with_retry(
+                http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+                json={
+                    "sources_completed": sources_completed, "documents_found": documents_found,
+                    "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
+                    "documents_failed": documents_failed,
+                },
+            )
+        except Exception as exc:
+            # One source's failure (a broken government host, an unexpected
+            # parsing error, anything) must not cost the OTHER nine
+            # departments in this request their already-real, already-synced
+            # progress. This is the actual production incident: a
+            # 10-department request ran for 16+ hours, got 80 documents
+            # genuinely downloaded and parsed, then hit one error on one
+            # source and the whole request came back FAILED -- discarding
+            # visibility into work that had, in fact, succeeded. Recorded
+            # and reported (see the completion call below), not silently
+            # swallowed.
+            print(f"  source {sid}: FAILED, skipping to the next source -- {exc}")
+            source_errors.append((sid, str(exc)))
+            continue
 
     print(
         f"  done: sources {sources_completed}/{len(source_ids)}, "
         f"{documents_downloaded} downloaded, {documents_parsed} parsed, "
         f"{synced_total - sync_failed_total}/{synced_total} synced"
+        + (f", {len(source_errors)} source(s) failed" if source_errors else "")
     )
 
-    http_client.post(
-        f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
-        json={"ok": True},
+    # Honest partial-success reporting: real progress elsewhere in the
+    # request must not be reported as a total failure just because one
+    # source hit a problem. Only a request where NOTHING at all worked is
+    # reported as failed; a mix of successes and failures is "completed"
+    # with the specific failures visible in the error field (surfaced today
+    # via the same "LAST ERROR" the admin dashboard already shows for a
+    # fully-failed request).
+    made_real_progress = sources_completed > 0 or documents_downloaded > 0 or documents_parsed > 0
+    ok = made_real_progress or not source_errors
+    error_summary = None
+    if source_errors:
+        error_summary = "; ".join(f"source {sid}: {msg}" for sid, msg in source_errors)
+    _post_with_retry(
+        http_client, f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
+        json={"ok": ok, **({"error": error_summary} if error_summary else {})},
     )
 
 

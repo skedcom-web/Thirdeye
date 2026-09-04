@@ -23,7 +23,19 @@ runs:
    multi-page GO can take several minutes by itself, so the dashboard could
    sit at 0 parsed for 15+ minutes of real, ongoing work (confirmed live: a
    24-page scanned document took ~6 minutes alone). Parsing is now done and
-   reported one document at a time (_PARSE_BATCH_SIZE=1)."""
+   reported one document at a time (_PARSE_BATCH_SIZE=1).
+
+3. A single unhandled exception ANYWHERE in _run_claimed_request (a broken
+   government host for one of several departments, a transient network blip
+   on a progress POST) aborted the ENTIRE request via cmd_agent_daemon's
+   broad `except Exception`, reporting it FAILED regardless of how many
+   hours of real, already-synced work came before it -- confirmed live: a
+   10-department request ran 16+ hours, genuinely downloaded and parsed 80
+   documents, then came back FAILED because of a single error on one
+   source. Each source's work is now isolated (one source's exception is
+   recorded and skipped, not fatal to the others) and progress POSTs retry
+   transient failures instead of raising immediately; the request is only
+   reported failed if literally nothing worked anywhere."""
 
 from __future__ import annotations
 
@@ -290,3 +302,115 @@ def test_progress_reports_after_every_parsed_document_not_once_per_batch(conn, s
     assert 1 in parsed_progression
     assert 2 in parsed_progression
     assert 3 in parsed_progression
+
+
+# ---------------------------------------------------------------------------
+# Reliability: retry transient network blips, isolate per-source failures,
+# and report completion honestly (partial success != total failure).
+# ---------------------------------------------------------------------------
+class _CompletionCapturingHttpxClient:
+    """Real-work acceptance (like _FakeRealWorkHttpxClient) that also
+    records every /complete POST's body, so a test can inspect exactly what
+    was reported to the server at the end of a run."""
+
+    def __init__(self):
+        self.complete_calls: list[dict] = []
+
+    def post(self, url: str, headers=None, json=None, files=None, data=None):
+        if url.endswith("/sync/document"):
+            return _FakeSyncResponse()
+        if url.endswith("/complete"):
+            self.complete_calls.append(dict(json))
+        return _FakeResponse({"ok": True})
+
+
+def test_post_with_retry_succeeds_after_transient_failures(monkeypatch):
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    attempts = []
+
+    class FlakyClient:
+        def post(self, url, headers=None, json=None):
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise ConnectionError("transient network blip")
+            return _FakeResponse({"ok": True})
+
+    result = cli._post_with_retry(FlakyClient(), "https://example.invalid/x", headers={}, json={})
+    assert result.json() == {"ok": True}
+    assert len(attempts) == 3
+
+
+def test_post_with_retry_raises_after_exhausting_attempts(monkeypatch):
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    class AlwaysFailingClient:
+        def post(self, url, headers=None, json=None):
+            raise ConnectionError("server unreachable")
+
+    with pytest.raises(ConnectionError, match="server unreachable"):
+        cli._post_with_retry(AlwaysFailingClient(), "https://example.invalid/x", headers={}, json={}, attempts=3)
+
+
+def test_one_failing_source_does_not_abort_the_others(conn, settings, fetcher, source_id, monkeypatch):
+    """The actual production incident, reproduced directly: two sources in
+    scope, one of which fails outright during discovery. The other source's
+    real work (sampledata's 3 documents) must still complete -- a broken
+    department must not cost the rest of the request its progress."""
+    from goengine import registry
+
+    broken_source_id = registry.add_source(
+        conn, name="Broken Department Source", department="Broken Department",
+        url="https://cms.tn.gov.in/broken", source_type="go_portal",
+    )
+
+    original_run_discovery = pipeline.run_discovery
+
+    def flaky_run_discovery(*args, **kwargs):
+        if kwargs.get("source_id") == broken_source_id:
+            raise ConnectionError("government host unreachable")
+        return original_run_discovery(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "run_discovery", flaky_run_discovery)
+
+    req = {
+        "id": 1, "kind": "extraction", "state_name": None, "district_name": None, "department_filter": None,
+    }
+    client = _CompletionCapturingHttpxClient()
+    cli._run_claimed_request(conn, settings, fetcher, client, "https://example.invalid", {}, req)
+
+    # The working source's real documents still landed despite the other
+    # source's total failure.
+    assert conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"] == 3
+    assert conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"] == 3
+
+    assert len(client.complete_calls) == 1
+    completion = client.complete_calls[0]
+    assert completion["ok"] is True  # real progress happened -- not a total failure
+    assert "Broken Department" not in completion.get("error", "") or str(broken_source_id) in completion.get("error", "")
+    assert "government host unreachable" in completion.get("error", "")
+
+
+def test_completion_reports_failure_only_when_nothing_at_all_worked(conn, settings, source_id, monkeypatch):
+    """The inverse case: if the only source in scope fails completely with
+    zero progress anywhere, the request must still be reported as failed --
+    partial-success reporting must not paper over a run that accomplished
+    nothing."""
+    def always_raise(*args, **kwargs):
+        raise ConnectionError("completely unreachable")
+
+    monkeypatch.setattr(pipeline, "run_discovery", always_raise)
+
+    req = {
+        "id": 1, "kind": "extraction", "state_name": None, "district_name": None, "department_filter": None,
+    }
+    client = _CompletionCapturingHttpxClient()
+    cli._run_claimed_request(conn, settings, None, client, "https://example.invalid", {}, req)
+
+    assert len(client.complete_calls) == 1
+    completion = client.complete_calls[0]
+    assert completion["ok"] is False
+    assert "completely unreachable" in completion["error"]
