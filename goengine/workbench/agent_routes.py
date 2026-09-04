@@ -183,12 +183,17 @@ def register(app: FastAPI) -> None:
     ):
         _require_claiming_agent(conn, request_id, agent_key)
         try:
-            extraction_queue.report_progress(
+            status = extraction_queue.report_progress(
                 conn, request_id, **{k: body[k] for k in _PROGRESS_FIELDS if k in body}
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return JSONResponse({"ok": True})
+        # `status` lets the agent notice an admin's Cancel click within one
+        # progress report (now firing once per document, not once per
+        # batch) instead of grinding on for however long its current source
+        # takes to exhaust or hit its time budget -- see cli.py's handling
+        # of a non-RUNNING/CLAIMED status back from this call.
+        return JSONResponse({"ok": True, "status": status})
 
     @app.post("/api/agent/queue/{request_id}/complete")
     def agent_queue_complete(

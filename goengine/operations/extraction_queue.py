@@ -154,15 +154,28 @@ def claim_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     }
 
 
+TERMINAL_STATUSES = (STATUS_COMPLETED, STATUS_FAILED)
+
+
 def report_progress(
     conn: sqlite3.Connection, request_id: int, *,
     sources_total: int | None = None, sources_completed: int | None = None,
     documents_found: int | None = None, documents_downloaded: int | None = None,
     documents_parsed: int | None = None, documents_failed: int | None = None,
-) -> None:
+) -> str:
+    """Returns the request's status AFTER this call -- the local agent
+    checks this on every progress report (now firing once per document, not
+    once per batch) to notice an admin's cancellation quickly, without a
+    separate channel. A request already in a terminal state (an admin
+    cancelled it, or it raced with its own completion) is left untouched --
+    a stray late progress post must never overwrite "Cancelled by admin"
+    with fresh stats, and the unchanged terminal status is exactly the
+    signal the agent needs to stop."""
     row = get_request(conn, request_id)
     if row is None:
         raise LookupError(f"no extraction_request with id {request_id}")
+    if row["status"] in TERMINAL_STATUSES:
+        return row["status"]
     updates = {
         "sources_total": sources_total, "sources_completed": sources_completed,
         "documents_found": documents_found, "documents_downloaded": documents_downloaded,
@@ -170,20 +183,30 @@ def report_progress(
     }
     set_clauses = [f"{k} = ?" for k, v in updates.items() if v is not None]
     params = [v for v in updates.values() if v is not None]
+    new_status = row["status"]
     if row["status"] == STATUS_CLAIMED:
+        new_status = STATUS_RUNNING
         set_clauses.append("status = ?")
-        params.append(STATUS_RUNNING)
+        params.append(new_status)
         set_clauses.append("started_at = ?")
         params.append(utcnow())
     if not set_clauses:
-        return
+        return new_status
     params.append(request_id)
     conn.execute(f"UPDATE extraction_requests SET {', '.join(set_clauses)} WHERE id = ?", params)
+    return new_status
 
 
 def complete_request(
     conn: sqlite3.Connection, request_id: int, *, ok: bool, error: str | None = None,
 ) -> None:
+    """A request already in a terminal state (e.g. cancelled by an admin
+    while the agent was still working) is left as-is -- the agent's own
+    eventual completion call must never overwrite "Cancelled by admin" with
+    a plain success/failure that erases why it actually stopped."""
+    row = get_request(conn, request_id)
+    if row is not None and row["status"] in TERMINAL_STATUSES:
+        return
     conn.execute(
         "UPDATE extraction_requests SET status = ?, finished_at = ?, error = ? WHERE id = ?",
         (STATUS_COMPLETED if ok else STATUS_FAILED, utcnow(), error, request_id),
@@ -199,21 +222,23 @@ CANCELLABLE_STATUSES = (STATUS_QUEUED, STATUS_CLAIMED, STATUS_RUNNING)
 
 
 def cancel_request(conn: sqlite3.Connection, request_id: int, *, actor: str) -> None:
-    """Marks a stuck or no-longer-wanted request as failed, from the admin
-    side -- for when the local agent that claimed it has died, hung, or was
-    force-stopped and will never report back on its own (a real production
-    incident: Ctrl+C in the terminal did nothing because the agent process
-    was blocked inside a long-running crawl/download/OCR call, which only
-    checks for interruption between whole requests, not mid-request).
+    """Marks a request as failed ("Cancelled by admin"), from the admin
+    side -- originally for when the local agent that claimed it has died,
+    hung, or was force-stopped and will never report back on its own (a
+    real production incident: Ctrl+C in the terminal did nothing because
+    the agent process was blocked inside a long-running crawl/download/OCR
+    call, which only checks for interruption between whole requests, not
+    mid-request).
 
-    This does NOT reach the local agent -- there is no channel to push a
-    stop signal to a machine that may be offline, unreachable, or simply not
-    polling anymore. It only ends the *server-side* bookkeeping, so the
-    request stops occupying a queue slot and stops looking like active work
-    on the dashboard. If the agent is actually still alive and working, it
-    must also be stopped locally (Ctrl+C, or ending the process) -- it will
-    otherwise keep working and may still report progress/completion for a
-    request the server now considers cancelled."""
+    This still doesn't reach an agent that's offline, unreachable, or not
+    polling -- it's server-side bookkeeping, not a signal pushed to a
+    machine. But if the agent IS alive and still working this request, it
+    WILL notice and stop on its own, quickly: report_progress() refuses to
+    update a request once it's in a terminal status, and returns that
+    status in its response; cli.py's agent checks that response after every
+    progress report (now firing once per document, not once per batch) and
+    stops the moment it sees this cancellation, without needing Ctrl+C or
+    the process to be killed."""
     row = get_request(conn, request_id)
     if row is None:
         raise LookupError(f"no extraction_request with id {request_id}")

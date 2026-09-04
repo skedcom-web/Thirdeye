@@ -74,6 +74,50 @@ def test_complete_with_failure_records_error(conn, agent_key):
     assert row["error"] == "no local sources matched"
 
 
+def test_report_progress_returns_the_current_status(conn, agent_key):
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    assert eq.report_progress(conn, rid, sources_total=1, sources_completed=0) == eq.STATUS_RUNNING
+
+
+def test_report_progress_after_cancel_is_a_no_op_and_returns_the_terminal_status(conn, agent_key):
+    """The actual mechanism a Cancel click relies on: once a request is
+    terminal, a stray progress report from an agent that hasn't noticed yet
+    must not resurrect it or overwrite "Cancelled by admin" -- and must tell
+    the agent, via its return value, to stop."""
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.report_progress(conn, rid, sources_total=5, sources_completed=1)
+    eq.cancel_request(conn, rid, actor="admin")
+
+    status = eq.report_progress(conn, rid, sources_completed=2, documents_downloaded=99)
+    assert status == eq.STATUS_FAILED
+
+    row = eq.get_request(conn, rid)
+    assert row["status"] == eq.STATUS_FAILED
+    assert row["error"] == "Cancelled by admin"
+    assert row["sources_completed"] == 1  # the post-cancel update was never applied
+    assert row["documents_downloaded"] == 0  # column default -- never touched by the post-cancel update
+
+
+def test_complete_request_after_cancel_does_not_overwrite_the_cancellation(conn, agent_key):
+    """The agent's own eventual completion call (it may not notice the
+    cancellation until its next progress report) must not clobber
+    "Cancelled by admin" with a plain success or failure."""
+    key_id, _ = agent_key
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    eq.claim_next(conn, agent_key_id=key_id)
+    eq.cancel_request(conn, rid, actor="admin")
+
+    eq.complete_request(conn, rid, ok=True)
+
+    row = eq.get_request(conn, rid)
+    assert row["status"] == eq.STATUS_FAILED
+    assert row["error"] == "Cancelled by admin"
+
+
 def test_resolve_local_source_ids_by_department(conn, source_id):
     ids = eq.resolve_local_source_ids(conn, state_name=None, district_name=None, department_filter=None)
     assert source_id in ids
@@ -124,6 +168,28 @@ def test_queue_claim_progress_complete_http(client, conn, agent_key):
     row = eq.get_request(conn, rid)
     assert row["status"] == eq.STATUS_COMPLETED
     assert row["documents_downloaded"] == 5
+
+
+def test_progress_endpoint_reports_cancellation_to_the_agent(client, conn, agent_key):
+    """The actual channel a Cancel click uses to reach a running agent: the
+    /progress response's `status` field flips to FAILED the moment an admin
+    cancels, even though the agent making this exact call has no idea yet --
+    that's precisely what lets it notice within one report."""
+    _, token = agent_key
+    headers = {"Authorization": f"Bearer {token}"}
+    rid = eq.enqueue_local_request(conn, state_id=None, district_id=None, department_filter=None, created_by="admin")
+    client.post("/api/agent/queue/claim", headers=headers)
+
+    ok_response = client.post(f"/api/agent/queue/{rid}/progress", headers=headers, json={"sources_total": 1})
+    assert ok_response.json()["status"] == eq.STATUS_RUNNING
+
+    eq.cancel_request(conn, rid, actor="admin")
+
+    cancelled_response = client.post(
+        f"/api/agent/queue/{rid}/progress", headers=headers, json={"sources_completed": 1},
+    )
+    assert cancelled_response.status_code == 200
+    assert cancelled_response.json()["status"] == eq.STATUS_FAILED
 
 
 def test_queue_progress_requires_claiming_agent(client, conn, agent_key):

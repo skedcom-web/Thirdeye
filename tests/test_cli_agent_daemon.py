@@ -8,7 +8,7 @@ consecutive polls, instead of looping forever until Ctrl+C (see
 cmd_agent_daemon's own docstring for why "launch a process on the admin's
 separate machine" isn't achievable here -- this is the part that is).
 
-Also covers two real production performance bugs found and fixed after live
+Also covers real production reliability bugs found and fixed after live
 runs:
 
 1. _run_claimed_request used to re-run full page discovery on every single
@@ -35,7 +35,32 @@ runs:
    source. Each source's work is now isolated (one source's exception is
    recorded and skipped, not fatal to the others) and progress POSTs retry
    transient failures instead of raising immediately; the request is only
-   reported failed if literally nothing worked anywhere."""
+   reported failed if literally nothing worked anywhere.
+
+4. Even with fix #3, a single source with an unexpectedly large real
+   backlog could occupy _run_claimed_request (and therefore the whole
+   single-threaded daemon) forever without ever raising an exception --
+   confirmed live: one department (Water Resources) ran continuously for
+   16.8 hours without exhausting, during which every OTHER queued request
+   sat untouched with zero chance of being claimed, no matter how small its
+   own scope was. A wall-clock budget (_REQUEST_TIME_BUDGET_SECONDS) now
+   caps the whole call; once hit, it returns early with honest partial
+   progress already reported and synced, so the daemon goes back to polling
+   and other requests get a fair turn. A follow-up request for the same
+   scope resumes exactly where the last one left off.
+
+5. Clicking Cancel on the dashboard only ever updated server-side
+   bookkeeping -- there was no channel to tell a still-running agent to
+   actually stop, so it kept working (and kept reporting progress) for
+   however long its current source took, regardless of the click. Fixed
+   using the channel that already exists: report_progress() now refuses to
+   update an already-terminal (cancelled) request and returns its status;
+   the /progress endpoint passes that status back in its response; and the
+   agent checks it after every report (once per document) and raises
+   RequestCancelled the moment it's no longer RUNNING/CLAIMED -- stopping
+   within one report instead of running to natural completion or the time
+   budget. Never recorded as a source error, and no pointless /complete
+   call follows (the request is already in its final state)."""
 
 from __future__ import annotations
 
@@ -414,3 +439,208 @@ def test_completion_reports_failure_only_when_nothing_at_all_worked(conn, settin
     completion = client.complete_calls[0]
     assert completion["ok"] is False
     assert "completely unreachable" in completion["error"]
+
+
+# ---------------------------------------------------------------------------
+# Fairness: a single source with a much larger real backlog than expected
+# must not be able to occupy the whole claimed request (and therefore the
+# whole single-threaded daemon) forever, starving every other queued
+# request of any chance to be claimed.
+# ---------------------------------------------------------------------------
+def test_time_budget_yields_with_sources_left_for_a_followup_request(conn, settings, fetcher, source_id, monkeypatch):
+    """The actual production incident, reproduced directly: confirmed live
+    that one department (Water Resources) ran continuously for 16.8 hours
+    without exhausting, during which the daemon could not even glance at
+    other queued requests -- no matter how small their own scope was. Two
+    sources in scope here; the fake clock jumps past the budget the instant
+    the first source's backlog is fully drained, so the second is never
+    started. The request must still be reported as completed (real progress
+    happened), with an honest note that a source is left for a follow-up."""
+    import time as time_module
+
+    from goengine import registry
+
+    second_source_id = registry.add_source(
+        conn, name="Second Department Source", department="Second Department",
+        url="https://cms.tn.gov.in/second", source_type="go_portal",
+    )
+    monkeypatch.setattr(cli, "_REQUEST_TIME_BUDGET_SECONDS", 1000)
+
+    real_monotonic = time_module.monotonic
+    clock = {"offset": 0.0}
+    monkeypatch.setattr(time_module, "monotonic", lambda: real_monotonic() + clock["offset"])
+
+    original_run_parsing = pipeline.run_parsing
+
+    def parsing_that_exhausts_the_clock(*args, **kwargs):
+        report = original_run_parsing(*args, **kwargs)
+        if kwargs.get("source_id") == source_id and report.processed == 0:
+            # source_id's backlog (sampledata's 3 documents) is fully
+            # drained -- jump the clock past the budget so the SECOND
+            # source is never even started.
+            clock["offset"] = 100_000
+        return report
+
+    monkeypatch.setattr(pipeline, "run_parsing", parsing_that_exhausts_the_clock)
+
+    req = {
+        "id": 1, "kind": "extraction", "state_name": None, "district_name": None, "department_filter": None,
+    }
+    client = _CompletionCapturingHttpxClient()
+    cli._run_claimed_request(conn, settings, fetcher, client, "https://example.invalid", {}, req)
+
+    # The first source's real work landed; the second was never touched.
+    assert conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"] == 3
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM documents WHERE source_id = ?", (second_source_id,)
+    ).fetchone()["n"] == 0
+
+    assert len(client.complete_calls) == 1
+    completion = client.complete_calls[0]
+    assert completion["ok"] is True  # real progress happened -- yielding is not a failure
+    assert "time budget" in completion["error"]
+    # The budget fires the instant the first source's backlog is drained,
+    # one round before the natural-exhaustion check would have confirmed
+    # and counted it -- an honest undercount (it says "2 of 2 remaining"
+    # rather than "1 of 2"), never an overcount or lost data: the real
+    # documents landed regardless (asserted above).
+    assert "2 of 2 source(s)" in completion["error"]
+
+
+# ---------------------------------------------------------------------------
+# Cancellation: an admin's Cancel click must reach a running agent, not just
+# update the dashboard while the agent grinds on for hours regardless.
+# ---------------------------------------------------------------------------
+class _CancellingHttpxClient:
+    """Real-work acceptance (like _FakeRealWorkHttpxClient) whose /progress
+    responses report the request as FAILED (as if an admin clicked Cancel
+    server-side) after a configurable number of real progress reports --
+    simulating a cancellation landing partway through a run."""
+
+    def __init__(self, *, cancel_after_n_progress_calls: int):
+        self.cancel_after = cancel_after_n_progress_calls
+        self.progress_calls = 0
+        self.complete_calls: list[dict] = []
+
+    def post(self, url: str, headers=None, json=None, files=None, data=None):
+        if url.endswith("/sync/document"):
+            return _FakeSyncResponse()
+        if url.endswith("/progress"):
+            self.progress_calls += 1
+            status = "FAILED" if self.progress_calls > self.cancel_after else "RUNNING"
+            return _FakeResponse({"ok": True, "status": status})
+        if url.endswith("/complete"):
+            self.complete_calls.append(dict(json) if json else {})
+        return _FakeResponse({"ok": True})
+
+
+def test_agent_stops_within_one_progress_report_after_being_cancelled(conn, settings, fetcher, source_id):
+    """The actual fix for "I clicked Cancel and it kept running": the agent
+    now checks the /progress response after every report (one per document)
+    and stops the moment it sees the request is no longer active -- instead
+    of grinding on until its current source naturally exhausts or the time
+    budget expires."""
+    client = _CancellingHttpxClient(cancel_after_n_progress_calls=1)
+    req = {
+        "id": 1, "kind": "extraction", "state_name": None, "district_name": None, "department_filter": None,
+    }
+
+    with pytest.raises(cli.RequestCancelled):
+        cli._run_claimed_request(conn, settings, fetcher, client, "https://example.invalid", {}, req)
+
+    # Stopped early -- not all 3 sample documents were parsed, proving this
+    # didn't run to natural completion.
+    parsed = conn.execute("SELECT COUNT(*) AS n FROM go_records").fetchone()["n"]
+    assert parsed < 3
+    # No completion call was ever made -- the request is already terminal
+    # server-side (that's WHY the agent stopped), so there is nothing to
+    # report; attempting one would be pointless at best.
+    assert client.complete_calls == []
+
+
+def test_cancellation_during_one_source_does_not_get_recorded_as_a_source_error(conn, settings, fetcher, source_id):
+    """A cancellation must propagate straight out, not get swallowed by the
+    per-source `except Exception` that isolates genuine per-source failures
+    -- it is not a failure, and must not be retried or reported as one."""
+    from goengine import registry
+
+    registry.add_source(
+        conn, name="Second Department Source", department="Second Department",
+        url="https://cms.tn.gov.in/second", source_type="go_portal",
+    )
+    client = _CancellingHttpxClient(cancel_after_n_progress_calls=0)
+    req = {
+        "id": 1, "kind": "extraction", "state_name": None, "district_name": None, "department_filter": None,
+    }
+
+    with pytest.raises(cli.RequestCancelled):
+        cli._run_claimed_request(conn, settings, fetcher, client, "https://example.invalid", {}, req)
+
+
+class _CancelledLifecycleHttpxClient:
+    """Like _FakeLifecycleHttpxClient, but the one real claimed request gets
+    cancelled immediately (its very first /progress call reports FAILED) --
+    proves cmd_agent_daemon treats this as a clean stop, not a crash or a
+    reported failure, and keeps polling afterward."""
+
+    def __init__(self):
+        self.claim_calls = 0
+        self.complete_calls: list[dict] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, url: str, headers=None):
+        if url.endswith("/api/agent/sources"):
+            return _FakeResponse([])
+        raise AssertionError(f"unexpected GET {url}")
+
+    def post(self, url: str, headers=None, json=None):
+        if url.endswith("/queue/claim"):
+            self.claim_calls += 1
+            if self.claim_calls == 1:
+                return _FakeResponse({
+                    "request": {
+                        "id": 1, "kind": "extraction", "state_name": None,
+                        "district_name": None, "department_filter": None,
+                    }
+                })
+            return _FakeResponse({"request": None})
+        if url.endswith("/complete"):
+            self.complete_calls.append(json)
+            return _FakeResponse({"ok": True})
+        if url.endswith("/progress"):
+            return _FakeResponse({"ok": True, "status": "FAILED"})
+        raise AssertionError(f"unexpected POST {url}")
+
+
+def test_cmd_agent_daemon_treats_cancellation_as_a_clean_stop_not_a_crash(monkeypatch, args):
+    """cmd_agent_daemon's broad `except Exception` must not catch
+    RequestCancelled and report it as a failure -- it's an admin's
+    deliberate action, not something gone wrong, and posting /complete for
+    an already-cancelled request would be pointless. The daemon must also
+    keep polling afterward (proven here by reaching its normal idle-exit).
+    _run_claimed_request itself is mocked to raise directly -- the mechanics
+    of IT detecting a cancellation are already covered by
+    test_agent_stops_within_one_progress_report_after_being_cancelled; this
+    test is only about cmd_agent_daemon's own handling of that outcome."""
+    import httpx
+    import time
+
+    fake_client = _CancelledLifecycleHttpxClient()
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: fake_client)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    def raise_cancelled(*args, **kwargs):
+        raise cli.RequestCancelled("request 1 is no longer active (status: FAILED)")
+
+    monkeypatch.setattr(cli, "_run_claimed_request", raise_cancelled)
+
+    exit_code = cli.cmd_agent_daemon(args)
+
+    assert exit_code == 0
+    assert fake_client.claim_calls == 1 + args.idle_exit_after
+    assert fake_client.complete_calls == []  # no pointless /complete for an already-terminal request

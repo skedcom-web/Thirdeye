@@ -200,7 +200,7 @@
         <td>
           {% if can_run and r.status in ('QUEUED', 'CLAIMED', 'RUNNING') %}
           <form method="post" action="/ops/jobs/{{ r.id }}/cancel" style="margin:0;"
-                onsubmit="return confirm('Cancel request #{{ r.id }}? This only updates the dashboard -- if the local agent is still actually running, stop it on that machine too (Ctrl+C or End Task).');">
+                onsubmit="return confirm('Cancel request #{{ r.id }}? If the local agent is actively running it, it will notice and stop within one progress report (usually a few seconds). If the agent is offline or stuck unresponsive, this still frees up the dashboard, but you may need to stop the process on that machine directly.');">
             <button type="submit" class="btn-sm btn-secondary" style="color:var(--bad); border-color:var(--bad);">✕ Cancel</button>
           </form>
           {% endif %}

@@ -443,6 +443,31 @@ def _post_with_retry(http_client, url: str, *, headers: dict, json: dict, attemp
     raise last_exc
 
 
+class RequestCancelled(Exception):
+    """Raised when a progress report comes back showing the request is no
+    longer RUNNING/CLAIMED -- an admin clicked Cancel while the agent was
+    still working. Distinct from a real failure: nothing here went wrong,
+    so it must never be recorded as a source error or reported back as a
+    failure (the request is already in its final "Cancelled by admin"
+    state; see extraction_queue.report_progress's docstring for why the
+    agent's own completion call is a safe no-op in that case)."""
+
+
+def _report_progress(http_client, server_url: str, request_id: int, auth_headers: dict, json: dict) -> None:
+    """Wraps _post_with_retry for the /progress endpoint specifically:
+    checks the returned status and raises RequestCancelled the moment it's
+    no longer RUNNING/CLAIMED, so a cancelled request stops within one
+    report (now firing once per document) instead of grinding on for
+    however long its current source takes to exhaust or hit its time
+    budget."""
+    response = _post_with_retry(
+        http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers, json=json,
+    )
+    status = response.json().get("status")
+    if status is not None and status not in (extraction_queue.STATUS_CLAIMED, extraction_queue.STATUS_RUNNING):
+        raise RequestCancelled(f"request {request_id} is no longer active (status: {status})")
+
+
 _BATCH_SIZE = 10  # small on purpose -- see _run_claimed_request docstring
 # Parsing (which includes OCR) is far slower per document than downloading --
 # a single heavily-scanned multi-page GO can take several minutes of OCR
@@ -452,6 +477,20 @@ _BATCH_SIZE = 10  # small on purpose -- see _run_claimed_request docstring
 # itself). Parsing one document at a time and reporting after each keeps the
 # dashboard live during exactly the phase that most needs it.
 _PARSE_BATCH_SIZE = 1
+# A wall-clock budget on the WHOLE claimed request, not per source. Without
+# this, one department with an unexpectedly large real backlog can occupy
+# the agent indefinitely -- confirmed live: a single department (Water
+# Resources) ran continuously for 16.8 hours and was STILL not exhausted,
+# during which every other queued request sat untouched with zero chance of
+# being claimed, no matter how small its own scope was (the daemon is a
+# single-threaded loop that only polls for new work once _run_claimed_request
+# returns). Once the budget is hit, this function returns early -- having
+# made and reported real, honest partial progress -- so the daemon goes back
+# to polling and other queued requests get a fair turn. Discovery/download/
+# parse are all naturally resumable from DB state (they only ever act on
+# not-yet-discovered/downloaded/parsed rows), so a follow-up request for the
+# same scope picks up exactly where this one left off, not from scratch.
+_REQUEST_TIME_BUDGET_SECONDS = 30 * 60
 
 # Each discovery attempt stays small and bounded, exactly as it always was
 # -- see the perf note below for why the fix is "stop repeating it once
@@ -497,7 +536,18 @@ def _run_claimed_request(
     keeps appearing every few seconds) but STOPS calling it once it has
     found nothing new twice in a row, instead of calling it again on every
     single one of the (possibly dozens of) remaining download/parse
-    batches -- eliminating the real waste without sacrificing visibility."""
+    batches -- eliminating the real waste without sacrificing visibility.
+
+    Fairness note: this function also enforces _REQUEST_TIME_BUDGET_SECONDS
+    across the WHOLE call, not per source. Confirmed live: one department
+    (Water Resources) had a far larger real backlog than expected and ran
+    continuously for 16.8 hours without exhausting -- during which the
+    daemon's single-threaded poll loop (see cmd_agent_daemon) could not even
+    glance at any other queued request, no matter how small. Once the budget
+    is hit, this returns early with honest partial progress already reported
+    and synced; the daemon goes back to polling, and a follow-up request for
+    the same scope resumes exactly where this one left off (discovery/
+    download/parse only ever act on not-yet-seen rows)."""
     request_id = req["id"]
     source_ids = extraction_queue.resolve_local_source_ids(
         conn, state_name=req.get("state_name"), district_name=req.get("district_name"),
@@ -509,11 +559,17 @@ def _run_claimed_request(
     sources_completed = documents_found = documents_downloaded = documents_parsed = documents_failed = 0
     synced_total = sync_failed_total = 0
     source_errors: list[tuple[int, str]] = []
-    _post_with_retry(
-        http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+    request_started = time.monotonic()
+    budget_exceeded = False
+    _report_progress(
+        http_client, server_url, request_id, auth_headers,
         json={"sources_total": len(source_ids), "sources_completed": 0},
     )
     for sid in source_ids:
+        if time.monotonic() - request_started > _REQUEST_TIME_BUDGET_SECONDS:
+            budget_exceeded = True
+            print(f"  time budget ({_REQUEST_TIME_BUDGET_SECONDS}s) reached -- yielding before starting source {sid}")
+            break
         try:
             discovery_exhausted = False
             consecutive_empty_discoveries = 0
@@ -559,8 +615,8 @@ def _run_claimed_request(
                     f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
                     f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
                 )
-                _post_with_retry(
-                    http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+                _report_progress(
+                    http_client, server_url, request_id, auth_headers,
                     json={
                         "sources_completed": sources_completed, "documents_found": documents_found,
                         "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
@@ -602,8 +658,8 @@ def _run_claimed_request(
                         f"{batch_synced - batch_sync_failed}/{batch_synced} synced "
                         f"(running total: {documents_downloaded} downloaded, {documents_parsed} parsed)"
                     )
-                    _post_with_retry(
-                        http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+                    _report_progress(
+                        http_client, server_url, request_id, auth_headers,
                         json={
                             "sources_completed": sources_completed, "documents_found": documents_found,
                             "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
@@ -617,15 +673,25 @@ def _run_claimed_request(
                 if discovery_exhausted and download_report.succeeded == 0 and parse_succeeded_this_round == 0:
                     break
 
+                if time.monotonic() - request_started > _REQUEST_TIME_BUDGET_SECONDS:
+                    budget_exceeded = True
+                    print(f"  source {sid}: time budget reached mid-source -- yielding (not exhausted; will resume from here on a future request)")
+                    break
+
+            if budget_exceeded:
+                break
+
             sources_completed += 1
-            _post_with_retry(
-                http_client, f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+            _report_progress(
+                http_client, server_url, request_id, auth_headers,
                 json={
                     "sources_completed": sources_completed, "documents_found": documents_found,
                     "documents_downloaded": documents_downloaded, "documents_parsed": documents_parsed,
                     "documents_failed": documents_failed,
                 },
             )
+        except RequestCancelled:
+            raise
         except Exception as exc:
             # One source's failure (a broken government host, an unexpected
             # parsing error, anything) must not cost the OTHER nine
@@ -641,25 +707,35 @@ def _run_claimed_request(
             source_errors.append((sid, str(exc)))
             continue
 
+    sources_remaining = len(source_ids) - sources_completed - len(source_errors)
     print(
         f"  done: sources {sources_completed}/{len(source_ids)}, "
         f"{documents_downloaded} downloaded, {documents_parsed} parsed, "
         f"{synced_total - sync_failed_total}/{synced_total} synced"
         + (f", {len(source_errors)} source(s) failed" if source_errors else "")
+        + (f", {sources_remaining} source(s) left for a follow-up request" if budget_exceeded else "")
     )
 
     # Honest partial-success reporting: real progress elsewhere in the
     # request must not be reported as a total failure just because one
-    # source hit a problem. Only a request where NOTHING at all worked is
-    # reported as failed; a mix of successes and failures is "completed"
-    # with the specific failures visible in the error field (surfaced today
-    # via the same "LAST ERROR" the admin dashboard already shows for a
-    # fully-failed request).
+    # source hit a problem, or because the time budget ran out with real
+    # departments still queued behind it. Only a request where NOTHING at
+    # all worked is reported as failed; anything else is "completed" with
+    # the specifics (failures, and/or how many sources are left for a
+    # follow-up request) visible in the error field -- surfaced today via
+    # the same "LAST ERROR" the admin dashboard already shows.
     made_real_progress = sources_completed > 0 or documents_downloaded > 0 or documents_parsed > 0
     ok = made_real_progress or not source_errors
-    error_summary = None
+    notes = []
     if source_errors:
-        error_summary = "; ".join(f"source {sid}: {msg}" for sid, msg in source_errors)
+        notes.append("; ".join(f"source {sid}: {msg}" for sid, msg in source_errors))
+    if budget_exceeded:
+        notes.append(
+            f"time budget ({_REQUEST_TIME_BUDGET_SECONDS // 60} min) reached with {sources_remaining} of "
+            f"{len(source_ids)} source(s) not yet fully processed -- submit another request for the same "
+            "scope to continue; already-downloaded/parsed documents are not repeated"
+        )
+    error_summary = " | ".join(notes) if notes else None
     _post_with_retry(
         http_client, f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
         json={"ok": ok, **({"error": error_summary} if error_summary else {})},
@@ -682,8 +758,8 @@ def _run_resync_all_request(
     request_id = req["id"]
     n = conn.execute("UPDATE documents SET agent_synced_at = NULL, agent_sync_error = NULL").rowcount
     print(f"  resync-all: marked {n} document(s) for re-push")
-    http_client.post(
-        f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+    _report_progress(
+        http_client, server_url, request_id, auth_headers,
         json={"sources_total": 1, "sources_completed": 0, "documents_found": n},
     )
 
@@ -702,18 +778,17 @@ def _run_resync_all_request(
             f"  resync-all batch: {batch_synced - batch_sync_failed}/{batch_synced} synced "
             f"(running total: {synced_total})"
         )
-        http_client.post(
-            f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
+        _report_progress(
+            http_client, server_url, request_id, auth_headers,
             json={"documents_downloaded": synced_total, "documents_failed": sync_failed_total},
         )
 
     print(f"  resync-all done: {synced_total - sync_failed_total}/{synced_total} synced")
-    http_client.post(
-        f"{server_url}/api/agent/queue/{request_id}/progress", headers=auth_headers,
-        json={"sources_completed": 1},
+    _report_progress(
+        http_client, server_url, request_id, auth_headers, json={"sources_completed": 1},
     )
-    http_client.post(
-        f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
+    _post_with_retry(
+        http_client, f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
         json={"ok": True},
     )
 
@@ -795,6 +870,14 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
                             _mirror_sources_from_server(conn, client, server_url, auth_headers)
                             _run_claimed_request(conn, settings, fetcher, client, server_url, auth_headers, req)
                         ops_jobs.cleanup_expired_evidence(conn)
+                    except RequestCancelled:
+                        # An admin's Cancel click, not a failure -- the
+                        # request is already in its final "Cancelled by
+                        # admin" state server-side (report_progress()
+                        # detected it), so there is nothing left to report;
+                        # posting /complete here would be a no-op at best
+                        # and risks confusing the dashboard at worst.
+                        print(f"  request #{req['id']}: cancelled by admin -- stopping this request")
                     except Exception as exc:
                         print(f"! request #{req['id']} failed: {exc}")
                         try:
