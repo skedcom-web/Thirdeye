@@ -12,6 +12,8 @@ import sqlite3
 
 from .. import audit
 from ..db import utcnow
+from ..review import BULK_REJECT_REASONS
+from . import triage
 
 
 class OperationsError(ValueError):
@@ -96,6 +98,16 @@ QUEUE_OCR = "ocr"
 QUEUE_METADATA = "metadata"
 QUEUE_FAILURE = "failure"
 
+# Phase 4.1 Refinement 4 -- Smart Queue Segmentation. Mutually exclusive
+# with each other (and with QUEUE_EXTRACTION/OCR/METADATA/FAILURE above,
+# which stay confidence/needs_ocr-based and unchanged); computed by
+# triage.py, not duplicated here.
+QUEUE_READY_FOR_APPROVAL = triage.QUEUE_READY_FOR_APPROVAL
+QUEUE_NEEDS_CORRECTION = triage.QUEUE_NEEDS_CORRECTION
+QUEUE_LIKELY_NON_GO = triage.QUEUE_LIKELY_NON_GO
+QUEUE_OCR_ISSUES = triage.QUEUE_OCR_ISSUES
+SMART_QUEUES = triage.REVIEWER_QUEUES
+
 # Below this confidence, a record is considered "extraction review" territory
 # regardless of which specific field is weak.
 LOW_CONFIDENCE_THRESHOLD = 0.7
@@ -117,6 +129,21 @@ def queue_by_type(
     Paginated (see queue_counts for the total per queue) -- a queue of
     hundreds capped at a fixed limit with no way to reach the rest is
     exactly the bug this replaces."""
+    if queue_type in SMART_QUEUES:
+        rows = triage.records_in_queue(conn, queue_type, department=department, limit=limit, offset=offset)
+        return [
+            {
+                "id": r["record_id"],
+                "status": "pending",
+                "file_name": r["file_name"],
+                "source_name": r["source_name"],
+                "extraction_confidence": r["extraction_confidence"],
+                "missing_field_names": r["missing_field_names"],
+                "suggested_reject_reason": r["suggested_reject_reason"],
+            }
+            for r in rows
+        ]
+
     dept_clause = " AND s.department = ?" if department else ""
     dept_params = [department] if department else []
 
@@ -190,7 +217,7 @@ def queue_by_type(
 def queue_counts(conn: sqlite3.Connection, *, department: str | None = None) -> dict[str, int]:
     dept_clause = " AND s.department = ?" if department else ""
     dept_params = (department,) if department else ()
-    return {
+    counts = {
         QUEUE_EXTRACTION: conn.execute(
             f"""
             SELECT COUNT(*) AS n FROM go_records r
@@ -203,3 +230,5 @@ def queue_counts(conn: sqlite3.Connection, *, department: str | None = None) -> 
         QUEUE_METADATA: len(queue_by_type(conn, QUEUE_METADATA, department=department, limit=10_000)),
         QUEUE_FAILURE: len(queue_by_type(conn, QUEUE_FAILURE, department=department, limit=10_000)),
     }
+    counts.update(triage.review_segment_counts(conn, department=department))
+    return counts

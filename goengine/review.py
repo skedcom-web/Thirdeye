@@ -21,6 +21,26 @@ STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 
+# Phase 4.1 Refinement 7 -- Bulk Reject's expanded reason list (12, up from
+# the original blueprint's 6), mirroring operations/triage.py's own Non-GO
+# sub-categories for the reasons that overlap. Stored verbatim on the
+# record (review_note) and in the audit trail via reject() below --
+# unchanged from a single rejection's own audit shape.
+BULK_REJECT_REASONS = (
+    "Not a Government Order",
+    "Letter",
+    "Circular",
+    "Notification",
+    "Press Release",
+    "Tender Notice",
+    "Advertisement",
+    "Duplicate",
+    "Poor OCR",
+    "Corrupt PDF",
+    "Irrelevant Document",
+    "Other",
+)
+
 
 class ReviewError(RuntimeError):
     pass

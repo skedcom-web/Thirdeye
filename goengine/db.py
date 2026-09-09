@@ -21,6 +21,7 @@ SCHEMA_CITIZEN_PATH = PACKAGE_DIR / "schema_citizen.sql"
 SCHEMA_DOCUMENT_BLOBS_PATH = PACKAGE_DIR / "schema_document_blobs.sql"
 SCHEMA_ENGAGEMENT_PATH = PACKAGE_DIR / "schema_engagement.sql"
 SCHEMA_REPUBLISH_PATH = PACKAGE_DIR / "schema_republish.sql"
+SCHEMA_REVIEW_OPS_PATH = PACKAGE_DIR / "schema_review_ops.sql"
 
 # Columns added to the pre-existing `sources` table for Phase 1 certification.
 # SQLite's ALTER TABLE has no "ADD COLUMN IF NOT EXISTS", so this is applied
@@ -310,6 +311,7 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_go_records_url_slug ON go_records(go_url_slug)")
     _ensure_columns(conn, "go_records", GO_RECORDS_REPUBLISH_COLUMNS)
     conn.executescript(SCHEMA_REPUBLISH_PATH.read_text(encoding="utf-8"))
+    conn.executescript(SCHEMA_REVIEW_OPS_PATH.read_text(encoding="utf-8"))
 
     from . import go_identity
 

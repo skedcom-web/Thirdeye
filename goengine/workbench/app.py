@@ -929,21 +929,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         core field is skipped, not silently force-approved, since that
         safeguard is the entire point of Phase 1's review gate. Skipped
         records stay pending for individual attention; nothing here bypasses
-        that override."""
-        approved = 0
+        that override. Refinement 8: processed item-by-item, one record's
+        outcome never stops the batch, and the three-way Processed/Skipped/
+        Failed split distinguishes "ineligible" from "unexpected error"."""
+        processed = 0
         skipped: list[tuple[int, str]] = []
+        failed: list[tuple[int, str]] = []
         for record_id in record_ids:
             try:
                 review.approve(conn, record_id, reviewer=current_user.username)
-                approved += 1
+                processed += 1
             except (review.ReviewError, LookupError) as exc:
                 skipped.append((record_id, str(exc)))
+            except Exception as exc:  # one bad record must never abort the batch
+                failed.append((record_id, str(exc)))
 
         qs = f"queue={queue}"
         if department:
             qs += f"&department={department}"
-        qs += f"&bulk_approved={approved}&bulk_skipped={len(skipped)}"
+        qs += f"&bulk_approved={processed}&bulk_skipped={len(skipped)}&bulk_failed={len(failed)}"
         return RedirectResponse(f"/ops/review?{qs}", status_code=303)
+
+    @app.post("/records/bulk-reject")
+    def post_bulk_reject(
+        conn: Conn,
+        current_user: RequireReview,
+        reason: Annotated[str, Form()],
+        record_ids: Annotated[list[int], Form()] = [],
+        queue: Annotated[str, Form()] = "extraction",
+        department: Annotated[str | None, Form()] = None,
+    ):
+        """Bulk Reject (Refinement 3.7/8): mirrors bulk-approve exactly --
+        same per-record review.reject() call already used for a single
+        rejection (same required reason, same audit trail), same
+        skip-not-fail batch behavior. `reason` is one of
+        review.BULK_REJECT_REASONS, chosen once for the whole selection and
+        stored on every rejected record."""
+        if reason not in review.BULK_REJECT_REASONS:
+            raise HTTPException(status_code=400, detail="unknown rejection reason")
+        processed = 0
+        skipped: list[tuple[int, str]] = []
+        failed: list[tuple[int, str]] = []
+        for record_id in record_ids:
+            try:
+                review.reject(conn, record_id, reviewer=current_user.username, reason=reason)
+                processed += 1
+            except (review.ReviewError, LookupError) as exc:
+                skipped.append((record_id, str(exc)))
+            except Exception as exc:
+                failed.append((record_id, str(exc)))
+
+        qs = f"queue={queue}"
+        if department:
+            qs += f"&department={department}"
+        qs += f"&bulk_rejected={processed}&bulk_skipped={len(skipped)}&bulk_failed={len(failed)}"
+        return RedirectResponse(f"/ops/review?{qs}", status_code=303)
+
+    @app.post("/records/bulk-reprocess")
+    def post_bulk_reprocess(
+        conn: Conn,
+        config: Config,
+        current_user: RequireReview,
+        record_ids: Annotated[list[int], Form()] = [],
+        redirect_to: Annotated[str, Form()] = "/ops/failures",
+    ):
+        """Bulk Reprocess (Refinement 3): reuses the exact single-record
+        reprocess path (pipeline.parse_document against the already-archived
+        document) per selected record -- no new extraction workflow. Each
+        reprocess creates a fresh pending go_records row and leaves the
+        original untouched, same as the single-record route. Available from
+        the Failure Workbench, the Critical Extraction Failure section, and
+        the Metadata Workbench, so `redirect_to` carries the caller back to
+        wherever it was triggered from."""
+        processed = 0
+        skipped: list[tuple[int, str]] = []
+        failed: list[tuple[int, str]] = []
+        for record_id in record_ids:
+            row = conn.execute("SELECT document_id FROM go_records WHERE id = ?", (record_id,)).fetchone()
+            if row is None:
+                skipped.append((record_id, "no such record"))
+                continue
+            try:
+                pipeline.parse_document(conn, config, int(row["document_id"]), actor=current_user.username)
+                processed += 1
+            except Exception as exc:
+                failed.append((record_id, str(exc)))
+
+        safe_redirect = redirect_to if redirect_to.startswith("/") else "/ops/failures"
+        separator = "&" if "?" in safe_redirect else "?"
+        qs = f"bulk_reprocessed={processed}&bulk_skipped={len(skipped)}&bulk_failed={len(failed)}"
+        return RedirectResponse(f"{safe_redirect}{separator}{qs}", status_code=303)
 
     @app.post("/records/{record_id}/reject")
     def post_reject(

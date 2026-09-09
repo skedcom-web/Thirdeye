@@ -29,6 +29,14 @@
       {% endfor %}
     </select>
   </div>
+  <div>
+    <label class="field-label" for="review-page-size">Page size</label>
+    <select name="page_size" id="review-page-size" onchange="this.form.submit()">
+      {% for size in page_sizes %}
+      <option value="{{ size }}" {% if page_size == size %}selected{% endif %}>{{ size }}</option>
+      {% endfor %}
+    </select>
+  </div>
 </form>
 
 {# ═══ Queue selector cards ══════════════════════════════════════════ #}
@@ -71,14 +79,62 @@
   </a>
 </div>
 
-{# ═══ Bulk-approve result banner ═════════════════════════════════════ #}
-{% if bulk_approved is not none %}
+{# ═══ Smart queues (Phase 4.1 Refinement 4) ═════════════════════════ #}
+<p class="muted" style="font-size:12px; margin:16px 0 8px;">
+  Smart queues -- every pending record not routed to Critical Extraction Failure (see
+  <a href="/ops/failures">Extraction Failure Workbench</a>) lands in exactly one of these.
+</p>
+<div class="review-queue-grid">
+  <a class="review-queue-card {% if selected_queue == 'ready_for_approval' %}active{% endif %}"
+     href="/ops/review?queue=ready_for_approval{{ dept_qs }}" id="review-queue-ready-btn">
+    <div class="rq-icon" aria-hidden="true">✅</div>
+    <div class="rq-count">{{ counts.ready_for_approval }}</div>
+    <div class="rq-label">Ready For Approval</div>
+    <div class="rq-desc">All required fields present, nothing flagged -- select and bulk approve</div>
+    {% if counts.ready_for_approval %}<div class="rq-badge">{{ counts.ready_for_approval }} ready</div>{% endif %}
+  </a>
+
+  <a class="review-queue-card {% if selected_queue == 'needs_correction' %}active{% endif %}"
+     href="/ops/review?queue=needs_correction{{ dept_qs }}" id="review-queue-needs-correction-btn">
+    <div class="rq-icon" aria-hidden="true">✏️</div>
+    <div class="rq-count {% if counts.needs_correction %}rq-count-warn{% endif %}">{{ counts.needs_correction }}</div>
+    <div class="rq-label">Needs Correction</div>
+    <div class="rq-desc">Missing 1-2 required fields</div>
+    {% if counts.needs_correction %}<div class="rq-badge">{{ counts.needs_correction }} waiting</div>{% endif %}
+  </a>
+
+  <a class="review-queue-card {% if selected_queue == 'likely_non_go' %}active{% endif %}"
+     href="/ops/review?queue=likely_non_go{{ dept_qs }}" id="review-queue-likely-non-go-btn">
+    <div class="rq-icon" aria-hidden="true">🚫</div>
+    <div class="rq-count {% if counts.likely_non_go %}rq-count-warn{% endif %}">{{ counts.likely_non_go }}</div>
+    <div class="rq-label">Likely Non-GO</div>
+    <div class="rq-desc">Letters, circulars, notifications, tenders, advertisements -- classifier suggestion only</div>
+    {% if counts.likely_non_go %}<div class="rq-badge">{{ counts.likely_non_go }} to review</div>{% endif %}
+  </a>
+
+  <a class="review-queue-card {% if selected_queue == 'ocr_issues' %}active{% endif %}"
+     href="/ops/review?queue=ocr_issues{{ dept_qs }}" id="review-queue-ocr-issues-btn">
+    <div class="rq-icon" aria-hidden="true">🔬</div>
+    <div class="rq-count {% if counts.ocr_issues %}rq-count-warn{% endif %}">{{ counts.ocr_issues }}</div>
+    <div class="rq-label">OCR Issues</div>
+    <div class="rq-desc">Low-confidence OCR text</div>
+    {% if counts.ocr_issues %}<div class="rq-badge">{{ counts.ocr_issues }} waiting</div>{% endif %}
+  </a>
+</div>
+
+{# ═══ Bulk action result banner (Refinement 8: Processed/Skipped/Failed) ══ #}
+{% if bulk_approved is not none or bulk_rejected is not none %}
 <div class="panel" style="margin-bottom:16px;">
   <p style="margin:0;">
+    {% if bulk_approved is not none %}
     <span class="pill ok">bulk approve complete</span>
-    Approved {{ bulk_approved }} record(s).
+    Processed {{ bulk_approved }}, Skipped {{ bulk_skipped or 0 }}, Failed {{ bulk_failed or 0 }}.
+    {% else %}
+    <span class="pill ok">bulk reject complete</span>
+    Processed {{ bulk_rejected }}, Skipped {{ bulk_skipped or 0 }}, Failed {{ bulk_failed or 0 }}.
+    {% endif %}
     {% if bulk_skipped and bulk_skipped != '0' %}
-    {{ bulk_skipped }} skipped (missing a required field -- open those individually to correct and approve).
+    Skipped records were ineligible (e.g. missing a required field, or already reviewed) and stay pending for individual attention.
     {% endif %}
   </p>
 </div>
@@ -92,6 +148,10 @@
       {% elif selected_queue == 'ocr' %}🔬 OCR Review Queue
       {% elif selected_queue == 'metadata' %}📊 Metadata Review Queue
       {% elif selected_queue == 'failure' %}⚠ Failed Documents
+      {% elif selected_queue == 'ready_for_approval' %}✅ Ready For Approval Workbench
+      {% elif selected_queue == 'needs_correction' %}✏️ Needs Correction Queue
+      {% elif selected_queue == 'likely_non_go' %}🚫 Likely Non-GO Queue
+      {% elif selected_queue == 'ocr_issues' %}🔬 OCR Issues Queue
       {% else %}Review Queue
       {% endif %}
     </h2>
@@ -104,12 +164,22 @@
   <form method="post" action="/records/bulk-approve" id="bulk-approve-form">
     <input type="hidden" name="queue" value="{{ selected_queue }}">
     <input type="hidden" name="department" value="{{ selected_department }}">
-    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
       <button class="btn-sm btn-primary" type="submit" id="bulk-approve-btn" disabled>
         ✅ Approve Selected (<span id="bulk-approve-count">0</span>)
       </button>
+      {% if bulk_reject_allowed %}
+      <select name="reason" id="bulk-reject-reason" aria-label="Rejection reason">
+        {% for r in bulk_reject_reasons %}
+        <option value="{{ r }}">{{ r }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn-sm danger" type="submit" formaction="/records/bulk-reject" id="bulk-reject-btn" disabled>
+        🚫 Reject Selected (<span id="bulk-reject-count">0</span>)
+      </button>
+      {% endif %}
       <span class="muted" style="font-size:12px;" id="bulk-approve-hint">
-        Records missing a required field are skipped automatically and stay pending for individual review.
+        Ineligible records (e.g. missing a required field) are skipped automatically and stay pending for individual review.
       </span>
       <span id="bulk-approve-status" style="display:none; font-size:13px; font-weight:600; color:var(--accent);">
         <span class="spinner" aria-hidden="true"></span> <span id="bulk-approve-status-text"></span>
@@ -122,6 +192,8 @@
           <th>Record</th>
           <th>Document</th>
           <th>Source</th>
+          {% if selected_queue == 'likely_non_go' %}<th>Classified As</th>{% endif %}
+          {% if selected_queue == 'needs_correction' %}<th>Missing Fields</th>{% endif %}
           <th>Action</th>
         </tr>
       </thead>
@@ -132,6 +204,8 @@
           <td class="mono">#{{ r.id }}</td>
           <td class="mono">{{ r.file_name }}</td>
           <td>{{ r.source_name }}</td>
+          {% if selected_queue == 'likely_non_go' %}<td><span class="pill warn">{{ r.suggested_reject_reason }}</span></td>{% endif %}
+          {% if selected_queue == 'needs_correction' %}<td>{{ r.missing_field_names|join(', ') }}</td>{% endif %}
           <td><a href="/records/{{ r.id }}" id="review-record-{{ r.id }}-btn">Review →</a></td>
         </tr>
         {% endfor %}
@@ -145,16 +219,22 @@
       if (!form) return;
       var selectAll = document.getElementById("bulk-approve-select-all");
       var rowBoxes = form.querySelectorAll(".bulk-approve-row");
-      var button = document.getElementById("bulk-approve-btn");
-      var countLabel = document.getElementById("bulk-approve-count");
+      var approveBtn = document.getElementById("bulk-approve-btn");
+      var rejectBtn = document.getElementById("bulk-reject-btn");
+      var approveCount = document.getElementById("bulk-approve-count");
+      var rejectCount = document.getElementById("bulk-reject-count");
       var hint = document.getElementById("bulk-approve-hint");
       var status = document.getElementById("bulk-approve-status");
       var statusText = document.getElementById("bulk-approve-status-text");
 
       function refresh() {
         var checked = form.querySelectorAll(".bulk-approve-row:checked").length;
-        countLabel.textContent = checked;
-        button.disabled = checked === 0;
+        approveCount.textContent = checked;
+        approveBtn.disabled = checked === 0;
+        if (rejectBtn) {
+          rejectCount.textContent = checked;
+          rejectBtn.disabled = checked === 0;
+        }
         selectAll.checked = checked === rowBoxes.length && rowBoxes.length > 0;
         selectAll.indeterminate = checked > 0 && checked < rowBoxes.length;
       }
@@ -165,13 +245,22 @@
       });
       rowBoxes.forEach(function (box) { box.addEventListener("change", refresh); });
 
+      function lockForm(message) {
+        approveBtn.disabled = true;
+        if (rejectBtn) rejectBtn.disabled = true;
+        selectAll.disabled = true;
+        form.querySelector("table").style.opacity = "0.6";
+        form.querySelector("table").style.pointerEvents = "none";
+        hint.style.display = "none";
+        statusText.textContent = message;
+        status.style.display = "inline-flex";
+        status.style.alignItems = "center";
+        status.style.gap = "6px";
+      }
+
       form.addEventListener("submit", function (e) {
         var checked = form.querySelectorAll(".bulk-approve-row:checked").length;
         if (checked === 0) {
-          e.preventDefault();
-          return;
-        }
-        if (!confirm("Approve " + checked + " selected record(s)?")) {
           e.preventDefault();
           return;
         }
@@ -186,15 +275,21 @@
         // them here (before the browser has finished collecting this same
         // submission's data) would silently send zero record_ids. Greying
         // the table out is a purely visual cue instead.
-        button.disabled = true;
-        selectAll.disabled = true;
-        form.querySelector("table").style.opacity = "0.6";
-        form.querySelector("table").style.pointerEvents = "none";
-        hint.style.display = "none";
-        statusText.textContent = "Approving " + checked + " record(s)… please wait, this page will refresh automatically.";
-        status.style.display = "inline-flex";
-        status.style.alignItems = "center";
-        status.style.gap = "6px";
+        var submitter = e.submitter;
+        var isReject = submitter && submitter.id === "bulk-reject-btn";
+        if (isReject) {
+          if (!confirm("Reject " + checked + " selected record(s)?")) {
+            e.preventDefault();
+            return;
+          }
+          lockForm("Rejecting " + checked + " record(s)… please wait, this page will refresh automatically.");
+        } else {
+          if (!confirm("Approve " + checked + " selected record(s)?")) {
+            e.preventDefault();
+            return;
+          }
+          lockForm("Approving " + checked + " record(s)… please wait, this page will refresh automatically.");
+        }
       });
     })();
   </script>

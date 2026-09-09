@@ -31,9 +31,11 @@ from ..operations import failures as ops_failures
 from ..operations import health as ops_health
 from ..operations import publication as ops_publication
 from ..operations import analytics as ops_analytics
+from ..operations import backlog_campaigns as ops_campaigns
 from ..operations import quality as ops_quality
 from ..operations import reset as ops_reset
 from ..operations import review as ops_review
+from ..operations import review_dashboard as ops_review_dashboard
 from ..operations import sources as ops_sources
 from ..discovery import crawler
 from .deps import (
@@ -63,6 +65,7 @@ def register(app: FastAPI) -> None:
     _register_jobs(app)
     _register_documents(app)
     _register_review(app)
+    _register_review_dashboard(app)
     _register_publication(app)
     _register_dashboard(app)
     _register_certification(app)
@@ -543,15 +546,31 @@ def _register_documents(app: FastAPI) -> None:
 # Module 7: Review Workbench (typed queues + escalation)
 # ---------------------------------------------------------------------------
 def _register_review(app: FastAPI) -> None:
-    REVIEW_PAGE_SIZE = 50
+    DEFAULT_REVIEW_PAGE_SIZE = 100
+    ALLOWED_REVIEW_PAGE_SIZES = (50, 100, 250)
+    ALL_REVIEW_QUEUES = (
+        ops_review.QUEUE_EXTRACTION, ops_review.QUEUE_OCR, ops_review.QUEUE_METADATA, ops_review.QUEUE_FAILURE,
+        *ops_review.SMART_QUEUES,
+    )
+    # Refinement 3: Bulk Reject is offered on the queues a reviewer actually
+    # triages record-by-record -- not Ready For Approval (nothing there
+    # should normally need rejecting) and not Failed Documents (that queue
+    # isn't go_records-keyed the same way; see /ops/failures instead).
+    BULK_REJECT_QUEUES = (
+        ops_review.QUEUE_EXTRACTION, ops_review.QUEUE_OCR, ops_review.QUEUE_METADATA,
+        ops_review.QUEUE_LIKELY_NON_GO, ops_review.QUEUE_NEEDS_CORRECTION,
+    )
 
     @app.get("/ops/review", response_class=HTMLResponse)
     def review_hub(
         request: Request, conn: Conn, current_user: LoggedIn,
         queue: str = ops_review.QUEUE_EXTRACTION, department: str | None = None, page: int = 1,
+        page_size: int = DEFAULT_REVIEW_PAGE_SIZE,
     ):
-        if queue not in (ops_review.QUEUE_EXTRACTION, ops_review.QUEUE_OCR, ops_review.QUEUE_METADATA, ops_review.QUEUE_FAILURE):
+        if queue not in ALL_REVIEW_QUEUES:
             raise HTTPException(status_code=400, detail="unknown queue type")
+        if page_size not in ALLOWED_REVIEW_PAGE_SIZES:
+            raise HTTPException(status_code=400, detail="unsupported page size")
         all_departments = registry.list_departments(conn)
         department = department or None
         if department is not None and department not in all_departments:
@@ -559,9 +578,12 @@ def _register_review(app: FastAPI) -> None:
 
         counts = ops_review.queue_counts(conn, department=department)
         total = counts[queue]
-        total_pages = max((total + REVIEW_PAGE_SIZE - 1) // REVIEW_PAGE_SIZE, 1)
+        total_pages = max((total + page_size - 1) // page_size, 1)
         page = min(max(page, 1), total_pages)
-        qs = urlencode({"queue": queue, **({"department": department} if department else {})})
+        qs = urlencode({
+            "queue": queue, "page_size": page_size,
+            **({"department": department} if department else {}),
+        })
 
         return templates.TemplateResponse(
             request, "review_hub.html",
@@ -571,18 +593,23 @@ def _register_review(app: FastAPI) -> None:
                 "selected_department": department or "",
                 "departments": all_departments,
                 "records": ops_review.queue_by_type(
-                    conn, queue, department=department, limit=REVIEW_PAGE_SIZE,
-                    offset=(page - 1) * REVIEW_PAGE_SIZE,
+                    conn, queue, department=department, limit=page_size,
+                    offset=(page - 1) * page_size,
                 ),
                 "page": page,
                 "total_pages": total_pages,
-                "page_size": REVIEW_PAGE_SIZE,
+                "page_size": page_size,
+                "page_sizes": ALLOWED_REVIEW_PAGE_SIZES,
                 "pagination_qs": qs,
+                "bulk_reject_allowed": queue in BULK_REJECT_QUEUES,
+                "bulk_reject_reasons": ops_review.BULK_REJECT_REASONS,
                 "open_escalations": ops_review.open_escalations(conn),
                 "current_user": current_user,
                 "can_escalate": current_user.has_permission("escalate_records"),
                 "bulk_approved": request.query_params.get("bulk_approved"),
+                "bulk_rejected": request.query_params.get("bulk_rejected"),
                 "bulk_skipped": request.query_params.get("bulk_skipped"),
+                "bulk_failed": request.query_params.get("bulk_failed"),
             },
         )
 
@@ -633,6 +660,42 @@ def _register_review(app: FastAPI) -> None:
         except (ops_review.OperationsError, LookupError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return RedirectResponse("/ops/review", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.1 -- Review Operations Dashboard (Refinements 5 & 6, plus the
+# original blueprint's Initiatives 6-9)
+# ---------------------------------------------------------------------------
+def _register_review_dashboard(app: FastAPI) -> None:
+    @app.get("/ops/review/dashboard", response_class=HTMLResponse)
+    def review_dashboard_page(request: Request, conn: Conn, current_user: LoggedIn):
+        return templates.TemplateResponse(
+            request, "ops_review_dashboard.html",
+            {
+                **ops_review_dashboard.dashboard_summary(conn),
+                "campaign": ops_campaigns.campaign_progress(conn),
+                "current_user": current_user,
+                "can_manage_campaign": current_user.has_permission("run_certification"),
+                "campaign_error": request.query_params.get("campaign_error"),
+            },
+        )
+
+    @app.post("/ops/review/dashboard/campaign/start")
+    def start_backlog_campaign(
+        conn: Conn, current_user: RequireCertify, target_count: Annotated[int, Form()],
+    ):
+        try:
+            ops_campaigns.start_campaign(conn, target_count=target_count, started_by=current_user.username)
+        except ops_campaigns.CampaignError as exc:
+            return RedirectResponse(
+                f"/ops/review/dashboard?{urlencode({'campaign_error': str(exc)})}", status_code=303
+            )
+        return RedirectResponse("/ops/review/dashboard", status_code=303)
+
+    @app.post("/ops/review/dashboard/campaign/{campaign_id}/end")
+    def end_backlog_campaign(campaign_id: int, conn: Conn, current_user: RequireCertify):
+        ops_campaigns.end_campaign(conn, campaign_id)
+        return RedirectResponse("/ops/review/dashboard", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -827,11 +890,15 @@ def _register_certification(app: FastAPI) -> None:
             request, "ops_failures.html",
             {
                 "failures": ops_failures.pipeline_failures(conn, department=department, stage=stage),
+                "critical_failures": ops_failures.critical_extraction_failures(conn, department=department),
                 "departments": all_departments,
                 "stages": ops_failures.ALL_STAGES,
                 "selected_department": department or "",
                 "selected_stage": stage or "",
                 "current_user": current_user,
+                "bulk_reprocessed": request.query_params.get("bulk_reprocessed"),
+                "bulk_skipped": request.query_params.get("bulk_skipped"),
+                "bulk_failed": request.query_params.get("bulk_failed"),
             },
         )
 

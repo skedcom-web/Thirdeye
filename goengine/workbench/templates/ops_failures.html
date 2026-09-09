@@ -34,7 +34,98 @@
   </div>
 </form>
 
+{# ═══ Bulk-reprocess result banner ═══════════════════════════════════ #}
+{% if bulk_reprocessed is not none %}
+<div class="panel" style="margin-bottom:16px;">
+  <p style="margin:0;">
+    <span class="pill ok">bulk reprocess complete</span>
+    Processed {{ bulk_reprocessed }}, Skipped {{ bulk_skipped or 0 }}, Failed {{ bulk_failed or 0 }}.
+    Each reprocessed record created a fresh pending review record; the original is unchanged.
+  </p>
+</div>
+{% endif %}
+
+{# ═══ Critical Extraction Failure (Refinement 2) ══════════════════════ #}
+<div class="panel" style="margin-bottom:16px;">
+  <h2 style="margin-top:0;">🧩 Critical Extraction Failure <span class="pill bad" style="margin-left:8px;">{{ critical_failures|length }}</span></h2>
+  <p class="muted" style="margin-top:-4px;">
+    Parsed without a pipeline-stage error, but missing 3 or more of the 4 core fields (GO Number, GO Date,
+    Department, Subject). These need re-extraction, not field-by-field review -- kept out of the normal
+    Review Center queues on purpose.
+  </p>
+  {% if critical_failures %}
+  <form method="post" action="/records/bulk-reprocess" id="bulk-reprocess-form">
+    <input type="hidden" name="redirect_to" value="/ops/failures">
+    <div style="margin-bottom:8px;">
+      <button class="btn-sm btn-secondary" type="submit" id="bulk-reprocess-btn" disabled>
+        ↻ Reprocess Selected (<span id="bulk-reprocess-count">0</span>)
+      </button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:32px;"><input type="checkbox" id="bulk-reprocess-select-all" title="Select all"></th>
+          <th>Record</th>
+          <th>Department</th>
+          <th>Document</th>
+          <th>Missing Fields</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in critical_failures %}
+        <tr>
+          <td><input type="checkbox" class="bulk-reprocess-row" name="record_ids" value="{{ c.record_id }}"></td>
+          <td class="mono"><a href="/records/{{ c.record_id }}">#{{ c.record_id }}</a></td>
+          <td>{{ c.department }}</td>
+          <td class="mono">{{ c.file_name }}</td>
+          <td>{{ c.missing_field_names|join(', ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
+  <script>
+    (function () {
+      var form = document.getElementById("bulk-reprocess-form");
+      if (!form) return;
+      var selectAll = document.getElementById("bulk-reprocess-select-all");
+      var rowBoxes = form.querySelectorAll(".bulk-reprocess-row");
+      var button = document.getElementById("bulk-reprocess-btn");
+      var countLabel = document.getElementById("bulk-reprocess-count");
+
+      function refresh() {
+        var checked = form.querySelectorAll(".bulk-reprocess-row:checked").length;
+        countLabel.textContent = checked;
+        button.disabled = checked === 0;
+        selectAll.checked = checked === rowBoxes.length && rowBoxes.length > 0;
+        selectAll.indeterminate = checked > 0 && checked < rowBoxes.length;
+      }
+
+      selectAll.addEventListener("change", function () {
+        rowBoxes.forEach(function (box) { box.checked = selectAll.checked; });
+        refresh();
+      });
+      rowBoxes.forEach(function (box) { box.addEventListener("change", refresh); });
+
+      form.addEventListener("submit", function (e) {
+        var checked = form.querySelectorAll(".bulk-reprocess-row:checked").length;
+        if (checked === 0) {
+          e.preventDefault();
+          return;
+        }
+        if (!confirm("Reprocess " + checked + " selected record(s)? Each will create a new pending review record.")) {
+          e.preventDefault();
+        }
+      });
+    })();
+  </script>
+  {% else %}
+  <p class="muted">No critical extraction failures{{ ' for this department' if selected_department else '' }}.</p>
+  {% endif %}
+</div>
+
 <div class="panel">
+  <h2 style="margin-top:0;">Pipeline-Stage Failures</h2>
   <table>
     <thead>
       <tr><th>Department</th><th>Source</th><th>Failure Stage</th><th>Error Message</th><th>Timestamp</th><th>Retry</th></tr>

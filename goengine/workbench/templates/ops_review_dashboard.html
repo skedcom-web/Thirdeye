@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Review Operations Dashboard · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center · Phase 4.1</div>
+    <h1 class="occ-page-title">Review Operations Dashboard</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      Live backlog segmentation, throughput, and velocity -- everything here is computed fresh from current data.
+    </p>
+  </div>
+  <a class="ghost btn" href="/ops/review">Open Review Center →</a>
+</div>
+
+<h2 style="margin-bottom:8px;">Backlog Segmentation</h2>
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🧩</div></div>
+    <div class="kpi-n">{{ segment_counts.critical_extraction_failure }}</div>
+    <div class="kpi-l">Critical Extraction Failure</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🔬</div></div>
+    <div class="kpi-n">{{ segment_counts.ocr_issues }}</div>
+    <div class="kpi-l">OCR Issues</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">🚫</div></div>
+    <div class="kpi-n">{{ segment_counts.likely_non_go }}</div>
+    <div class="kpi-l">Likely Non-GO</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">✏️</div></div>
+    <div class="kpi-n">{{ segment_counts.needs_correction }}</div>
+    <div class="kpi-l">Needs Correction</div>
+  </div>
+</div>
+
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--ok);">✅</div></div>
+    <div class="kpi-n">{{ segment_counts.ready_for_approval }}</div>
+    <div class="kpi-l">Ready For Approval</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--ok);">👍</div></div>
+    <div class="kpi-n">{{ approved_today }}</div>
+    <div class="kpi-l">Approved Today</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--bad);">👎</div></div>
+    <div class="kpi-n">{{ rejected_today }}</div>
+    <div class="kpi-l">Rejected Today</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">⚡</div></div>
+    <div class="kpi-n" style="font-size:20px;">
+      <span class="pill {{ 'ok' if throughput.label == 'Excellent' else ('warn' if throughput.label == 'Good' else 'bad') }}">{{ throughput.label }}</span>
+    </div>
+    <div class="kpi-l">Review Throughput Score</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">
+      {{ throughput.approved_today }} approved ÷ {{ throughput.pending_review }} pending
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:24px;">
+  <h2 style="margin-top:0;">🔥 Top 20 Publication Blockers</h2>
+  <p class="muted" style="margin-top:-4px;">Most missing core fields first, then lowest extraction confidence.</p>
+  {% if top_blockers %}
+  <table>
+    <thead>
+      <tr><th>Record</th><th>Department</th><th>Missing Fields</th><th>Confidence</th><th>Quick Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for b in top_blockers %}
+      <tr>
+        <td class="mono">#{{ b.record_id }}</td>
+        <td>{{ b.department }}</td>
+        <td>{{ b.missing_field_names|join(', ') if b.missing_field_names else '—' }}</td>
+        <td class="mono">{{ '%.2f'|format(b.extraction_confidence) if b.extraction_confidence is not none else '—' }}</td>
+        <td style="display:flex; gap:8px;">
+          <a class="btn-sm btn-secondary" href="/records/{{ b.record_id }}">Review</a>
+          <form method="post" action="/records/bulk-reprocess" class="inline">
+            <input type="hidden" name="record_ids" value="{{ b.record_id }}">
+            <input type="hidden" name="redirect_to" value="/ops/review/dashboard">
+            <button class="btn-sm btn-secondary" type="submit">↻ Reprocess</button>
+          </form>
+          <form method="post" action="/records/{{ b.record_id }}/reject" class="inline"
+                onsubmit="return confirm('Reject record #{{ b.record_id }}?');">
+            <input type="hidden" name="reason" value="{{ b.suggested_reject_reason or 'Other' }}">
+            <button class="btn-sm danger" type="submit">🚫 Reject</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No publication blockers right now.</p>
+  {% endif %}
+</div>
+
+<div class="grid cols-2" style="margin-bottom:24px; align-items:start;">
+  <div class="panel">
+    <h2 style="margin-top:0;">🏛 Department Triage</h2>
+    <p class="muted" style="margin-top:-4px;">Top departments by live review-failure count (everything except Ready For Approval).</p>
+    {% if department_triage %}
+    <table>
+      <thead><tr><th>Department</th><th>Needs Attention</th><th></th></tr></thead>
+      <tbody>
+        {% for d in department_triage %}
+        <tr>
+          <td>{{ d.department }}</td>
+          <td class="mono">{{ d.needs_attention }}</td>
+          <td><a href="/ops/review?queue=extraction&department={{ d.department|urlencode }}">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No departments need attention right now.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2 style="margin-top:0;">🏆 Department Leaderboard <span class="muted" style="font-size:12px; font-weight:400;">(last 30 days)</span></h2>
+    {% if department_leaderboard %}
+    <table>
+      <thead><tr><th>Department</th><th>Approvals</th></tr></thead>
+      <tbody>
+        {% for d in department_leaderboard[:10] %}
+        <tr><td>{{ d.department }}</td><td class="mono">{{ d.approvals }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No approvals recorded in the last 30 days.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:24px;">
+  <h2 style="margin-top:0;">📈 Publication Velocity <span class="muted" style="font-size:12px; font-weight:400;">(last 30 days)</span></h2>
+  <p class="muted" style="margin-top:-4px;">
+    Average review time:
+    {% if average_review_time_hours is not none %}{{ '%.1f'|format(average_review_time_hours) }} hours{% else %}not enough reviewed records yet{% endif %}
+  </p>
+  {% if daily_activity %}
+  <table>
+    <thead><tr><th>Date</th><th>Approved</th><th>Rejected</th></tr></thead>
+    <tbody>
+      {% for d in daily_activity %}
+      <tr><td class="mono">{{ d.date }}</td><td class="mono">{{ d.approved }}</td><td class="mono">{{ d.rejected }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No review activity recorded in the last 30 days.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0;">🎯 Backlog Reduction Campaign</h2>
+  {% if campaign_error %}<p class="pill bad">{{ campaign_error }}</p>{% endif %}
+  {% if campaign %}
+  <div class="grid cols-4" style="margin-bottom:12px;">
+    <div class="kpi-card occ-kpi">
+      <div class="kpi-n">{{ campaign.starting_count }}</div>
+      <div class="kpi-l">Starting Backlog</div>
+    </div>
+    <div class="kpi-card occ-kpi">
+      <div class="kpi-n">{{ campaign.current_count }}</div>
+      <div class="kpi-l">Current Backlog</div>
+    </div>
+    <div class="kpi-card occ-kpi">
+      <div class="kpi-n">{{ '%.1f'|format(campaign.reduction_pct) }}%</div>
+      <div class="kpi-l">Reduction Toward Target ({{ campaign.target_count }})</div>
+    </div>
+    <div class="kpi-card occ-kpi">
+      <div class="kpi-n">{% if campaign.days_remaining is not none %}~{{ campaign.days_remaining|round|int }}{% else %}—{% endif %}</div>
+      <div class="kpi-l">Days Remaining (estimate)</div>
+    </div>
+  </div>
+  <p class="muted" style="font-size:12px;">
+    Started {{ campaign.started_at }} by {{ campaign.started_by }}. Days-remaining is a linear estimate from
+    the last 7 days' real review activity, not a commitment.
+  </p>
+  {% if can_manage_campaign %}
+  <form method="post" action="/ops/review/dashboard/campaign/{{ campaign.campaign_id }}/end"
+        onsubmit="return confirm('End this campaign?');">
+    <button class="ghost" type="submit">End Campaign</button>
+  </form>
+  {% endif %}
+  {% else %}
+  <p class="muted">No active campaign.</p>
+  {% if can_manage_campaign %}
+  <form method="post" action="/ops/review/dashboard/campaign/start" style="display:flex; gap:8px; align-items:center;">
+    <label class="field-label" for="campaign-target">Target pending count</label>
+    <input type="number" name="target_count" id="campaign-target" min="0" required style="width:120px;">
+    <button class="btn-sm btn-primary" type="submit">Start Campaign</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% endblock %}

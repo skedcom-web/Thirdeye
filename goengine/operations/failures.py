@@ -15,6 +15,8 @@ import json
 import sqlite3
 from urllib.parse import quote
 
+from . import triage
+
 STAGE_DISCOVERY = "Discovery"
 STAGE_DOWNLOAD = "Download"
 STAGE_OCR = "OCR"
@@ -138,6 +140,26 @@ def _publication_failures(conn: sqlite3.Connection) -> list[dict]:
         _row(department=r["department"], source_name=r["source_name"], stage=STAGE_PUBLICATION,
              error_message=r["review_note"] or "Rejected on review", timestamp=r["reviewed_at"],
              sort_id=int(r["id"]))
+        for r in rows
+    ]
+
+
+def critical_extraction_failures(conn: sqlite3.Connection, *, department: str | None = None) -> list[dict]:
+    """Phase 4.1 Refinement 2 -- records that parsed without any pipeline-
+    stage error (so they don't show up in the sections above) but are still
+    missing 3+ of the 4 core fields. These need re-extraction/reprocessing,
+    not field-by-field review, so they're kept out of the normal review
+    queues (operations/review.py) and surfaced here instead, alongside the
+    other real failure stages -- one unified failure-triage surface."""
+    rows = triage.records_in_queue(conn, triage.QUEUE_CRITICAL, department=department, limit=10_000)
+    return [
+        {
+            "record_id": r["record_id"],
+            "department": r["department"],
+            "source_name": r["source_name"],
+            "file_name": r["file_name"],
+            "missing_field_names": r["missing_field_names"],
+        }
         for r in rows
     ]
 
