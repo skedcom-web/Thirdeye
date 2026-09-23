@@ -85,7 +85,16 @@ class Settings:
 
     @classmethod
     def load(cls, data_dir: str | os.PathLike[str] | None = None) -> "Settings":
-        root = Path(data_dir or os.environ.get("THIRDEYE_DATA_DIR") or PROJECT_ROOT / "data")
+        # Netlify Functions run on a read-only filesystem outside /tmp.
+        # netlify.toml sets THIRDEYE_DATA_DIR=/tmp/thirdeye explicitly, but
+        # this is a defense-in-depth fallback in case that env var is ever
+        # missing from a Netlify site's config -- without it, ensure_dirs()
+        # crashes every cold start trying to mkdir under PROJECT_ROOT.
+        # `NETLIFY` is set by Netlify's own build/function runtime and isn't
+        # present on Render or in local dev, so this doesn't change behavior
+        # anywhere else.
+        default_root = "/tmp/thirdeye" if os.environ.get("NETLIFY") else PROJECT_ROOT / "data"
+        root = Path(data_dir or os.environ.get("THIRDEYE_DATA_DIR") or default_root)
         root = root.resolve()
         return cls(
             data_dir=root,

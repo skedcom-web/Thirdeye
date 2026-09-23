@@ -11,6 +11,7 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.20",
     "pypdf>=5.1",
+    "mangum>=0.17.0",
 ]
 
 [project.optional-dependencies]
