@@ -4,6 +4,10 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
+# Netlify CLI's local project cache (from an abandoned migration attempt --
+# Netlify Functions don't support Python, see git history).
+.netlify/
+
 # Runtime data: the document repository and database are local state, never
 # committed. The repository is rebuildable from the source registry.
 data/

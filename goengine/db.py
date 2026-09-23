@@ -313,11 +313,15 @@ def init_db(settings: Settings) -> sqlite3.Connection:
     conn.executescript(SCHEMA_REPUBLISH_PATH.read_text(encoding="utf-8"))
     conn.executescript(SCHEMA_REVIEW_OPS_PATH.read_text(encoding="utf-8"))
 
-    from . import go_identity
-
-    go_identity.backfill_all(conn)
-    for department in GO_IDENTITY_DEPARTMENT_CODE_MIGRATIONS:
-        go_identity.migrate_department_code(conn, department)
+    # NOTE: go_identity.backfill_all()/migrate_department_code() used to run
+    # here on every boot. Real record creation already computes identity
+    # inline at parse time (see extract_and_store/correct_field), so this
+    # was only ever a legacy-data safety net -- but compute_identity() does
+    # 2-3 network round trips per record, and at real production scale
+    # (thousands of records still missing identity, against a remote Turso
+    # database) that turned a boot into a multi-minute operation, which
+    # reads as a hung/crashed app to any platform's health check. Run it
+    # explicitly instead: `python -m goengine.cli backfill-identity`.
 
     # Automatically seed Tamil Nadu if table is empty and we are not in test mode
     if "PYTEST_CURRENT_TEST" not in os.environ:

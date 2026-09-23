@@ -23,12 +23,37 @@ package) before this shim was written -- see chat history for the probe.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Sequence
+import time
+from typing import Any, Callable, Iterable, Sequence, TypeVar
 
+import aiohttp
 import libsql_client
 
 _BEGIN_RE = re.compile(r"\bBEGIN\b", re.IGNORECASE)
 _END_RE = re.compile(r"\bEND\b", re.IGNORECASE)
+
+_T = TypeVar("_T")
+# Transient connection-level failures only -- never a SQL/protocol error
+# (LibsqlError), so a genuine bad statement still surfaces immediately
+# instead of being retried into a slow, confusing failure. Added after a
+# real deployment saw a container's network namespace briefly unable to
+# resolve DNS in the first instant after startup (ClientConnectorDNSError,
+# "Temporary failure in name resolution") -- a known cold-start race, not a
+# permanent block; a short retry clears it in practice.
+_RETRYABLE_EXCEPTIONS = (aiohttp.ClientError, OSError, TimeoutError)
+
+
+def _with_retry(func: Callable[[], _T], *, attempts: int = 4, base_delay: float = 0.5) -> _T:
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return func()
+        except _RETRYABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(base_delay * (2**attempt))
+    assert last_exc is not None
+    raise last_exc
 
 
 class TursoRow:
@@ -149,17 +174,19 @@ class TursoConnection:
         self.row_factory = None  # accepted for API parity only; rows are already dict-accessible
 
     def execute(self, sql: str, params: Sequence[Any] | None = None) -> TursoCursor:
-        result = self._client.execute(sql, list(params) if params else [])
+        args = list(params) if params else []
+        result = _with_retry(lambda: self._client.execute(sql, args))
         return TursoCursor(result)
 
     def executemany(self, sql: str, seq_of_params: Iterable[Sequence[Any]]) -> None:
         for params in seq_of_params:
-            self._client.execute(sql, list(params))
+            args = list(params)
+            _with_retry(lambda: self._client.execute(sql, args))
 
     def executescript(self, script: str) -> None:
         statements = _split_statements(script)
         if statements:
-            self._client.batch(statements)
+            _with_retry(lambda: self._client.batch(statements))
 
     def commit(self) -> None:
         pass  # every execute() is already durable on return -- no-op for API parity

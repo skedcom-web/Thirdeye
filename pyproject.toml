@@ -6,7 +6,15 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28",
     "beautifulsoup4>=4.13",
-    "fastapi>=0.115",
+    # Remote database (Turso/libSQL) -- goengine/db.py connects here in
+    # production instead of a local SQLite file (see goengine/turso_db.py).
+    # FastAPI Cloud reads dependencies from this file, not requirements.txt,
+    # so this must stay in sync with it.
+    "libsql-client>=0.3",
+    # [standard] extra pulls in fastapi-cli, which is what actually provides
+    # the `fastapi` command FastAPI Cloud's container invokes at startup --
+    # plain fastapi alone leaves that command missing and the app never boots.
+    "fastapi[standard]>=0.115",
     "uvicorn[standard]>=0.32",
     "jinja2>=3.1",
     "python-multipart>=0.0.20",

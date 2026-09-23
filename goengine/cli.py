@@ -63,6 +63,26 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backfill_identity(args: argparse.Namespace) -> int:
+    """Explicit, one-off run of what init_db() used to do automatically on
+    every boot (see db.py's GO_IDENTITY_DEPARTMENT_CODE_MIGRATIONS comment):
+    compute_identity() does 2-3 network round trips per record, which is
+    fine for the handful of records a normal boot needs but far too slow to
+    run inline against a real remote database with a large legacy backlog.
+    Safe to re-run any time -- both underlying functions are idempotent."""
+    from . import go_identity
+    from .db import GO_IDENTITY_DEPARTMENT_CODE_MIGRATIONS
+
+    settings = _settings(args)
+    with session(settings) as conn:
+        touched = go_identity.backfill_all(conn)
+        print(f"backfill_all: recomputed identity for {touched} record(s)")
+        for department in GO_IDENTITY_DEPARTMENT_CODE_MIGRATIONS:
+            touched = go_identity.migrate_department_code(conn, department)
+            print(f"migrate_department_code({department!r}): recomputed {touched} record(s)")
+    return 0
+
+
 def cmd_sources_list(args: argparse.Namespace) -> int:
     with session(_settings(args)) as conn:
         sources = registry.list_sources(conn)
@@ -1476,6 +1496,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("init", help="create the database and seed official sources")
     p.add_argument("--no-seed", action="store_true", help="skip the seed source list")
     p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser(
+        "backfill-identity",
+        help="one-off: compute go_identifier/canonical_go_id/go_url_slug for legacy records missing them",
+    )
+    p.set_defaults(func=cmd_backfill_identity)
 
     # sources
     sources = sub.add_parser("sources", help="manage the official source registry")
