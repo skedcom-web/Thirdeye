@@ -50,10 +50,17 @@ import re
 # G\s*\.?\s*[O0] (was G\.?\s*[O0]): a real sample had "G .0.(Ms).No.86" --
 # whitespace appearing BEFORE the period rather than after, which the old
 # ordering couldn't cross.
+# "4D" series: found during OCR Recovery Wave 1 validation -- 26 distinct
+# production documents across 4 departments (Water Resources, Health and
+# Family Welfare, Agriculture and Farmers Welfare, Housing and Urban
+# Development) use "G.O.(4D) No.X" in exactly the same structural position
+# as the already-trusted Ms/Rt/D/P/2D series codes. Evidence collected and
+# confirmed before adding -- see the investigation script's output for the
+# full list.
 GO_NUMBER_FULL = re.compile(
     r"""
     \bG\s*\.?\s*[O0]\.?\s*                # G.O. (or G.0. / G .0. -- OCR O/0 confusion, misplaced space)
-    (?:[({]\s*(?P<series>Ms|MS|Rt|RT|D|P|2D)\s*\.?\s*[)}]|(?P<series2>Ms|MS|Rt|RT|D|P)\s*[.,])?  # (Ms) / {Ms.) / Ms. / Ms,
+    (?:[({]\s*(?P<series>Ms|MS|Rt|RT|D|P|2D|4D)\s*\.?\s*[)}]|(?P<series2>Ms|MS|Rt|RT|D|P)\s*[.,])?  # (Ms) / {Ms.) / Ms. / Ms, / (4D)
     [\s.,]*(?:No\.?|Number)?[\s:]*
     (?P<number>[0-9]{1,5})
     (?:\s*[/,]?\s*(?P<year>(?:19|20)[0-9]{2}))?
@@ -78,14 +85,14 @@ ORDER_NUMBER_LOOSE = re.compile(
 GO_NUMBER_DOUBLE_MISREAD = re.compile(
     r"""
     \b0\s*\.?\s*[O06]\.?\s*
-    [({]\s*(?P<series>Ms|MS|Rt|RT|D|P|2D)\s*\.?\s*[)}]
+    [({]\s*(?P<series>Ms|MS|Rt|RT|D|P|2D|4D)\s*\.?\s*[)}]
     \s*\.?\s*No\.?\s*
     (?P<number>[0-9]{1,5})
     """,
     re.IGNORECASE | re.VERBOSE,
 )
 
-GO_SERIES_LABELS = {"MS": "Ms", "RT": "Rt", "D": "D", "P": "P", "2D": "2D"}
+GO_SERIES_LABELS = {"MS": "Ms", "RT": "Rt", "D": "D", "P": "P", "2D": "2D", "4D": "4D"}
 
 # ---------------------------------------------------------------------------
 # Dates

@@ -48,6 +48,35 @@ def test_still_matches_previously_documented_ocr_variants():
 
 
 # ---------------------------------------------------------------------------
+# "4D" series -- found during OCR Recovery Wave 1 validation, confirmed
+# against 26 distinct real production documents across 4 departments before
+# being added (see patterns.py's comment for the full evidence trail).
+# ---------------------------------------------------------------------------
+def test_matches_4d_series():
+    m = P.GO_NUMBER_FULL.search("G.O.(4D) No.66 Dated: 08.08.2025")
+    assert m is not None
+    assert m.group("series") == "4D"
+    assert m.group("number") == "66"
+
+
+def test_4d_series_normalizes_correctly_end_to_end():
+    pages = [PageText(1, "Water Resources (S1) Department\nG.O.(4D) No.66 Dated: 08.08.2025")]
+    candidates = extract_go_number(pages)
+    best = max(candidates, key=lambda c: c.confidence)
+    assert best.normalized_value == "G.O.(4D) No.66"
+
+
+def test_4d_series_matches_ocr_spacing_variant():
+    """Real production example: 'G.0.(4D) No. 42' -- O/0 confusion plus a
+    space before the number, both already-tolerated variants, combined with
+    the new series."""
+    m = P.GO_NUMBER_FULL.search("G.0.(4D) No. 42 Dated: 17.04.2025")
+    assert m is not None
+    assert m.group("series") == "4D"
+    assert m.group("number") == "42"
+
+
+# ---------------------------------------------------------------------------
 # GO_NUMBER_DOUBLE_MISREAD -- both letters of "G.O." misread as digits
 # ---------------------------------------------------------------------------
 def test_matches_both_letters_misread_as_zero():
