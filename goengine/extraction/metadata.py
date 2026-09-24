@@ -184,6 +184,27 @@ def extract_go_number(pages: Iterable[PageText]) -> list[FieldCandidate]:
                     method=f"GO_NUMBER_FULL{'+series' if series else ''}@{region}",
                 )
             )
+        for match in P.GO_NUMBER_DOUBLE_MISREAD.finditer(page.text):
+            number = match.group("number")
+            series = P.GO_SERIES_LABELS.get(match.group("series").upper(), match.group("series"))
+            weight, region = _positional_weight("go_number", page, match.start(), region_state)
+            found.append(
+                FieldCandidate(
+                    field_name="go_number",
+                    value=match.group(0).strip(),
+                    normalized_value=f"G.O.({series}) No.{number}",
+                    source_page=page.page_number,
+                    source_text=_evidence(page.text, match.start(), match.end()),
+                    char_start=match.start(),
+                    char_end=match.end(),
+                    # Lower than GO_NUMBER_FULL's series tier (0.98): both
+                    # letters of "G.O." being misread as digits is a weaker
+                    # signal than one, even with the mandatory series+"No."
+                    # context that rules out an ordinary decimal number.
+                    confidence=round(0.80 * weight, 4),
+                    method=f"GO_NUMBER_DOUBLE_MISREAD+series@{region}",
+                )
+            )
         if not found:
             for match in P.ORDER_NUMBER_LOOSE.finditer(page.text):
                 weight, region = _positional_weight("go_number", page, match.start(), region_state)

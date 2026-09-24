@@ -384,6 +384,62 @@ def test_production_reset_auto_queues_resync_all(conn):
 
 
 # ---------------------------------------------------------------------------
+# Phase 4.1 -- OCR recovery requests (see operations/ocr_recovery.py)
+# ---------------------------------------------------------------------------
+def test_enqueue_ocr_recovery_full_system(conn, agent_key):
+    key_id, _ = agent_key
+    rid = eq.enqueue_ocr_recovery_request(conn, created_by="admin")
+    claimed = eq.claim_next(conn, agent_key_id=key_id)
+    assert claimed["id"] == rid
+
+    payload = eq.claim_payload(conn, claimed)
+    assert payload["kind"] == eq.KIND_OCR_RECOVERY
+    assert payload["department_filter"] is None
+
+
+def test_enqueue_ocr_recovery_department_scoped(conn, agent_key):
+    key_id, _ = agent_key
+    rid = eq.enqueue_ocr_recovery_request(conn, department_filter=["Health and Family Welfare"], created_by="admin")
+    claimed = eq.claim_next(conn, agent_key_id=key_id)
+    payload = eq.claim_payload(conn, claimed)
+    assert payload["id"] == rid
+    assert payload["department_filter"] == ["Health and Family Welfare"]
+
+
+def test_enqueue_ocr_recovery_does_not_duplicate_same_scope(conn):
+    rid1 = eq.enqueue_ocr_recovery_request(conn, department_filter=["Water Resources"], created_by="admin")
+    rid2 = eq.enqueue_ocr_recovery_request(conn, department_filter=["Water Resources"], created_by="admin")
+    assert rid1 == rid2
+    assert eq.queue_size(conn) == 1
+
+
+def test_enqueue_ocr_recovery_different_scopes_do_not_collide(conn):
+    """A full-system request and a department-scoped one are genuinely
+    different requests -- neither should be treated as a duplicate of the
+    other."""
+    rid1 = eq.enqueue_ocr_recovery_request(conn, created_by="admin")
+    rid2 = eq.enqueue_ocr_recovery_request(conn, department_filter=["Water Resources"], created_by="admin")
+    assert rid1 != rid2
+    assert eq.queue_size(conn) == 2
+
+
+def test_ocr_recovery_dashboard_queues_full_system(client, conn):
+    login_as(client, conn)
+    res = client.post("/ops/ocr-recovery/queue", follow_redirects=False)
+    assert res.status_code == 303
+    assert eq.queue_size(conn) == 1
+    rows = eq.list_requests(conn)
+    assert rows[0]["kind"] == eq.KIND_OCR_RECOVERY
+
+
+def test_ocr_recovery_dashboard_queues_department_scoped(client, conn):
+    login_as(client, conn)
+    res = client.post("/ops/ocr-recovery/queue", data={"department": "Health and Family Welfare"}, follow_redirects=False)
+    assert res.status_code == 303
+    assert "department=Health" in res.headers["location"]
+
+
+# ---------------------------------------------------------------------------
 # Phase 3.5 Initiative 4 -- Agent Operations Center
 # ---------------------------------------------------------------------------
 def test_agent_operations_status_with_no_requests(conn):

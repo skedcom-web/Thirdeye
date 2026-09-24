@@ -32,6 +32,7 @@ from ..operations import health as ops_health
 from ..operations import publication as ops_publication
 from ..operations import analytics as ops_analytics
 from ..operations import backlog_campaigns as ops_campaigns
+from ..operations import ocr_recovery as ops_ocr_recovery
 from ..operations import quality as ops_quality
 from ..operations import reset as ops_reset
 from ..operations import review as ops_review
@@ -66,6 +67,7 @@ def register(app: FastAPI) -> None:
     _register_documents(app)
     _register_review(app)
     _register_review_dashboard(app)
+    _register_ocr_recovery(app)
     _register_publication(app)
     _register_dashboard(app)
     _register_certification(app)
@@ -696,6 +698,62 @@ def _register_review_dashboard(app: FastAPI) -> None:
     def end_backlog_campaign(campaign_id: int, conn: Conn, current_user: RequireCertify):
         ops_campaigns.end_campaign(conn, campaign_id)
         return RedirectResponse("/ops/review/dashboard", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.1 -- OCR Coverage Recovery Program
+#
+# The server never runs OCR itself (no Tesseract here -- see
+# operations/ocr_recovery.py's module docstring) and can't reach into the
+# local agent's own database, so this dashboard only ever reports what the
+# agent still needs to deliver and queues requests for it to act on. The
+# actual recovery (finding documents with unsent real OCR text, resetting
+# their sync bookkeeping, re-syncing) all runs agent-side, the next time it
+# polls -- typically within minutes, no manual command needed.
+# ---------------------------------------------------------------------------
+def _register_ocr_recovery(app: FastAPI) -> None:
+    from ..operations import extraction_queue
+
+    @app.get("/ops/ocr-recovery", response_class=HTMLResponse)
+    def ocr_recovery_dashboard(request: Request, conn: Conn, current_user: LoggedIn, department: str | None = None):
+        all_departments = registry.list_departments(conn)
+        department = department or None
+        if department is not None and department not in all_departments:
+            raise HTTPException(status_code=400, detail="unknown department")
+
+        records = (
+            ops_ocr_recovery.pending_records_for_department(conn, department)
+            if department else None
+        )
+        return templates.TemplateResponse(
+            request, "ops_ocr_recovery.html",
+            {
+                "summary": ops_ocr_recovery.pending_recovery_summary(conn),
+                "department_breakdown": ops_ocr_recovery.department_breakdown(conn),
+                "departments": all_departments,
+                "selected_department": department or "",
+                "records": records,
+                "agent_status": extraction_queue.agent_operations_status(conn),
+                "current_user": current_user,
+                "can_recover": current_user.has_permission("run_certification"),
+                "queued": request.query_params.get("queued"),
+            },
+        )
+
+    @app.post("/ops/ocr-recovery/queue")
+    def ocr_recovery_queue(
+        conn: Conn, current_user: RequireCertify, department: Annotated[str | None, Form()] = None,
+    ):
+        """Queues an ocr_recovery request for the local agent -- department-
+        scoped if given, otherwise every source. Reuses the exact same
+        extraction_requests queue and agent-daemon poll loop as a normal
+        extraction run or resync-all; nothing here runs on the server."""
+        department_filter = [department] if department else None
+        extraction_queue.enqueue_ocr_recovery_request(
+            conn, department_filter=department_filter, created_by=current_user.username,
+        )
+        qs = f"queued=1{'&department=' + department if department else ''}"
+        return RedirectResponse(f"/ops/ocr-recovery?{qs}", status_code=303)
 
 
 # ---------------------------------------------------------------------------

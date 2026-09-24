@@ -33,6 +33,7 @@ STATUS_FAILED = "FAILED"
 
 KIND_EXTRACTION = "extraction"
 KIND_RESYNC_ALL = "resync_all"
+KIND_OCR_RECOVERY = "ocr_recovery"
 
 
 def enqueue_local_request(
@@ -101,6 +102,47 @@ def enqueue_resync_all_request(conn: sqlite3.Connection, *, created_by: str) -> 
     return request_id
 
 
+def enqueue_ocr_recovery_request(
+    conn: sqlite3.Connection, *, department_filter: list[str] | None = None, created_by: str
+) -> int:
+    """Asks the local agent to find documents whose real, already-computed
+    OCR text never reached the server (the sync-ordering bug -- see
+    operations/ocr_recovery.py's module docstring) and re-sync just those,
+    optionally scoped to specific departments. Unlike resync_all, this never
+    re-pushes a document that's already fully and correctly synced -- it
+    only targets the documented gap.
+
+    Reuses an already-pending recovery request with the same department
+    scope instead of piling up duplicates."""
+    filter_json = json.dumps(sorted(department_filter)) if department_filter else None
+    existing = conn.execute(
+        """
+        SELECT id FROM extraction_requests
+         WHERE kind = ? AND status IN (?, ?, ?)
+           AND department_filter IS ?
+         ORDER BY id DESC LIMIT 1
+        """,
+        (KIND_OCR_RECOVERY, STATUS_QUEUED, STATUS_CLAIMED, STATUS_RUNNING, filter_json),
+    ).fetchone()
+    if existing is not None:
+        return int(existing["id"])
+
+    cur = conn.execute(
+        """
+        INSERT INTO extraction_requests
+            (kind, state_id, district_id, department_filter, status, created_by, created_at)
+        VALUES (?, NULL, NULL, ?, ?, ?, ?)
+        """,
+        (KIND_OCR_RECOVERY, filter_json, STATUS_QUEUED, created_by, utcnow()),
+    )
+    request_id = int(cur.lastrowid)
+    audit.record(
+        conn, action="extraction_request.ocr_recovery_queued", entity_type="extraction_request",
+        entity_id=request_id, actor=created_by, detail={"department_filter": department_filter},
+    )
+    return request_id
+
+
 def claim_next(conn: sqlite3.Connection, *, agent_key_id: int) -> sqlite3.Row | None:
     """Claims the oldest QUEUED request, if any. Optimistic concurrency: the
     UPDATE's WHERE clause re-checks status='QUEUED', so if two agents race
@@ -136,6 +178,8 @@ def claim_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     kind = row["kind"] if "kind" in row.keys() else KIND_EXTRACTION
     if kind == KIND_RESYNC_ALL:
         return {"id": row["id"], "kind": kind}
+    if kind == KIND_OCR_RECOVERY:
+        return {"id": row["id"], "kind": kind, "department_filter": _department_filter_of(row)}
 
     state_name = None
     district_name = None
@@ -383,8 +427,9 @@ def run_history_row(conn: sqlite3.Connection, request_row: sqlite3.Row) -> dict:
     whose document was downloaded inside this run's [started_at,
     finished_at] window, from a source in this run's own scope, and
     *currently* approved -- always reflects today's review state, never a
-    stale count frozen at completion time. Meaningless for a resync_all
-    request (it doesn't crawl anything new), so left None for those."""
+    stale count frozen at completion time. Meaningless for a resync_all or
+    ocr_recovery request (neither crawls anything new), so left None for
+    those."""
     started_at = request_row["started_at"]
     finished_at = request_row["finished_at"]
 
@@ -399,7 +444,7 @@ def run_history_row(conn: sqlite3.Connection, request_row: sqlite3.Row) -> dict:
 
     kind = request_row["kind"] if "kind" in request_row.keys() else KIND_EXTRACTION
     documents_published = None
-    if kind != KIND_RESYNC_ALL and started_at and finished_at:
+    if kind not in (KIND_RESYNC_ALL, KIND_OCR_RECOVERY) and started_at and finished_at:
         source_ids = [
             int(r["id"]) for r in ops_jobs.sources_in_scope(
                 conn, state_id=request_row["state_id"], district_id=request_row["district_id"],

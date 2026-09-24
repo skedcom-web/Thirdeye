@@ -41,11 +41,20 @@ import re
 # "(Ms.)" (a stray period before the paren closes) and "G.0.{Ms.)" (OCR
 # reads "(" as the visually similar "{"). Both silently dropped the series
 # match, which then failed the whole GO number for that document.
+# [\s.,]*(?:No\.?|Number)?[\s:]* (was \s* before "No"/before the number): two
+# more real OCR artifacts found in a Phase 4.1 root-cause investigation of
+# 1,552 production records missing a GO number -- "Ms,No.204" (a stray comma
+# glued onto the series where a period was expected) and "No: 21" (a colon
+# between "No" and the number). Both silently dropped the whole match, same
+# failure mode as the OCR artifacts already documented below.
+# G\s*\.?\s*[O0] (was G\.?\s*[O0]): a real sample had "G .0.(Ms).No.86" --
+# whitespace appearing BEFORE the period rather than after, which the old
+# ordering couldn't cross.
 GO_NUMBER_FULL = re.compile(
     r"""
-    \bG\.?\s*[O0]\.?\s*                  # G.O. (or G.0. -- OCR O/0 confusion)
-    (?:[({]\s*(?P<series>Ms|MS|Rt|RT|D|P|2D)\s*\.?\s*[)}]|(?P<series2>Ms|MS|Rt|RT|D|P)\s*\.)?  # (Ms) / {Ms.) / Ms.
-    [\s.,]*(?:No\.?|Number)?\s*
+    \bG\s*\.?\s*[O0]\.?\s*                # G.O. (or G.0. / G .0. -- OCR O/0 confusion, misplaced space)
+    (?:[({]\s*(?P<series>Ms|MS|Rt|RT|D|P|2D)\s*\.?\s*[)}]|(?P<series2>Ms|MS|Rt|RT|D|P)\s*[.,])?  # (Ms) / {Ms.) / Ms. / Ms,
+    [\s.,]*(?:No\.?|Number)?[\s:]*
     (?P<number>[0-9]{1,5})
     (?:\s*[/,]?\s*(?P<year>(?:19|20)[0-9]{2}))?
     """,
@@ -55,6 +64,25 @@ GO_NUMBER_FULL = re.compile(
 # Bare "Order No. 123" -- weaker, used only when nothing better is found.
 ORDER_NUMBER_LOOSE = re.compile(
     r"\b(?:Order|Proceedings)\s+No\.?\s*(?P<number>[0-9]{1,5})", re.IGNORECASE
+)
+
+# Both letters of "G.O." OCR-misread as digits ("0.0." / "0.6.", confirmed on
+# real GST/Commercial-Taxes orders in the same investigation) -- GO_NUMBER_FULL
+# only tolerates the second letter (O->0) being misread; this covers the
+# first letter too. Kept as a separate, much stricter pattern rather than
+# widening GO_NUMBER_FULL's leading character class: an ordinary decimal
+# number ("Rs. 0.06", "GST rate ... 0.6%") is common in these documents, so
+# the series bracket and "No." are both made MANDATORY here (never optional)
+# -- that combination is what distinguishes a genuine misread GO header from
+# an unrelated decimal, and is exactly what the two real examples have.
+GO_NUMBER_DOUBLE_MISREAD = re.compile(
+    r"""
+    \b0\s*\.?\s*[O06]\.?\s*
+    [({]\s*(?P<series>Ms|MS|Rt|RT|D|P|2D)\s*\.?\s*[)}]
+    \s*\.?\s*No\.?\s*
+    (?P<number>[0-9]{1,5})
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 
 GO_SERIES_LABELS = {"MS": "Ms", "RT": "Rt", "D": "D", "P": "P", "2D": "2D"}

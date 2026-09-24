@@ -29,6 +29,7 @@ from .extraction.metadata import ALL_FIELDS
 from .fetching import HttpFetcher, OfflineFetcher
 from .operations import extraction_queue, geography
 from .operations import jobs as ops_jobs
+from .operations import ocr_recovery
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -256,6 +257,20 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             return 2
     print(f"Ingested {path.name} as GO record #{record_id}")
     return 0
+
+
+def _resync_ocr_gaps(conn, source_ids: list[int] | None) -> int:
+    """Closes the sync-ordering bug's window: a document synced once (right
+    after download) whose local OCR completed AFTER that sync has real page
+    text this database has never sent to the server. Resetting its sync
+    bookkeeping makes the very next _sync_documents() call pick it back up,
+    this time carrying that OCR data. Cheap and safe to call before every
+    sync -- it only ever touches documents that actually have this gap."""
+    gaps = ocr_recovery.find_unsynced_ocr_gaps(conn, source_ids=source_ids)
+    if gaps:
+        ocr_recovery.reset_for_resync(conn, gaps)
+        print(f"  ocr-recovery: {len(gaps)} document(s) had unsent OCR results -- reset for resync")
+    return len(gaps)
 
 
 def _sync_documents(
@@ -654,6 +669,7 @@ def _run_claimed_request(
                 documents_downloaded += download_report.succeeded
                 documents_failed += download_report.failed
 
+                _resync_ocr_gaps(conn, [sid])
                 sync_results = _sync_documents(
                     conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
                 )
@@ -693,6 +709,13 @@ def _run_claimed_request(
                     parse_succeeded_this_round += parse_report.succeeded
                     parse_failed_this_round += parse_report.failed
 
+                    # The document(s) just parsed may already have been
+                    # synced once (right after download, before parsing) --
+                    # this is the sync-ordering bug's exact window: real OCR
+                    # just ran, but the earlier sync call means it will never
+                    # be sent unless the sync gate is reopened. See
+                    # ocr_recovery.py's module docstring for the full story.
+                    _resync_ocr_gaps(conn, [sid])
                     sync_results = _sync_documents(
                         conn, settings, http_client, server_url, auth_headers, source_ids=[sid], limit=1000,
                     )
@@ -855,6 +878,61 @@ def _run_resync_all_request(
     )
 
 
+def _run_ocr_recovery_request(
+    conn, settings: Settings, http_client, server_url: str, auth_headers: dict, req: dict,
+) -> None:
+    """Handles a kind='ocr_recovery' claimed request (see
+    operations/extraction_queue.enqueue_ocr_recovery_request /
+    operations/ocr_recovery.py's module docstring for the full root-cause
+    story). Unlike resync_all, this never re-pushes an already-correctly-
+    synced document -- it only targets documents whose real, already-
+    computed local OCR text never reached the server, optionally scoped to
+    specific departments."""
+    request_id = req["id"]
+    department_filter = req.get("department_filter")
+    source_ids = None
+    if department_filter:
+        source_ids = extraction_queue.resolve_local_source_ids(
+            conn, state_name=None, district_name=None, department_filter=department_filter,
+        )
+        if not source_ids:
+            print(f"  ocr-recovery: no local sources match department filter {department_filter}")
+
+    # source_ids stays None for a full-system recovery (no department
+    # filter given) -- find_unsynced_ocr_gaps treats None as "check every
+    # source," distinct from an empty list meaning "no sources matched."
+    reset_count = _resync_ocr_gaps(conn, source_ids)
+    print(f"  ocr-recovery: {reset_count} document(s) reset for resync")
+    _report_progress(
+        http_client, server_url, request_id, auth_headers,
+        json={"sources_total": 1, "sources_completed": 0, "documents_found": reset_count},
+    )
+
+    synced_total = sync_failed_total = 0
+    while True:
+        sync_results = _sync_documents(
+            conn, settings, http_client, server_url, auth_headers, source_ids=source_ids, limit=200,
+        )
+        if not sync_results:
+            break
+        batch_synced = len(sync_results)
+        batch_sync_failed = sum(1 for r in sync_results if r[1] == "failed")
+        synced_total += batch_synced
+        sync_failed_total += batch_sync_failed
+        print(f"  ocr-recovery batch: {batch_synced - batch_sync_failed}/{batch_synced} synced (running total: {synced_total})")
+        _report_progress(
+            http_client, server_url, request_id, auth_headers,
+            json={"documents_downloaded": synced_total, "documents_failed": sync_failed_total},
+        )
+
+    print(f"  ocr-recovery done: {synced_total - sync_failed_total}/{synced_total} synced")
+    _report_progress(http_client, server_url, request_id, auth_headers, json={"sources_completed": 1})
+    _post_with_retry(
+        http_client, f"{server_url}/api/agent/queue/{request_id}/complete", headers=auth_headers,
+        json={"ok": True},
+    )
+
+
 def cmd_agent_daemon(args: argparse.Namespace) -> int:
     """Phase 3.4 -- polls a Third Eye server for queued Local extraction
     requests (created from the Extraction Center's "Local Agent" mode),
@@ -920,14 +998,19 @@ def cmd_agent_daemon(args: argparse.Namespace) -> int:
                     continue
 
                 consecutive_empty_polls = 0
-                if req.get("kind") == "resync_all":
+                kind = req.get("kind")
+                if kind == "resync_all":
                     print(f"Claimed request #{req['id']}: resync_all")
+                elif kind == "ocr_recovery":
+                    print(f"Claimed request #{req['id']}: ocr_recovery department_filter={req.get('department_filter')}")
                 else:
                     print(f"Claimed request #{req['id']}: department_filter={req.get('department_filter')}")
                 with session(settings) as conn:
                     try:
-                        if req.get("kind") == "resync_all":
+                        if kind == "resync_all":
                             _run_resync_all_request(conn, settings, client, server_url, auth_headers, req)
+                        elif kind == "ocr_recovery":
+                            _run_ocr_recovery_request(conn, settings, client, server_url, auth_headers, req)
                         else:
                             _mirror_sources_from_server(conn, client, server_url, auth_headers)
                             _run_claimed_request(conn, settings, fetcher, client, server_url, auth_headers, req)

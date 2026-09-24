@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}OCR Recovery Dashboard · Third Eye{% endblock %}
+{% block content %}
+
+<div class="occ-page-header">
+  <div>
+    <div class="occ-page-kicker">Operations Control Center · Phase 4.1</div>
+    <h1 class="occ-page-title">OCR Coverage Recovery</h1>
+    <p class="muted" style="margin:4px 0 0;">
+      This server has no OCR engine (no Tesseract here) and never runs OCR itself. These numbers report what
+      the local extraction agent still needs to deliver -- the agent OCR's documents on its own machine and
+      syncs the results back; recovery happens there, not here.
+    </p>
+  </div>
+  <a class="ghost btn" href="/ops/jobs">Local Agent Status →</a>
+</div>
+
+{% if queued %}
+<div class="panel" style="margin-bottom:16px;">
+  <p style="margin:0;"><span class="pill ok">recovery queued</span>
+    The local agent will pick this up on its next poll (usually within a few minutes) and re-sync any
+    documents whose real OCR text never reached the server{{ ' for ' + selected_department if selected_department else '' }}.
+  </p>
+</div>
+{% endif %}
+
+<div class="grid cols-4" style="margin-bottom:24px;">
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:{{ 'var(--bad)' if summary.total_pending else 'var(--ok)' }};">🔬</div></div>
+    <div class="kpi-n">{{ summary.total_pending }}</div>
+    <div class="kpi-l">Total OCR Pending</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">needs_ocr, skipped server-side, no OCR run yet</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:var(--ok);">✅</div></div>
+    <div class="kpi-n">{{ summary.recovered_total }}</div>
+    <div class="kpi-l">Total OCR Recovered</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">{{ summary.recovered_today }} recovered today</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon">📈</div></div>
+    <div class="kpi-n">{{ summary.recovery_success_rate_pct }}%</div>
+    <div class="kpi-l">Recovery Success Rate</div>
+  </div>
+  <div class="kpi-card occ-kpi">
+    <div class="kpi-top"><div class="kpi-icon" style="color:{{ 'var(--ok)' if agent_status.running else 'var(--warn)' }};">🤖</div></div>
+    <div class="kpi-n" style="font-size:16px;">{{ 'Running' if agent_status.running else 'Idle' }}</div>
+    <div class="kpi-l">Local Agent Status</div>
+    <div class="muted" style="font-size:12px; margin-top:4px;">last completed: {{ agent_status.last_completed_at or 'never' }}</div>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:24px;">
+  <h2 style="margin-top:0;">Run Recovery</h2>
+  <p class="muted" style="margin-top:-4px;">
+    Queues a request for the local agent -- it finds documents whose real OCR text never reached the server
+    and re-syncs just those. Nothing runs on this server; nothing is skipped or overwritten.
+  </p>
+  {% if can_recover %}
+  <form method="post" action="/ops/ocr-recovery/queue" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+    <div>
+      <label class="field-label" for="recovery-dept">Department (optional)</label>
+      <select name="department" id="recovery-dept">
+        <option value="">Full system (every department)</option>
+        {% for d in departments %}
+        <option value="{{ d }}" {% if selected_department == d %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn-sm btn-primary" type="submit">Run OCR Recovery</button>
+  </form>
+  {% else %}
+  <p class="muted">Your role cannot queue extraction requests.</p>
+  {% endif %}
+</div>
+
+<div class="panel" style="margin-bottom:24px;">
+  <h2 style="margin-top:0;">🏛 Top Impact Departments</h2>
+  {% if department_breakdown %}
+  <table>
+    <thead><tr><th>Department</th><th>Pending</th><th></th></tr></thead>
+    <tbody>
+      {% for d in department_breakdown %}
+      <tr>
+        <td>{{ d.department }}</td>
+        <td class="mono">{{ d.pending }}</td>
+        <td><a href="/ops/ocr-recovery?department={{ d.department|urlencode }}">View →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No departments currently pending OCR recovery.</p>
+  {% endif %}
+</div>
+
+{% if selected_department %}
+<div class="panel">
+  <h2 style="margin-top:0;">Pending Records · {{ selected_department }}</h2>
+  {% if records %}
+  <table>
+    <thead><tr><th>Record</th><th>Extraction</th></tr></thead>
+    <tbody>
+      {% for r in records %}
+      <tr>
+        <td class="mono"><a href="/records/{{ r.record_id }}">#{{ r.record_id }}</a></td>
+        <td class="mono">#{{ r.extraction_id }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Nothing pending for this department.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}
